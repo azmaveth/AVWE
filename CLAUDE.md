@@ -24,6 +24,10 @@ changing anything structural; it records the decisions and the reasons.
   world after a telnet command, call `TelnetClient.sync/1`.
 - **Every intent ends in exactly one result percept.** New verbs must keep
   this; the property test in `test/avwe/actions_test.exs` checks it.
+- **Replay must be exact.** `Avwe.Store.rebuild_from_start/1` has to reproduce
+  `Region.state_hash/1`; anything that would make live and replay differ
+  (reading map order, the wall clock, `:rand` without `Tick.rng`) is a bug.
+  `test/e2e/persistence_test.exs` checks it.
 
 ## Commands
 

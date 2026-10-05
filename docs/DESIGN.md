@@ -133,7 +133,7 @@ avwe/
   lib/avwe/telnet/       text client (M0)
   lib/avwe/mcp/          MCP adapter on ExMCP (M1)
   lib/avwe_web/          Phoenix channels and LiveView (M2)
-  worlds/ember-reach/    terrain, compiled sidecars, snapshots, logs
+  worlds/<world>/<region>/   log and snapshots (dev and prod; not in git)
 ```
 
 ## 6. Simulation core
@@ -332,10 +332,36 @@ outputs (evaporation, outflow, radiation). Property tests check this.
 
 ### 6.7 Persistence
 
-- An append-only log per world: applied inputs plus chronicle-worthy events.
-- A snapshot every N ticks (`:erlang.term_to_binary`) under
-  `worlds/<id>/state/`.
-- Files are enough to start. SQLite or Postgres come later if needed.
+Built. All file I/O lives in `Avwe.Store`; the core stays pure.
+
+- **One folder per region**, `worlds/<world>/<region>/`, holding an
+  append-only log (an Erlang `:disk_log`) and snapshots. The world's folder
+  comes from `:data_dir` (`worlds/` in dev and prod, off in tests).
+- **The log records inputs as they are accepted.** Every intent is journaled
+  the moment the region accepts it, with the sequence number it was given,
+  and every advance is journaled with its step, time, the `dt` it used and
+  the events it emitted. Journaling at acceptance is what keeps "every intent
+  ends in exactly one result" true across a crash: an intent accepted just
+  before the region dies is replayed and still gets its result.
+- **Snapshots** are the whole region (`term_to_binary`, written to a temp
+  file, fsynced, then renamed) taken when an advance crosses a multiple of
+  `snapshot_every` steps (default 1000), keeping the newest few plus step 0.
+  Terrain is inside the snapshot, so once a world has run its terrain is
+  fixed.
+- **Replay** rebuilds a region from a snapshot and the records after it, and
+  must reproduce `Region.state_hash/1` exactly; a replay from step 0 is the
+  determinism test, run end-to-end. Replay checks the log's continuity and
+  the sequence numbers it reassigns, and refuses anything else.
+- **Restart** resumes from the latest readable snapshot plus the log. State
+  wins over configuration (seed, time, terrain, components, fields) and
+  configuration wins for code: the systems list comes from the current
+  config, and a system added since the save is prepared for the saved time.
+  A log with no snapshot refuses to start rather than silently beginning
+  again over it.
+- **Durability:** a region crash loses nothing (the log process outlives it);
+  a VM crash can lose the tail since the last sync, which happens at every
+  snapshot. Files are enough for now. SQLite or Postgres come later if
+  needed, as does log rotation (the log is never truncated yet).
 
 ### 6.8 Unobserved regions (deferred)
 
@@ -712,7 +738,7 @@ core. A feature isn't done until its end-to-end test exists.
 
 | | Name | Scope | Done when |
 |---|---|---|---|
-| **M0** | The valley breathes | Mix project. Read-only Quire import. One region holding the whole valley. Terrain from pins, including the river's source. Heat, water and fire systems. Places for the lodge and kiln-houses. Mira and a few riverfolk on autopilot. Day and night. Telnet client with `look`, `go`, `say`, `wait`. Log and snapshots | Two telnet sessions see the same events. Replaying the log reproduces the same state hash. Conservation property tests pass |
+| **M0** | The valley breathes | Mix project. Read-only Quire import. One region holding the whole valley. Terrain from pins, including the river's source. Heat, water and fire systems. Places for the lodge and kiln-houses. Mira and a few riverfolk on autopilot. Day and night. Telnet client with `look`, `go`, `say`, `wait`. Log and snapshots (built: 6.7) | Two telnet sessions see the same events (built). Replaying the log reproduces the same state hash (built). Conservation property tests pass (water built; heat and smoke in progress) |
 | **M1** | Claude walks the banks | MCP adapter. Leases. Intents that take time, interrupts and salience. Notebook item | Claude plays Mira across two sessions and finds the notes from the first |
 | **M2** | Many lenses | Phoenix and a LiveView canvas. Representation layers. Embodied and spectator views with field overlays | A telnet player, a web player and Claude are in the world at once and each perceives the others |
 | **M3** | Agents move in | Arbor `world` capability over Channels. `world-player` trust profile. Percept mapping. Earshot engagements. Taint | Two Arbor agents live in the Reach for a world week unattended. Conversation engagements are scoped correctly. An injection attempt through in-world speech stays contained |

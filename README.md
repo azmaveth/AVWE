@@ -25,9 +25,12 @@ M0 in progress. Built so far:
   812 miracle drains from its source downward. In 813 it is dry, and its
   forgotten source can be found by following the old channel upstream.
 - A telnet client.
+- Persistence: every intent and advance is journaled, snapshots are taken as
+  the world runs, replaying the journal reproduces the world exactly, and a
+  restarted or crashed world resumes where it was.
 
-Next: heat and fire, the event log and snapshots, and autopilot for bodies
-nobody is controlling.
+Next: heat and fire (in progress), and autopilot for bodies nobody is
+controlling.
 
 ## Playing
 
@@ -40,8 +43,10 @@ mix deps.get
 mix run --no-halt
 ```
 
-That runs the Ember Reach in real time, one world minute per second. In
-another terminal:
+That runs the Ember Reach in real time, one world minute per second, and
+keeps its journal and snapshots under `worlds/`, so stopping and starting it
+resumes the world where it was (delete `worlds/ember_reach` to start over).
+In another terminal:
 
 ```bash
 telnet localhost 4040
