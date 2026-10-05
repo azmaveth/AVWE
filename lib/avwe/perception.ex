@@ -463,8 +463,9 @@ defmodule Avwe.Perception do
   end
 
   # The fires beyond this spot that a body can make out: by their smoke in
-  # daylight, by their glow at night, at least 200 m off either way. A fire
-  # that gives no smoke shows only at night.
+  # daylight, by their glow at night, at least 200 m off either way. A
+  # standing miracle gives no smoke (`Avwe.Systems.Fire`), so it shows only
+  # at night.
   defp fires_in_sight(view, position) do
     light = light(view)
     sight = max(sight_cells(light), @fire_sight_cells)
@@ -473,7 +474,7 @@ defmodule Avwe.Perception do
     for source <- Heat.sources(view),
         distance = Space.distance(position, source.position),
         distance > @at_place_cells and distance <= sight,
-        sign == :glow or smokes?(view, source) do
+        sign == :glow or source.kind == :hearth do
       %{
         ref: source.id,
         name: source.name,
@@ -483,11 +484,6 @@ defmodule Avwe.Perception do
       }
     end
   end
-
-  defp smokes?(view, %{kind: :miracle, id: id}),
-    do: get_in(view.components, [:miracle, id, :smoke]) != false
-
-  defp smokes?(_view, _hearth), do: true
 
   defp hearths(view) do
     for id <- ids(view, :hearth), hearth = component(view, :hearth)[id] do
