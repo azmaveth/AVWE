@@ -16,11 +16,20 @@ defmodule Avwe.Perception do
   volume: a whisper carries 2 m, talk 15 m, a shout 100 m. A body is "at" a
   place within 20 m of it. A body within 80 m of the river channel can see it
   and which way it runs, and within 120 m hears the stretch beside it fall
-  silent or start running.
+  silent or start running, and sees its banks begin to steam.
+
+  Heat and fire: a body feels the air and the ground underfoot
+  (`Avwe.Systems.Heat.at/2`), the warmth of a fire within 20 m
+  (`Avwe.Systems.Fire.felt/2`), and can light or douse a hearth within 20 m.
+  A fire is its own light: its smoke by day or its glow by night shows at
+  least 200 m off, and so do its lighting, burning low and going out. Only the
+  body's own nose smells smoke (`Avwe.Systems.Smoke`); the snapshot's
+  `fields` carry the heat and smoke, and without them `warmth` and `smoke`
+  are `nil`.
   """
 
   alias Avwe.{Event, Percept, Prose, Space, Terrain}
-  alias Avwe.Systems.River
+  alias Avwe.Systems.{Fire, Heat, River, Smoke}
 
   @at_place_cells 2
   @earshot_cells %{whisper: 0.2, talk: 1.5, shout: 10.0}
@@ -29,8 +38,17 @@ defmodule Avwe.Perception do
   @moving_events [:departed, :arrived]
   @sky_events [:sunrise, :sunset]
   @river_events [:river_silent, :river_flowing]
+  @steam_events [:steam_rising, :steam_fading]
   @spring_events [:spring_stopped, :spring_started]
+  @fire_events [:fire_lit, :fire_out, :fire_low]
+  @smell_events [:smoke_smelled, :smoke_faded]
   @river_cells 12
+  @river_salience 0.8
+  @steam_salience 0.6
+  @fire_sight_cells 20
+  @fire_salience %{fire_lit: 0.7, fire_out: 0.6, fire_low: 0.5}
+  @smell_salience %{faint: 0.5, clear: 0.7, thick: 0.7}
+  @glow_below 0.1
 
   @doc "How far a body can see, in cells, for a light level from 0.0 to 1.0."
   @spec sight_cells(float()) :: float()
@@ -48,7 +66,9 @@ defmodule Avwe.Perception do
       light: light(view),
       bodies: view |> ids(:body) |> Enum.map(&spectated_body(view, &1)),
       places: view |> ids(:place) |> Enum.map(&%{id: &1, name: name(view, &1)}),
-      river: river_status(view)
+      river: river_status(view),
+      fires: hearths(view),
+      heat: heat_status(view)
     }
   end
 
@@ -71,9 +91,13 @@ defmodule Avwe.Perception do
           |> Map.put(:target_name, name(view, action.target)),
       ground: view[:terrain] && Terrain.ground(view.terrain, position),
       channel: channel,
+      warmth: warmth(view, position),
+      smoke: smoke(view, position),
+      hearth: hearth_here(view, position),
+      fires: fires_in_sight(view, position),
       bodies: bodies_in_sight(view, body, position),
       places: known_places(view, body, position, here),
-      affordances: affordances(view, body, here, action, channel)
+      affordances: affordances(view, body, here, action, channel, position)
     }
   end
 
@@ -94,10 +118,19 @@ defmodule Avwe.Perception do
     do: [sky(body, event)]
 
   defp perceive(view, body, %Event{type: type} = event) when type in @river_events,
-    do: hear_river(view, body, event)
+    do: along_river(view, body, event, {:hearing, @river_salience, &Prose.river/2})
+
+  defp perceive(view, body, %Event{type: type} = event) when type in @steam_events,
+    do: along_river(view, body, event, {:sight, @steam_salience, &Prose.steam/2})
 
   defp perceive(view, body, %Event{type: type} = event) when type in @spring_events,
     do: see_spring(view, body, event)
+
+  defp perceive(view, body, %Event{type: type} = event) when type in @fire_events,
+    do: see_fire(view, body, event)
+
+  defp perceive(view, body, %Event{type: type} = event) when type in @smell_events,
+    do: smell(view, body, event)
 
   defp perceive(view, body, %Event{type: :discovered, entity: body} = event) when body != nil,
     do: [discovered(view, body, event)]
@@ -223,20 +256,25 @@ defmodule Avwe.Perception do
     end
   end
 
-  # A body hears the river change only for the stretch nearest to it, so
-  # walking the bank doesn't bring a string of identical percepts.
-  # Spectators hear about the river once per place along it: only when a reach
-  # is the first one near a different place from the reach above it.
-  defp hear_river(%{terrain: %Terrain{} = terrain} = view, nil, %Event{data: %{reach: k}} = event) do
+  # A body notices the river change (its water falling silent, its banks
+  # steaming) only for the stretch nearest to it, so walking the bank doesn't
+  # bring a string of identical percepts. Spectators notice once per place
+  # along it: only when a reach is the first one near a different place from
+  # the reach above it. `sense` is the modality, salience and prose of what
+  # changed.
+  defp along_river(
+         %{terrain: %Terrain{} = terrain} = view,
+         nil,
+         %Event{data: %{reach: k}} = event,
+         sense
+       ) do
     near = nearest_any_place(view, event.data.position)
     above = if k > 0, do: nearest_any_place(view, Enum.at(Terrain.reaches(terrain), k - 1).mid)
 
-    if near != above,
-      do: [river_percept(nil, event, nil, Prose.river(event.type, near))],
-      else: []
+    if near != above, do: [river_percept(nil, event, nil, near, sense)], else: []
   end
 
-  defp hear_river(%{terrain: %Terrain{} = terrain} = view, body, event) do
+  defp along_river(%{terrain: %Terrain{} = terrain} = view, body, event, sense) do
     listener = position(view, body)
 
     with {index, _point, distance} when distance <= @river_cells <-
@@ -248,26 +286,78 @@ defmodule Avwe.Perception do
         direction: Space.direction(listener, event.data.position)
       }
 
-      [river_percept(body, event, source, Prose.river(event.type, nil))]
+      [river_percept(body, event, source, nil, sense)]
     else
       _not_here -> []
     end
   end
 
-  defp hear_river(_view, _body, _event), do: []
+  defp along_river(_view, _body, _event, _sense), do: []
 
-  defp river_percept(body, event, source, summary) do
+  defp river_percept(body, event, source, near, {modality, salience, prose}) do
     %Percept{
       kind: :sensed,
       type: event.type,
       time: event.time,
       body: body,
-      modality: :hearing,
+      modality: modality,
       source: source,
-      salience: 0.8,
-      summary: summary
+      salience: salience,
+      summary: prose.(event.type, near)
     }
   end
+
+  # A fire is its own light: it is seen at least 200 m off whatever the hour.
+  defp see_fire(view, body, %Event{entity: hearth, data: data} = event) do
+    observer = body && position(view, body)
+    distance = observer && Space.distance(observer, data.position)
+
+    if body == nil or distance <= max(sight_cells(light(view)), @fire_sight_cells) do
+      [
+        %Percept{
+          kind: :sensed,
+          type: event.type,
+          time: event.time,
+          body: body,
+          modality: :sight,
+          source:
+            distance &&
+              %{
+                ref: hearth,
+                distance_m: Space.meters(distance),
+                direction: Space.direction(observer, data.position)
+              },
+          salience: @fire_salience[event.type],
+          summary: Prose.fire(event.type, who(view, body, Map.get(data, :by)), name(view, hearth))
+        }
+      ]
+    else
+      []
+    end
+  end
+
+  defp who(_view, _body, nil), do: nil
+  defp who(_view, body, body), do: :you
+  defp who(view, _body, other), do: name(view, other)
+
+  # Only the body's own nose smells smoke.
+  defp smell(_view, body, %Event{entity: body, data: data} = event) when body != nil do
+    level = Map.get(data, :level)
+
+    [
+      %Percept{
+        kind: :sensed,
+        type: event.type,
+        time: event.time,
+        body: body,
+        modality: :smell,
+        salience: Map.get(@smell_salience, level, 0.5),
+        summary: Prose.smell(event.type, level, Map.get(data, :from))
+      }
+    ]
+  end
+
+  defp smell(_view, _body, _event), do: []
 
   defp see_spring(view, body, event) do
     observer = body && position(view, body)
@@ -318,7 +408,8 @@ defmodule Avwe.Perception do
           at_head: index <= 3,
           at_end: index >= last - 3,
           flowing: state != nil and not state.silent,
-          temp_c: state && state.temp_c
+          temp_c: state && state.temp_c,
+          air_c: Map.get(view.env, :air_c)
         }
 
       _far ->
@@ -327,6 +418,91 @@ defmodule Avwe.Perception do
   end
 
   defp channel_near(_view, _position), do: nil
+
+  # Heat, fire and smoke
+
+  defp warmth(view, position) do
+    case Heat.at(view, position) do
+      nil -> nil
+      felt -> Map.put(felt, :fire, fire_felt(view, position))
+    end
+  end
+
+  defp fire_felt(view, position) do
+    case Fire.felt(view, position) do
+      nil -> nil
+      felt -> Map.take(felt, [:ref, :name, :level])
+    end
+  end
+
+  defp smoke(%{fields: %{smoke: field}} = view, position) do
+    case field |> Smoke.density_g_m2(position, view.time) |> Smoke.level() do
+      :none -> nil
+      level -> %{level: level, from: wind(view).from}
+    end
+  end
+
+  defp smoke(_view, _position), do: nil
+
+  defp wind(view), do: Map.get(view.env, :wind, Smoke.default_wind())
+
+  defp hearth_here(view, position) do
+    case Fire.hearth_near(view, position) do
+      [{id, hearth, distance} | _rest] ->
+        %{
+          id: id,
+          name: name(view, id),
+          burning: hearth.burning,
+          fuel_kg: hearth.fuel_kg,
+          distance_m: Space.meters(distance)
+        }
+
+      [] ->
+        nil
+    end
+  end
+
+  # The fires beyond this spot that a body can make out: by their smoke in
+  # daylight, by their glow at night, at least 200 m off either way. A fire
+  # that gives no smoke shows only at night.
+  defp fires_in_sight(view, position) do
+    light = light(view)
+    sight = max(sight_cells(light), @fire_sight_cells)
+    sign = if light < @glow_below, do: :glow, else: :smoke
+
+    for source <- Heat.sources(view),
+        distance = Space.distance(position, source.position),
+        distance > @at_place_cells and distance <= sight,
+        sign == :glow or smokes?(view, source) do
+      %{
+        ref: source.id,
+        name: source.name,
+        distance_m: Space.meters(distance),
+        direction: Space.direction(position, source.position),
+        sign: sign
+      }
+    end
+  end
+
+  defp smokes?(view, %{kind: :miracle, id: id}),
+    do: get_in(view.components, [:miracle, id, :smoke]) != false
+
+  defp smokes?(_view, _hearth), do: true
+
+  defp hearths(view) do
+    for id <- ids(view, :hearth), hearth = component(view, :hearth)[id] do
+      %{id: id, name: name(view, id), burning: hearth.burning, fuel_kg: hearth.fuel_kg}
+    end
+  end
+
+  defp heat_status(%{fields: %{heat: %Heat.Field{steaming: steaming} = field}} = view) do
+    %{
+      air_c: Map.get(view.env, :air_c),
+      steaming_reaches: Enum.filter(0..(tuple_size(steaming) - 1)//1, &Heat.steaming?(field, &1))
+    }
+  end
+
+  defp heat_status(_view), do: nil
 
   defp river_reach(view, reach) do
     case component(view, :river)[River.id()] do
@@ -399,7 +575,7 @@ defmodule Avwe.Perception do
     |> Enum.sort_by(& &1.name)
   end
 
-  defp affordances(view, body, here, action, channel) do
+  defp affordances(view, body, here, action, channel, position) do
     known = component(view, :knows)[body] || MapSet.new()
     go = Enum.filter(Enum.sort(MapSet.to_list(known)), &(here == nil or &1 != here.id))
 
@@ -410,7 +586,26 @@ defmodule Avwe.Perception do
       %{verb: :wait, until: [:dawn, :dusk]}
     ] ++
       if(channel, do: [%{verb: :follow, directions: [:upstream, :downstream]}], else: []) ++
+      hearth_affordances(view, position) ++
       if(action, do: [%{verb: :stop}], else: [])
+  end
+
+  # Within reach of a hearth, a body can light one that is cold and has fuel
+  # (or burns without it) and douse one that is burning and can be put out.
+  defp hearth_affordances(view, position) do
+    near = Fire.hearth_near(view, position)
+
+    kindle =
+      for {id, %{burning: false} = hearth, _distance} <- near,
+          hearth.fuel_kg > 0 or Fire.standing?(view, id),
+          do: id
+
+    douse =
+      for {id, %{burning: true}, _distance} <- near, not Fire.unquenchable?(view, id), do: id
+
+    for {verb, targets} <- [kindle: kindle, douse: douse], targets != [] do
+      %{verb: verb, targets: targets}
+    end
   end
 
   defp spectated_body(view, body) do

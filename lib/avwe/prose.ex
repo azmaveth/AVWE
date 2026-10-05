@@ -5,12 +5,13 @@ defmodule Avwe.Prose do
   """
 
   alias Avwe.Calendar
-  alias Avwe.Systems.River
 
   @speech_verbs %{whisper: "whispers", talk: "says", shout: "shouts"}
   @own_speech_verbs %{whisper: "whisper", talk: "say", shout: "shout"}
   @warm_c 30
-  @steam_above_air_c 15
+  @steam_above_air_c 8
+  @cool_air_c 15
+  @warm_air_c 22
 
   @doc "A body has started an action of its own."
   @spec started(atom(), String.t() | nil, map()) :: String.t()
@@ -85,6 +86,23 @@ defmodule Avwe.Prose do
   def result(:say, :blocked, _reason, _target, _params), do: "You can't say that."
   def result(:stop, :success, :idle, _target, _params), do: "You aren't doing anything."
   def result(:stop, :success, _reason, _target, _params), do: nil
+
+  # Lighting and dousing report themselves through the `:fire_lit` and
+  # `:fire_out` percepts ("You light ..."), so a success says nothing more.
+  def result(verb, :success, _reason, _target, _params) when verb in [:kindle, :douse], do: nil
+  def result(:kindle, :blocked, :no_hearth, _target, _params), do: "There is no hearth here."
+  def result(:douse, :blocked, :no_hearth, _target, _params), do: "There is no hearth here."
+
+  def result(verb, :blocked, :no_such_hearth, _target, _params) when verb in [:kindle, :douse],
+    do: "There is no such hearth."
+
+  def result(verb, :blocked, :too_far, _target, _params) when verb in [:kindle, :douse],
+    do: "You are not close enough."
+
+  def result(:kindle, :blocked, :no_fuel, _target, _params), do: "There is nothing to burn."
+  def result(:kindle, :blocked, :already_burning, _target, _params), do: "It is already lit."
+  def result(:douse, :blocked, :not_burning, _target, _params), do: "It isn't lit."
+  def result(:douse, :failure, :unquenchable, _target, _params), do: "It does not go out."
   def result(_verb, _outcome, _reason, _target, _params), do: "You can't do that."
 
   @doc "Someone was heard speaking. `direction` is set when they are some way off."
@@ -125,12 +143,47 @@ defmodule Avwe.Prose do
   def discovered(name, nil), do: "You find #{name}."
   def discovered(name, description), do: "You find #{name}. #{description}"
 
+  @doc """
+  A fire was lit, burned low or went out. `who` is `:you` when the body did
+  it, someone's name when they did, or `nil` when nobody did (the fuel ran
+  out).
+  """
+  @spec fire(:fire_lit | :fire_low | :fire_out, :you | String.t() | nil, String.t()) ::
+          String.t()
+  def fire(:fire_lit, :you, name), do: "You light #{name}."
+  def fire(:fire_lit, who, name), do: "#{who} lights #{name}."
+  def fire(:fire_low, _who, _name), do: "The fire burns low."
+  def fire(:fire_out, nil, _name), do: "The fire goes out."
+  def fire(:fire_out, :you, name), do: "You douse #{name}."
+  def fire(:fire_out, who, name), do: "#{who} douses #{name}."
+
+  @doc "The river's banks nearby began or stopped steaming. `near` names a place, for spectators."
+  @spec steam(:steam_rising | :steam_fading, String.t() | nil) :: String.t()
+  def steam(:steam_rising, nil), do: "Steam begins to rise from the banks."
+  def steam(:steam_rising, near), do: "Steam begins to rise from the banks near #{near}."
+  def steam(:steam_fading, nil), do: "The steam over the banks thins and is gone."
+
+  def steam(:steam_fading, near),
+    do: "The steam over the banks near #{near} thins and is gone."
+
+  @doc "The body's nose caught woodsmoke on the wind, or lost it."
+  @spec smell(:smoke_smelled | :smoke_faded, atom() | nil, String.t() | nil) :: String.t()
+  def smell(:smoke_smelled, :faint, from), do: "You smell woodsmoke, faint, from the #{from}."
+  def smell(:smoke_smelled, :clear, from), do: "You smell woodsmoke on the wind from the #{from}."
+  def smell(:smoke_smelled, :thick, _from), do: "The smoke is thick here."
+  def smell(:smoke_faded, _level, _from), do: "The smell of smoke fades."
+
   @doc "Describes a look (`Avwe.Perception.look/2`) as a few lines of text."
   @spec look(map()) :: String.t()
   def look(%{spectator: true} = look) do
     bodies = Enum.map(look.bodies, &spectated/1)
 
-    [clock(look), "You are watching. Nobody can see you.", river_status(look[:river]) | bodies]
+    fires =
+      for %{burning: true, name: name} <- look[:fires] || [],
+          do: "#{capitalize(name)} is burning."
+
+    ([clock(look), "You are watching. Nobody can see you.", river_status(look[:river]) | bodies] ++
+       fires)
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
   end
@@ -142,6 +195,11 @@ defmodule Avwe.Prose do
       look.here && look.here.description,
       ground(look[:ground], look[:channel]),
       channel(look[:channel], look.light),
+      air_and_ground(look[:warmth], look[:ground]),
+      hearth(look[:hearth]),
+      fire_felt(look[:warmth]),
+      fires(look[:fires]),
+      smoke(look[:smoke]),
       others(look.bodies),
       known(look.places),
       doing(look.action)
@@ -186,19 +244,84 @@ defmodule Avwe.Prose do
 
     what =
       if channel.flowing,
-        do: "The river #{where}#{warmth(channel, light)}.",
+        do: "The river #{where}#{channel_warmth(channel, light)}.",
         else: "The old channel #{where}."
 
     "#{what} Upstream is to the #{channel.upstream}, downstream to the #{channel.downstream}."
   end
 
-  defp warmth(%{temp_c: temp}, light) when is_number(temp) and temp >= @warm_c do
-    if light < 0.3 and temp - River.ambient_c() >= @steam_above_air_c,
+  # Warm water steams when the air over it is cool enough and the light low
+  # enough to show it.
+  defp channel_warmth(%{temp_c: temp} = channel, light)
+       when is_number(temp) and temp >= @warm_c do
+    air = Map.get(channel, :air_c)
+
+    if is_number(air) and light < 0.3 and temp - air >= @steam_above_air_c,
       do: ", warm, with steam lifting off it",
       else: ", warm"
   end
 
-  defp warmth(_channel, _light), do: ""
+  defp channel_warmth(_channel, _light), do: ""
+
+  defp air_and_ground(nil, _ground), do: nil
+
+  defp air_and_ground(warmth, ground) do
+    sentences([
+      air(warmth.air_c),
+      warmth.ground && underfoot(warmth.ground),
+      warmth.steam? && steam_off(ground)
+    ])
+  end
+
+  defp air(air_c) when air_c < @cool_air_c, do: "The air is cool."
+  defp air(air_c) when air_c >= @warm_air_c, do: "The air is warm."
+  defp air(_mild), do: nil
+
+  defp underfoot(:hot), do: "The ground is hot underfoot."
+  defp underfoot(:warm), do: "The ground is warm underfoot."
+  defp underfoot(:cold), do: "The ground is cold."
+
+  defp steam_off(:silt), do: "Steam lifts off the silt."
+  defp steam_off(:reeds), do: "Steam lifts off the reeds."
+  defp steam_off(_bed), do: "Steam lifts off the water."
+
+  defp hearth(nil), do: nil
+  defp hearth(%{burning: true, name: name}), do: "#{capitalize(name)} is burning here."
+
+  defp hearth(%{fuel_kg: fuel, name: name}) when fuel > 0,
+    do: "#{capitalize(name)} is cold, with wood laid."
+
+  defp hearth(%{name: name}), do: "#{capitalize(name)} is cold and empty."
+
+  defp fire_felt(%{fire: %{level: :hot}}), do: "The fire's heat is on your face."
+  defp fire_felt(%{fire: %{level: :warm, name: name}}), do: "Warmth reaches you from #{name}."
+
+  defp fire_felt(%{fire: %{level: :faint, name: name}}),
+    do: "You feel a faint warmth from #{name}."
+
+  defp fire_felt(_warmth), do: nil
+
+  defp fires(fires) when fires in [nil, []], do: nil
+  defp fires(fires), do: Enum.map_join(fires, "\n", &fire_sign/1)
+
+  defp fire_sign(%{sign: :smoke} = fire),
+    do: "Smoke rises from #{fire.name}, #{fire.distance_m} m to the #{fire.direction}."
+
+  defp fire_sign(%{sign: :glow} = fire),
+    do: "A glow shows at #{fire.name}, #{fire.distance_m} m to the #{fire.direction}."
+
+  defp smoke(nil), do: nil
+  defp smoke(%{level: :faint, from: from}), do: "Woodsmoke, faint, from the #{from}."
+  defp smoke(%{level: :clear, from: from}), do: "Woodsmoke on the wind from the #{from}."
+  defp smoke(%{level: :thick}), do: "The smoke is thick here."
+
+  # Joins the sentences that are there into one line, or nothing.
+  defp sentences(parts) do
+    case Enum.filter(parts, &is_binary/1) do
+      [] -> nil
+      present -> Enum.join(present, " ")
+    end
+  end
 
   defp others([]), do: "You see no one else."
   defp others(bodies), do: Enum.map_join(bodies, "\n", &other/1)

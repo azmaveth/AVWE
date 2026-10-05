@@ -44,7 +44,7 @@ defmodule Avwe.Percept do
           type: atom(),
           time: Avwe.Calendar.time(),
           body: String.t() | nil,
-          modality: :sight | :hearing | nil,
+          modality: :sight | :hearing | :smell | nil,
           source: map() | nil,
           intent: String.t() | nil,
           outcome: :success | :failure | :blocked | :interrupted | nil,

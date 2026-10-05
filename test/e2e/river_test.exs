@@ -2,7 +2,8 @@ defmodule Avwe.E2E.RiverTest do
   @moduledoc """
   End to end over real TCP: the Ember Reach on day 200 of 812 AR, an hour
   before the river's source fails. Checks the simulation against canon: "the
-  Ember river falls silent at the Dry Bend".
+  Ember river falls silent at the Dry Bend". The day before, the banks still
+  steam: the town "sits where the silt used to steam at dusk".
   """
 
   use ExUnit.Case, async: false
@@ -11,9 +12,10 @@ defmodule Avwe.E2E.RiverTest do
   import Avwe.Test.TelnetClient
 
   @world :ember_812
+  @moduletag start: {812, day: 200, hour: 14}
 
-  setup do
-    {:ok, _pid} = Avwe.start_world(@world, ember_reach_opts(start: {812, day: 200, hour: 14}))
+  setup %{start: start} do
+    {:ok, _pid} = Avwe.start_world(@world, ember_reach_opts(start: start))
     on_exit(fn -> Avwe.stop_world(@world) end)
 
     %{port: Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0}))}
@@ -62,5 +64,33 @@ defmodule Avwe.E2E.RiverTest do
     Avwe.step(@world, 45)
     expect(mira, "The spring stops welling up.")
     expect(mira, "The river falls silent.")
+  end
+
+  describe "the day before the source fails" do
+    @describetag start: {812, day: 199, hour: 14}
+
+    test "Mira, on the silt beside the channel, sees the banks steam from mid-afternoon all night",
+         %{port: port} do
+      mira = join(port, "mira")
+
+      send_line(mira, "go east 90")
+      sync(mira)
+      Avwe.step(@world, 2)
+      expect(mira, "You stop, 90 m east of where you set out.")
+
+      Avwe.step(@world, 4 * 60 - 2)
+      expect(mira, "Steam begins to rise from the banks.")
+
+      send_line(mira, "look")
+      expect(mira, ~r/^812 AR, day 199, 18:00\./)
+      expect(mira, "The ground is silt, pale and fine.")
+      expect(mira, "Steam lifts off the silt.")
+
+      Avwe.step(@world, 4 * 60)
+      send_line(mira, "look")
+      expect(mira, "812 AR, day 199, 22:00. It is dark.")
+      expect(mira, "The river runs 30 m to the west, warm, with steam lifting off it.")
+      expect(mira, "Steam lifts off the silt.")
+    end
   end
 end

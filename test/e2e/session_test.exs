@@ -1,7 +1,8 @@
 defmodule Avwe.E2E.SessionTest do
   @moduledoc """
   End to end through `Avwe.Session`, the API every controller (telnet, MCP,
-  Arbor) uses. Runs Lantern Hollow at noon with a manual clock.
+  Arbor) uses. Runs Lantern Hollow at noon with a manual clock, with a fire
+  pit on Hollow Green and a wind from the north.
   """
 
   use ExUnit.Case, async: false
@@ -11,9 +12,23 @@ defmodule Avwe.E2E.SessionTest do
   alias Avwe.{Percept, Session}
 
   @world :hollow_sessions
+  @fire_pit [
+    id: "green-fire-pit",
+    at: "hollow-green",
+    name: "the fire pit on the green",
+    fuel_kg: 8.0,
+    power_w: 5_000.0
+  ]
 
   setup do
-    {:ok, _pid} = Avwe.start_world(@world, quire: lantern_hollow(), start: {1, hour: 12})
+    {:ok, _pid} =
+      Avwe.start_world(@world,
+        quire: lantern_hollow(),
+        start: {1, hour: 12},
+        hearths: [@fire_pit],
+        climate: [wind: [from: "north", m_s: 2.0]]
+      )
+
     on_exit(fn -> Avwe.stop_world(@world) end)
   end
 
@@ -139,6 +154,30 @@ defmodule Avwe.E2E.SessionTest do
       assert [~s(Odo says, "All quiet.")] = summaries(watcher)
       assert {:ok, %{spectator: true, bodies: bodies}} = Session.look(watcher)
       assert length(bodies) == 4
+    end
+  end
+
+  describe "fire" do
+    test "kindling succeeds, and a body 300 m downwind smells the smoke" do
+      wren = join("wren")
+      tamsin = join("tamsin")
+      pell = join("pell")
+
+      {:ok, _walk} = Session.act(tamsin, :walk, params: %{direction: "south", distance_m: 300})
+      Avwe.step(@world, 5)
+      assert "You stop, 300 m south of where you set out." in summaries(tamsin)
+
+      {:ok, ref} = Session.act(wren, :kindle)
+      Avwe.step(@world, 5)
+
+      assert [%Percept{intent: ^ref, outcome: :success, summary: nil}] =
+               wren |> percepts() |> results()
+
+      assert [%Percept{kind: :sensed, type: :smoke_smelled, modality: :smell, summary: smelled}] =
+               Enum.filter(percepts(tamsin), &(&1.type == :smoke_smelled))
+
+      assert smelled =~ ~r/^You smell woodsmoke.* from the north\.$/
+      refute Enum.any?(percepts(pell), &(&1.modality == :smell))
     end
   end
 

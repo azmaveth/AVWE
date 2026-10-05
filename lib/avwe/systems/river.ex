@@ -60,14 +60,6 @@ defmodule Avwe.Systems.River do
   @doc "Water depth below which a reach counts as silent, in metres."
   def silent_depth_m, do: @silent_depth_m
 
-  @doc """
-  The daily mean air temperature, in °C. The river itself cools toward the
-  real air of each step; this stays only for `Avwe.Prose.warmth/2` until a
-  look carries the channel's `air_c`.
-  """
-  @spec ambient_c() :: float()
-  def ambient_c, do: Weather.daily_mean_air_c()
-
   @doc "A reach's depth in metres."
   @spec depth_m(map(), map()) :: float()
   def depth_m(reach_state, reach), do: reach_state.volume / (@width_m * reach.length_m)

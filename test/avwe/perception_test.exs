@@ -1,9 +1,15 @@
 defmodule Avwe.PerceptionTest do
   use ExUnit.Case, async: true
 
-  alias Avwe.{Calendar, Event, Perception, Quire, Region}
-  alias Avwe.Systems.Daylight
-  alias Avwe.Test.Fixtures
+  alias Avwe.{Calendar, Event, Perception, Prose, Quire, Region, Terrain}
+  alias Avwe.Systems.{Daylight, Smoke}
+  alias Avwe.Test.{Ember, Fixtures}
+
+  @mira "mira-vale"
+  @lodge "lodge-hearth"
+  @town "town-hearth"
+  @coal "the-last-coal"
+  @dawn {813, day: 220, hour: 4}
 
   setup_all do
     {:ok, world} = Quire.load(Fixtures.lantern_hollow())
@@ -151,9 +157,6 @@ defmodule Avwe.PerceptionTest do
   end
 
   describe "the river" do
-    alias Avwe.{Prose, Terrain}
-    alias Avwe.Test.Ember
-
     defp ember_view(at) do
       region = Ember.region(at)
       region |> Region.view() |> Map.put(:terrain, region.terrain)
@@ -214,6 +217,250 @@ defmodule Avwe.PerceptionTest do
 
       assert Prose.look(Perception.look(ember_view({812, day: 200, hour: 14}), nil)) =~
                "The Ember is running."
+    end
+  end
+
+  describe "heat and fire" do
+    # What a session's `look` sees: the snapshot, with its fields, and the terrain.
+    defp ember_snapshot(at) do
+      region = Ember.region(at)
+      region |> Region.snapshot() |> Map.put(:terrain, region.terrain)
+    end
+
+    defp at(view, body, cell), do: put_in(view, [:components, :position, body], cell)
+
+    defp lit(view, id),
+      do: update_in(view, [:components, :hearth, id], &%{&1 | burning: true, lit_at: view.time})
+
+    defp with_smoke(view, {x, y}, grams) do
+      puff = %{x: x + 0.5, y: y + 0.5, g: grams, born: view.time * 1.0}
+      put_in(view, [:fields, :smoke], %{puffs: [puff], last_step: Smoke.new().last_step})
+    end
+
+    defp verbs(look), do: Enum.map(look.affordances, & &1.verb)
+
+    test "at the lodge before dawn, Mira feels the Last Coal and finds the hearth laid" do
+      look = Perception.look(at(ember_snapshot(@dawn), @mira, Ember.places().lodge), @mira)
+
+      assert %{fire: %{ref: @coal, name: "The Last Coal", level: :warm}, air_c: air_c} =
+               look.warmth
+
+      assert air_c < 15
+      assert %{id: @lodge, burning: false, fuel_kg: 12.0, distance_m: 0} = look.hearth
+      assert %{verb: :kindle, targets: [@lodge]} in look.affordances
+      refute :douse in verbs(look)
+
+      text = Prose.look(look)
+      assert text =~ "The air is cool."
+      assert text =~ "The lodge hearth is cold, with wood laid."
+      assert text =~ "Warmth reaches you from The Last Coal."
+    end
+
+    test "with the lodge hearth lit, the fire's heat is on her face and she can douse it" do
+      view = @dawn |> ember_snapshot() |> lit(@lodge) |> at(@mira, Ember.places().lodge)
+      look = Perception.look(view, @mira)
+
+      assert %{fire: %{ref: @lodge, level: :hot}} = look.warmth
+      assert %{verb: :douse, targets: [@lodge]} in look.affordances
+      refute :kindle in verbs(look)
+
+      text = Prose.look(look)
+      assert text =~ "The lodge hearth is burning here."
+      assert text =~ "The fire's heat is on your face."
+    end
+
+    test "a faint warmth reaches the next cell" do
+      {x, y} = Ember.places().lodge
+      view = @dawn |> ember_snapshot() |> lit(@lodge) |> at(@mira, {x + 1, y})
+
+      assert Prose.look(Perception.look(view, @mira)) =~
+               "You feel a faint warmth from the lodge hearth."
+    end
+
+    test "at night a burning hearth 150 m off shows as a glow; one 550 m off does not" do
+      {x, y} = Ember.places().lodge
+      view = @dawn |> ember_snapshot() |> lit(@lodge) |> lit(@town) |> at(@mira, {x, y - 15})
+      look = Perception.look(view, @mira)
+
+      assert [
+               %{ref: @lodge, name: "the lodge hearth", distance_m: 150, direction: "south"},
+               %{ref: @coal, sign: :glow}
+             ] = Enum.sort_by(look.fires, & &1.ref)
+
+      assert hd(look.fires).sign == :glow
+      refute Enum.any?(look.fires, &(&1.ref == @town))
+      assert Prose.look(look) =~ "A glow shows at the lodge hearth, 150 m to the south."
+    end
+
+    test "by day a fire shows by its smoke, and the Last Coal, which gives none, not at all" do
+      {x, y} = Ember.places().lodge
+
+      look =
+        {813, day: 220, hour: 12}
+        |> ember_snapshot()
+        |> lit(@lodge)
+        |> at(@mira, {x, y - 15})
+        |> Perception.look(@mira)
+
+      assert [%{ref: @lodge, sign: :smoke, distance_m: 150}] = look.fires
+      assert Prose.look(look) =~ "Smoke rises from the lodge hearth, 150 m to the south."
+    end
+
+    test "kindling is offered only within 20 m of a hearth" do
+      {x, y} = Ember.places().town
+      view = ember_snapshot(@dawn)
+
+      assert %{verb: :kindle, targets: [@town]} in Perception.look(view, @mira).affordances
+
+      assert %{verb: :kindle, targets: [@town]} in Perception.look(
+               at(view, @mira, {x + 2, y}),
+               @mira
+             ).affordances
+
+      refute :kindle in verbs(Perception.look(at(view, @mira, {x + 3, y}), @mira))
+    end
+
+    test "without fields there is no warmth and no smoke" do
+      look = Perception.look(ember_view(@dawn), @mira)
+
+      assert look.warmth == nil
+      assert look.smoke == nil
+      assert %{id: @town, burning: false} = look.hearth
+      assert Prose.look(look) =~ "The kiln-house hearth is cold, with wood laid."
+    end
+
+    test "smoke on the spot is thick; a wisp is faint, and comes with the wind" do
+      town = Ember.places().town
+      view = ember_snapshot(@dawn)
+
+      thick = Perception.look(with_smoke(view, town, 0.1875), @mira)
+      assert thick.smoke == %{level: :thick, from: "south-west"}
+      assert Prose.look(thick) =~ "The smoke is thick here."
+
+      faint = Perception.look(with_smoke(view, town, 0.003), @mira)
+      assert faint.smoke == %{level: :faint, from: "south-west"}
+      assert Prose.look(faint) =~ "Woodsmoke, faint, from the south-west."
+    end
+
+    test "on the silt beside the running river at night, the banks steam" do
+      {x, y} = Ember.places().town
+      view = at(ember_snapshot({812, day: 199, hour: 22}), @mira, {x + 9, y})
+      look = Perception.look(view, @mira)
+
+      assert look.ground == :silt
+      assert %{steam?: true, ground: band} = look.warmth
+      assert band in [:warm, :hot]
+      assert look.channel.air_c == view.env.air_c
+
+      text = Prose.look(look)
+      assert text =~ "underfoot. Steam lifts off the silt."
+      assert text =~ "with steam lifting off it."
+    end
+
+    test "a spectator sees every hearth and which banks steam" do
+      look = Perception.look(ember_snapshot({812, day: 199, hour: 22}), nil)
+
+      assert [%{id: @lodge, burning: false}, %{id: @coal, burning: true}, %{id: @town}] =
+               look.fires
+
+      assert %{air_c: air_c, steaming_reaches: [0 | _rest]} = look.heat
+      assert is_float(air_c)
+      assert Prose.look(look) =~ "The Last Coal is burning."
+    end
+  end
+
+  describe "fire, steam and smoke percepts" do
+    defp fire_event(type, view, data) do
+      %Event{type: type, time: view.time, entity: @lodge, data: data}
+    end
+
+    test "a fire is seen 200 m off at night, not 210 m" do
+      {x, y} = lodge = Ember.places().lodge
+      view = ember_snapshot(@dawn)
+      lit = fire_event(:fire_lit, view, %{position: lodge, by: @mira})
+
+      assert [%{summary: "You light the lodge hearth.", modality: :sight, salience: 0.7}] =
+               Perception.percepts(at(view, @mira, {x, y + 20}), @mira, [lit])
+
+      assert Perception.percepts(at(view, @mira, {x, y + 21}), @mira, [lit]) == []
+
+      assert [%{summary: "Mira Vale lights the lodge hearth."}] =
+               Perception.percepts(view, nil, [lit])
+    end
+
+    test "burning low and going out are seen, and say who doused it" do
+      lodge = Ember.places().lodge
+      view = at(ember_snapshot(@dawn), @mira, lodge)
+      low = fire_event(:fire_low, view, %{position: lodge})
+      fuel = fire_event(:fire_out, view, %{position: lodge, reason: :fuel, by: nil})
+      doused = fire_event(:fire_out, view, %{position: lodge, reason: :doused, by: @mira})
+
+      assert [
+               %{summary: "The fire burns low.", salience: 0.5},
+               %{summary: "The fire goes out.", salience: 0.6},
+               %{summary: "You douse the lodge hearth."}
+             ] = Perception.percepts(view, @mira, [low, fuel, doused])
+
+      assert [_low, _fuel, %{summary: "Mira Vale douses the lodge hearth."}] =
+               Perception.percepts(view, nil, [low, fuel, doused])
+    end
+
+    test "steam is seen on the stretch beside the body, and once per place by a spectator" do
+      view = ember_view({812, day: 199, hour: 22})
+
+      {index, _cell, _distance} =
+        Terrain.nearest_channel(view.terrain, view.components.position[@mira])
+
+      beside = Terrain.reach_of(view.terrain, index)
+
+      steam = fn type, reach ->
+        %Event{
+          type: type,
+          time: view.time,
+          entity: "river",
+          data: %{reach: reach, position: Enum.at(Terrain.reaches(view.terrain), reach).mid}
+        }
+      end
+
+      assert [
+               %{summary: "Steam begins to rise from the banks.", modality: :sight, salience: 0.6}
+             ] = Perception.percepts(view, @mira, [steam.(:steam_rising, beside)])
+
+      assert [%{summary: "The steam over the banks thins and is gone."}] =
+               Perception.percepts(view, @mira, [steam.(:steam_fading, beside)])
+
+      assert Perception.percepts(view, @mira, [steam.(:steam_rising, 0)]) == []
+
+      assert [%{summary: "Steam begins to rise from the banks near The Source."}] =
+               Perception.percepts(view, nil, [steam.(:steam_rising, 0)])
+    end
+
+    test "only the body's own nose smells smoke" do
+      view = ember_view(@dawn)
+
+      smelled = %Event{
+        type: :smoke_smelled,
+        time: view.time,
+        entity: @mira,
+        data: %{level: :faint, from: "north"}
+      }
+
+      faded = %Event{type: :smoke_faded, time: view.time, entity: @mira, data: %{}}
+
+      assert [
+               %{
+                 summary: "You smell woodsmoke, faint, from the north.",
+                 modality: :smell,
+                 salience: 0.5
+               },
+               %{summary: "The smell of smoke fades.", modality: :smell}
+             ] = Perception.percepts(view, @mira, [smelled, faded])
+
+      assert [%{salience: 0.7}] =
+               Perception.percepts(view, @mira, [put_in(smelled.data.level, :clear)])
+
+      assert Perception.percepts(view, nil, [smelled, faded]) == []
+      assert Perception.percepts(view, "someone-else", [smelled]) == []
     end
   end
 end
