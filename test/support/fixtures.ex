@@ -7,6 +7,18 @@ defmodule Avwe.Test.Fixtures do
   def ember_reach, do: Path.expand("../fixtures/quire/ember-reach", __DIR__)
 
   @doc """
+  Options for starting the Ember Reach as configured (terrain, the river,
+  the 812 miracle, 813 start), but from the fixture copy of its Quire folder.
+  """
+  def ember_reach_opts(overrides \\ []) do
+    :avwe
+    |> Application.get_env(:worlds)
+    |> Keyword.fetch!(:ember_reach)
+    |> Keyword.merge(quire: ember_reach(), seed: :erlang.phash2(:ember_reach))
+    |> Keyword.merge(overrides)
+  end
+
+  @doc """
   Lantern Hollow, a small test world. Wren and Tamsin live on Hollow Green,
   Pell at the Mill Pond 70 m away (in earshot of a shout, not of talk), and
   Odo in the Far Tower 1.5 km away (out of sight and hearing).

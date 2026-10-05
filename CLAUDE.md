@@ -36,6 +36,9 @@ mix compile --warnings-as-errors
 
 Tests use worlds in `test/fixtures/quire/`: a copy of the Ember Reach, and
 Lantern Hollow, a tiny world laid out to test hearing and sight ranges.
+`Avwe.Test.Fixtures.ember_reach_opts/1` starts the Ember Reach with its real
+settings (terrain, river, the 812 miracle) from the fixture copy, and
+`Avwe.Test.Ember.region/2` builds its region directly for unit tests.
 `mix run --no-halt` in dev runs the Ember Reach live (one world minute per
 second) with telnet on port 4040, reading Quire from `../quire/data/worlds` or
 `AVWE_QUIRE_ROOT`.

@@ -11,6 +11,7 @@ defmodule Avwe.Region do
       just an id that appears in one or more component maps.
     * **fields**, dense per-cell values such as temperature or water.
     * **env**, region-wide values such as light.
+    * **terrain**, the static shape of the land (`Avwe.Terrain`), or `nil`.
     * an **inbox** of intents waiting for the next step, and an **outbox** of
       events emitted since it was last drained.
 
@@ -34,6 +35,7 @@ defmodule Avwe.Region do
   defstruct [
     :id,
     :seed,
+    :terrain,
     step: 0,
     time: 0,
     dt: 60,
@@ -49,6 +51,7 @@ defmodule Avwe.Region do
   @type t :: %__MODULE__{
           id: term(),
           seed: integer(),
+          terrain: Avwe.Terrain.t() | nil,
           step: non_neg_integer(),
           time: Avwe.Calendar.time(),
           dt: pos_integer(),
@@ -245,7 +248,10 @@ defmodule Avwe.Region do
     :sha256 |> :crypto.hash(binary) |> Base.encode16(case: :lower)
   end
 
-  @doc "A read-only copy of the region's state for clients, including fields."
+  @doc """
+  A read-only copy of the region's changing state for clients, including
+  fields. Terrain is static and left out; `Avwe.RegionServer` publishes it once.
+  """
   @spec snapshot(t()) :: map()
   def snapshot(%__MODULE__{} = region) do
     Map.take(region, [:id, :step, :time, :components, :fields, :env])

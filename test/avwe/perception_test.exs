@@ -149,4 +149,71 @@ defmodule Avwe.PerceptionTest do
       assert Perception.percepts(view, nil, [result]) == []
     end
   end
+
+  describe "the river" do
+    alias Avwe.{Prose, Terrain}
+    alias Avwe.Test.Ember
+
+    defp ember_view(at) do
+      region = Ember.region(at)
+      region |> Region.view() |> Map.put(:terrain, region.terrain)
+    end
+
+    test "from the town in 813, Mira sees the dry channel and which way is upstream" do
+      look = Perception.look(ember_view({813, day: 220, hour: 4}), "mira-vale")
+
+      assert look.ground == :clay
+
+      assert %{distance_m: 60, direction: "east", flowing: false, upstream: upstream} =
+               look.channel
+
+      assert upstream in ["north", "north-east"]
+      assert %{verb: :follow, directions: [:upstream, :downstream]} in look.affordances
+
+      text = Prose.look(look)
+      assert text =~ "The ground underfoot is packed clay."
+      assert text =~ "The old channel runs 60 m to the east. Upstream is to the #{upstream}"
+    end
+
+    test "in 812 the river runs, warm, and steams after dark" do
+      day = Perception.look(ember_view({812, day: 200, hour: 14}), "mira-vale")
+      night = Perception.look(ember_view({812, day: 199, hour: 22}), "mira-vale")
+
+      assert Prose.look(day) =~ "The river runs 60 m to the east, warm. Upstream"
+
+      assert Prose.look(night) =~
+               "The river runs 60 m to the east, warm, with steam lifting off it."
+    end
+
+    test "Mira hears the stretch beside her fall silent, not the stretches far away" do
+      view = ember_view({813, day: 220, hour: 4})
+
+      {index, _cell, _distance} =
+        Terrain.nearest_channel(view.terrain, view.components.position["mira-vale"])
+
+      beside = Terrain.reach_of(view.terrain, index)
+
+      silent = fn reach ->
+        %Event{
+          type: :river_silent,
+          time: view.time,
+          entity: "river",
+          data: %{reach: reach, position: Enum.at(Terrain.reaches(view.terrain), reach).mid}
+        }
+      end
+
+      assert [%{summary: "The river falls silent.", modality: :hearing}] =
+               Perception.percepts(view, "mira-vale", [silent.(beside)])
+
+      assert Perception.percepts(view, "mira-vale", [silent.(0)]) == []
+    end
+
+    test "a spectator sees whether the river runs" do
+      assert Prose.look(Perception.look(ember_view({813, day: 220, hour: 4}), nil)) =~
+               "The Ember is dry."
+
+      assert Prose.look(Perception.look(ember_view({812, day: 200, hour: 14}), nil)) =~
+               "The Ember is running."
+    end
+  end
 end

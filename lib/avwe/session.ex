@@ -62,6 +62,7 @@ defmodule Avwe.Session do
          body: body,
          controller: controller,
          sink: sink,
+         terrain: view.terrain,
          next_ref: 1,
          next_percept: 1
        }}
@@ -103,7 +104,7 @@ defmodule Avwe.Session do
 
   @impl true
   def handle_info({:avwe_events, world, events, view}, %{world: world} = state) do
-    case Perception.percepts(view, state.body, events) do
+    case Perception.percepts(Map.put(view, :terrain, state.terrain), state.body, events) do
       [] ->
         {:noreply, state}
 

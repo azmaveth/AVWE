@@ -7,18 +7,21 @@ defmodule Avwe.Actions do
   or `:interrupted`.
 
   Instant actions (speaking, stopping) finish in the step they start. Durative
-  actions (going, waiting) live in the body's `:action` component until a
-  system completes them, `:stop` interrupts them, or a new action replaces
-  them.
+  actions (going, following, walking, waiting) live in the body's `:action`
+  component until a system completes them, `:stop` interrupts them, or a new
+  action replaces them. Journeys carry a `:path` of waypoints that
+  `Avwe.Systems.Movement` walks along.
   """
 
-  alias Avwe.{Calendar, Event, Intent, Region, Space, Tick}
+  alias Avwe.{Calendar, Event, Intent, Region, Space, Terrain, Tick}
   alias Avwe.Systems.Daylight
 
   @volumes [:whisper, :talk, :shout]
   @max_speech 500
   @max_wait 7 * 86_400
   @moments %{dawn: :sunrise, sunrise: :sunrise, dusk: :sunset, sunset: :sunset}
+  @default_map_cells 256
+  @walk_m 10..2_000
 
   @doc "Applies an intent at the start of a step."
   @spec handle(Region.t(), Intent.t(), Tick.t()) :: {Region.t(), [Event.t()]}
@@ -55,23 +58,40 @@ defmodule Avwe.Actions do
         {region, [result(intent, :success, :already_there)]}
 
       destination ->
-        action =
-          intent
-          |> action_base()
-          |> Map.merge(%{
-            from: here,
-            to: destination,
-            distance: Space.distance(here, destination),
-            covered: 0.0
-          })
+        travel(region, intent, [here, destination], %{toward: intent.target})
+    end
+  end
 
-        departed =
-          Event.new(:departed,
-            entity: intent.body,
-            data: %{position: here, toward: intent.target}
-          )
+  defp perform(region, %Intent{verb: :follow} = intent, _tick) do
+    here = Region.get(region, intent.body, :position)
 
-        start(region, intent.body, action, [departed])
+    with {:ok, direction} <- follow_direction(intent.params),
+         {:ok, path} <- channel_route(region.terrain, here, direction) do
+      intent = %{intent | params: %{direction: direction}}
+
+      case path do
+        [_here] -> {region, [result(intent, :success, :end_of_channel)]}
+        path -> travel(region, intent, path, %{heading: Atom.to_string(direction)})
+      end
+    else
+      {:error, reason} -> {region, [result(intent, :blocked, reason)]}
+    end
+  end
+
+  defp perform(region, %Intent{verb: :walk} = intent, _tick) do
+    here = Region.get(region, intent.body, :position)
+
+    case walk_params(intent.params) do
+      {:ok, direction, meters} ->
+        intent = %{intent | params: %{direction: direction, distance_m: meters}}
+        target = Space.offset(here, direction, meters / Space.cell_size_m(), map_cells(region))
+
+        if target == here,
+          do: {region, [result(intent, :blocked, :edge)]},
+          else: travel(region, intent, [here, target], %{heading: direction})
+
+      :error ->
+        {region, [result(intent, :blocked, :invalid)]}
     end
   end
 
@@ -110,6 +130,50 @@ defmodule Avwe.Actions do
   end
 
   defp perform(region, intent, _tick), do: {region, [result(intent, :blocked, :unknown_verb)]}
+
+  defp travel(region, intent, path, heading) do
+    action =
+      intent
+      |> action_base()
+      |> Map.merge(%{path: path, distance: Space.path_length(path), covered: 0.0})
+
+    departed =
+      Event.new(:departed, entity: intent.body, data: Map.put(heading, :position, hd(path)))
+
+    start(region, intent.body, action, [departed])
+  end
+
+  defp channel_route(%Terrain{} = terrain, here, direction) do
+    near = Terrain.near_channel_cells()
+
+    case Terrain.nearest_channel(terrain, here) do
+      {index, point, distance} when distance <= near ->
+        {:ok, Enum.dedup([here, point | Terrain.path_along(terrain, index, direction)])}
+
+      _far_or_none ->
+        {:error, :no_channel}
+    end
+  end
+
+  defp channel_route(nil, _here, _direction), do: {:error, :no_channel}
+
+  defp follow_direction(%{direction: direction}) when direction in [:upstream, :downstream],
+    do: {:ok, direction}
+
+  defp follow_direction(_params), do: {:error, :invalid}
+
+  defp walk_params(%{direction: direction} = params) do
+    meters = Map.get(params, :distance_m, 100)
+
+    if direction in Space.directions() and is_integer(meters) and meters in @walk_m,
+      do: {:ok, direction, meters},
+      else: :error
+  end
+
+  defp walk_params(_params), do: :error
+
+  defp map_cells(%Region{terrain: %Terrain{width: width}}), do: width
+  defp map_cells(_region), do: @default_map_cells
 
   defp start(region, body, action, events) do
     {region, replaced} = complete(region, body, :interrupted, :replaced)

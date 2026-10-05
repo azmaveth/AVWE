@@ -1,10 +1,12 @@
 defmodule Avwe.Systems.Movement do
   @moduledoc """
-  Walks bodies toward the place they're going.
+  Walks bodies along their journey's path: to a place (`:go`), along the
+  river channel (`:follow`) or in a compass direction (`:walk`).
 
-  Bodies walk at 1.3 m/s in a straight line; terrain comes later. Emits an
-  `:action_progress` event at each quarter of the way, then, on arrival, the
-  action's result and an `:arrived` event that others nearby can see.
+  Bodies walk at 1.3 m/s; terrain doesn't slow them yet. Emits an
+  `:action_progress` event at each quarter of the way, then the action's
+  result on arrival. Arriving at a place (`:go`) also emits `:arrived`, which
+  others nearby can see.
   """
 
   @behaviour Avwe.System
@@ -13,12 +15,13 @@ defmodule Avwe.Systems.Movement do
 
   @walking_speed_m_per_s 1.3
   @quarters [0.25, 0.5, 0.75]
+  @finished %{go: :arrived, follow: :end_of_channel, walk: :walked}
 
   @impl Avwe.System
   def run(region, tick) do
     region
     |> Region.with_components([:action, :position])
-    |> Enum.filter(&match?(%{verb: :go}, Region.get(region, &1, :action)))
+    |> Enum.filter(&match?(%{path: _path}, Region.get(region, &1, :action)))
     |> Enum.reduce({region, []}, &walk(&1, &2, tick))
   end
 
@@ -32,11 +35,7 @@ defmodule Avwe.Systems.Movement do
     else
       region =
         region
-        |> Region.put_component(
-          body,
-          :position,
-          Space.lerp(action.from, action.to, covered / action.distance)
-        )
+        |> Region.put_component(body, :position, Space.along(action.path, covered))
         |> Region.put_component(body, :action, %{action | covered: covered})
 
       {region, events ++ progress(body, action, covered)}
@@ -44,16 +43,20 @@ defmodule Avwe.Systems.Movement do
   end
 
   defp arrive(region, events, body, action) do
+    destination = List.last(action.path)
+
     {region, done} =
       region
-      |> Region.put_component(body, :position, action.to)
-      |> Actions.complete(body, :success, :arrived)
+      |> Region.put_component(body, :position, destination)
+      |> Actions.complete(body, :success, @finished[action.verb])
 
-    arrived =
-      Event.new(:arrived, entity: body, data: %{place: action.target, position: action.to})
-
-    {region, events ++ done ++ [arrived]}
+    {region, events ++ done ++ arrived(body, action, destination)}
   end
+
+  defp arrived(body, %{verb: :go, target: place}, destination),
+    do: [Event.new(:arrived, entity: body, data: %{place: place, position: destination})]
+
+  defp arrived(_body, _action, _destination), do: []
 
   defp progress(body, action, covered) do
     before = action.covered / action.distance
@@ -62,7 +65,7 @@ defmodule Avwe.Systems.Movement do
     for quarter <- @quarters, before < quarter and now >= quarter do
       Event.new(:action_progress,
         entity: body,
-        data: %{ref: action.ref, verb: :go, target: action.target, progress: quarter}
+        data: action |> Map.take([:ref, :verb, :target, :params]) |> Map.put(:progress, quarter)
       )
     end
   end

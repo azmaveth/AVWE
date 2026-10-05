@@ -12,7 +12,7 @@ defmodule Avwe.E2E.TelnetTest do
   @world :ember_telnet
 
   setup do
-    {:ok, _pid} = Avwe.start_world(@world, quire: ember_reach(), start: {813, day: 220, hour: 4})
+    {:ok, _pid} = Avwe.start_world(@world, ember_reach_opts())
     on_exit(fn -> Avwe.stop_world(@world) end)
 
     telnet = start_supervised!({Avwe.Telnet, port: 0})
@@ -184,7 +184,7 @@ defmodule Avwe.E2E.TelnetTest do
       send_line(mira, "go to atlantis")
       expect(mira, ~s(You don't know a place called "atlantis".))
 
-      send_line(mira, "go e")
+      send_line(mira, "go r")
       expect(mira, "Which do you mean: ")
 
       send_line(mira, "dance")
@@ -218,6 +218,72 @@ defmodule Avwe.E2E.TelnetTest do
 
       expect(mira, "The sun rises.")
       expect(watcher, "The sun rises.")
+    end
+  end
+
+  describe "the dry river" do
+    setup %{port: port}, do: %{mira: join(port, "mira")}
+
+    test "Mira follows the old channel upstream and finds the forgotten source", %{mira: mira} do
+      send_line(mira, "look")
+      expect(mira, ~r/^The old channel runs 60 m to the east\. Upstream is to the/)
+      lines = expect(mira, "You know the way to:")
+      refute Enum.any?(lines, &(&1 =~ "The Source"))
+
+      send_line(mira, "follow the channel upstream")
+      sync(mira)
+      Avwe.step(@world, 45)
+
+      expect(mira, "You set off upstream along the channel.")
+
+      expect(
+        mira,
+        "You find The Source. A hollow ringed with pale stones, where the Ember once welled up warm."
+      )
+
+      expect(mira, "You reach the head of the channel.")
+
+      send_line(mira, "look")
+      expect(mira, "You are Mira Vale, at The Source.")
+      expect(mira, "You stand in the old river channel, on cracked mud.")
+      expect(mira, "This is where the old channel begins.")
+
+      send_line(mira, "go ember reach")
+      sync(mira)
+      Avwe.step(@world, 30)
+      expect(mira, "You arrive at Ember Reach.")
+
+      send_line(mira, "look")
+      expect(mira, ~r/^You know the way to: .*The Source \(\d+ m north(-east)?\)/)
+    end
+
+    test "she walks a set distance in a compass direction", %{mira: mira} do
+      send_line(mira, "go north 200")
+      sync(mira)
+      Avwe.step(@world, 5)
+
+      expect(mira, "You set off to the north.")
+      expect(mira, "You stop, 200 m north of where you set out.")
+    end
+
+    test "away from the channel there is nothing to follow", %{mira: mira} do
+      send_line(mira, "go lodge")
+      sync(mira)
+      Avwe.step(@world, 10)
+      expect(mira, "You arrive at Ashwarden Lodge.")
+
+      send_line(mira, "look")
+      expect(mira, "Dry grass covers the ground.")
+
+      send_line(mira, "follow upstream")
+      sync(mira)
+      Avwe.step(@world, 1)
+      expect(mira, "There's no channel here to follow.")
+    end
+
+    test "help explains following and walking", %{mira: mira} do
+      send_line(mira, "help")
+      expect(mira, "  follow upstream   follow the river channel (or: follow downstream)")
     end
   end
 end

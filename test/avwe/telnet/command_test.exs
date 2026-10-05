@@ -37,6 +37,18 @@ defmodule Avwe.Telnet.CommandTest do
       assert {:invalid, _message} = Command.parse("wait 0")
     end
 
+    test "following the channel and walking in a direction" do
+      assert Command.parse("follow the channel upstream") == {:follow, :upstream}
+      assert Command.parse("follow river down") == {:follow, :downstream}
+      assert Command.parse("go upstream") == {:follow, :upstream}
+      assert Command.parse("follow") == {:invalid, "Follow the channel upstream or downstream?"}
+      assert Command.parse("go north") == {:walk, "north", 100}
+      assert Command.parse("walk NE 250") == {:walk, "north-east", 250}
+      assert Command.parse("go south-west 40 m") == {:walk, "south-west", 40}
+      assert Command.parse("go docks") == {:go, "docks"}
+      assert Command.parse("go west rise") == {:go, "west rise"}
+    end
+
     test "anything else is unknown" do
       assert Command.parse("dance wildly") == {:unknown, "dance wildly"}
     end

@@ -5,13 +5,21 @@ defmodule Avwe.Prose do
   """
 
   alias Avwe.Calendar
+  alias Avwe.Systems.River
 
   @speech_verbs %{whisper: "whispers", talk: "says", shout: "shouts"}
   @own_speech_verbs %{whisper: "whisper", talk: "say", shout: "shout"}
+  @warm_c 30
+  @steam_above_air_c 15
 
   @doc "A body has started an action of its own."
   @spec started(atom(), String.t() | nil, map()) :: String.t()
   def started(:go, target, _params), do: "You set off toward #{target}."
+
+  def started(:follow, _target, %{direction: direction}),
+    do: "You set off #{direction} along the channel."
+
+  def started(:walk, _target, %{direction: direction}), do: "You set off to the #{direction}."
 
   def started(:wait, _target, %{until: moment}),
     do: "You settle in to wait for #{moment(moment)}."
@@ -19,11 +27,16 @@ defmodule Avwe.Prose do
   def started(:wait, _target, _params), do: "You settle in to wait."
   def started(_verb, _target, _params), do: "You begin."
 
-  @doc "A body's own walk has reached a quarter mark."
-  @spec progress(String.t() | nil, float()) :: String.t()
-  def progress(target, 0.25), do: "You're a quarter of the way to #{target}."
-  def progress(target, 0.5), do: "You're halfway to #{target}."
-  def progress(target, _quarter), do: "You're nearly at #{target}."
+  @doc "A body's own journey has reached a quarter mark."
+  @spec progress(atom(), String.t() | nil, map(), float()) :: String.t()
+  def progress(:go, target, _params, 0.25), do: "You're a quarter of the way to #{target}."
+  def progress(:go, target, _params, 0.5), do: "You're halfway to #{target}."
+  def progress(:go, target, _params, _quarter), do: "You're nearly at #{target}."
+  def progress(:follow, _target, _params, 0.25), do: "You follow the channel on."
+  def progress(:follow, _target, _params, 0.5), do: "You keep to the channel."
+  def progress(:follow, _target, _params, _quarter), do: "The channel goes on a little further."
+  def progress(_verb, _target, _params, 0.5), do: "You're halfway there."
+  def progress(_verb, _target, _params, _quarter), do: "You keep walking."
 
   @doc """
   An intent has finished. Returns `nil` when another percept already says what
@@ -39,6 +52,29 @@ defmodule Avwe.Prose do
   def result(:go, :interrupted, _reason, target, _params),
     do: "You give up on going to #{target}."
 
+  def result(:follow, :success, _reason, _target, %{direction: :upstream}),
+    do: "You reach the head of the channel."
+
+  def result(:follow, :success, _reason, _target, _params),
+    do: "You follow the channel to the edge of the valley."
+
+  def result(:follow, :blocked, :no_channel, _target, _params),
+    do: "There's no channel here to follow."
+
+  def result(:follow, :blocked, _reason, _target, _params),
+    do: "Follow it upstream or downstream?"
+
+  def result(:follow, :interrupted, _reason, _target, _params),
+    do: "You stop following the channel."
+
+  def result(:walk, :success, _reason, _target, %{direction: direction, distance_m: meters}),
+    do: "You stop, #{meters} m #{direction} of where you set out."
+
+  def result(:walk, :blocked, :edge, _target, _params),
+    do: "You can't go any further that way."
+
+  def result(:walk, :blocked, _reason, _target, _params), do: "You can't walk like that."
+  def result(:walk, :interrupted, _reason, _target, _params), do: "You stop walking."
   def result(:wait, :success, _reason, _target, _params), do: "You finish waiting."
   def result(:wait, :interrupted, _reason, _target, _params), do: "You stop waiting."
   def result(:wait, :blocked, _reason, _target, _params), do: "You can't wait like that."
@@ -58,21 +94,45 @@ defmodule Avwe.Prose do
   def heard(who, volume, text, direction),
     do: "#{who} #{@speech_verbs[volume]} from the #{direction}, \"#{text}\""
 
-  @doc "Someone was seen leaving for, or arriving at, a place."
-  @spec moving(:departed | :arrived, String.t(), String.t() | nil) :: String.t()
-  def moving(:departed, who, toward), do: "#{who} leaves, heading toward #{toward}."
-  def moving(:arrived, who, place), do: "#{who} arrives at #{place}."
+  @doc """
+  Someone was seen leaving or arriving. `toward` is a place name, or a heading
+  such as "upstream" or "north" when `heading?` is true.
+  """
+  @spec moving(:departed | :arrived, String.t(), String.t() | nil, boolean()) :: String.t()
+  def moving(:departed, who, heading, true), do: "#{who} leaves, heading #{heading}."
+  def moving(:departed, who, toward, false), do: "#{who} leaves, heading toward #{toward}."
+  def moving(:arrived, who, place, _heading?), do: "#{who} arrives at #{place}."
 
   @doc "Something happened in the sky."
   @spec sky(:sunrise | :sunset) :: String.t()
   def sky(:sunrise), do: "The sun rises."
   def sky(:sunset), do: "The sun sets."
 
+  @doc "The river nearby fell silent or started running. `near` names a place, for spectators."
+  @spec river(:river_silent | :river_flowing, String.t() | nil) :: String.t()
+  def river(:river_silent, nil), do: "The river falls silent."
+  def river(:river_silent, near), do: "The river falls silent near #{near}."
+  def river(:river_flowing, nil), do: "Water begins to run in the channel."
+  def river(:river_flowing, near), do: "Water begins to run in the channel near #{near}."
+
+  @doc "The spring at the river's source stopped or started."
+  @spec spring(:spring_stopped | :spring_started) :: String.t()
+  def spring(:spring_stopped), do: "The spring stops welling up."
+  def spring(:spring_started), do: "Water wells up in the spring."
+
+  @doc "A body found a place it didn't know."
+  @spec discovered(String.t(), String.t() | nil) :: String.t()
+  def discovered(name, nil), do: "You find #{name}."
+  def discovered(name, description), do: "You find #{name}. #{description}"
+
   @doc "Describes a look (`Avwe.Perception.look/2`) as a few lines of text."
   @spec look(map()) :: String.t()
   def look(%{spectator: true} = look) do
     bodies = Enum.map(look.bodies, &spectated/1)
-    Enum.join([clock(look), "You are watching. Nobody can see you." | bodies], "\n")
+
+    [clock(look), "You are watching. Nobody can see you.", river_status(look[:river]) | bodies]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
   end
 
   def look(look) do
@@ -80,6 +140,8 @@ defmodule Avwe.Prose do
       clock(look),
       you_are(look),
       look.here && look.here.description,
+      ground(look[:ground], look[:channel]),
+      channel(look[:channel], look.light),
       others(look.bodies),
       known(look.places),
       doing(look.action)
@@ -101,8 +163,44 @@ defmodule Avwe.Prose do
 
   defp you_are(%{body: body}), do: "You are #{body.name}."
 
-  defp others([]), do: "You see no one else."
+  defp ground(nil, _channel), do: nil
+  defp ground(:channel_bed, %{flowing: true}), do: "You are standing in the river."
+  defp ground(:channel_bed, _channel), do: "You stand in the old river channel, on cracked mud."
+  defp ground(:reeds, %{flowing: true}), do: "Reeds crowd the river's edge here."
+  defp ground(:reeds, _channel), do: "Reeds stand around you, keeping the channel's shape."
+  defp ground(:silt, _channel), do: "The ground is silt, pale and fine."
+  defp ground(:clay, _channel), do: "The ground underfoot is packed clay."
+  defp ground(:stone, _channel), do: "Pale stone breaks through the thin soil."
+  defp ground(:grass, _channel), do: "Dry grass covers the ground."
 
+  defp channel(nil, _light), do: nil
+
+  defp channel(%{at_head: true, flowing: false}, _light),
+    do: "This is where the old channel begins. Downstream it runs away from here."
+
+  defp channel(channel, light) do
+    where =
+      if channel.distance_m <= 20,
+        do: "runs here",
+        else: "runs #{channel.distance_m} m to the #{channel.direction}"
+
+    what =
+      if channel.flowing,
+        do: "The river #{where}#{warmth(channel, light)}.",
+        else: "The old channel #{where}."
+
+    "#{what} Upstream is to the #{channel.upstream}, downstream to the #{channel.downstream}."
+  end
+
+  defp warmth(%{temp_c: temp}, light) when is_number(temp) and temp >= @warm_c do
+    if light < 0.3 and temp - River.ambient_c() >= @steam_above_air_c,
+      do: ", warm, with steam lifting off it",
+      else: ", warm"
+  end
+
+  defp warmth(_channel, _light), do: ""
+
+  defp others([]), do: "You see no one else."
   defp others(bodies), do: Enum.map_join(bodies, "\n", &other/1)
 
   defp other(%{here: true, name: name}), do: "#{name} is here."
@@ -117,8 +215,21 @@ defmodule Avwe.Prose do
 
   defp doing(nil), do: nil
   defp doing(%{verb: :go, target_name: target}), do: "You are on your way to #{target}."
+
+  defp doing(%{verb: :follow, params: %{direction: direction}}),
+    do: "You are following the channel #{direction}."
+
+  defp doing(%{verb: :walk, params: %{direction: direction}}), do: "You are walking #{direction}."
   defp doing(%{verb: :wait}), do: "You are waiting."
   defp doing(_action), do: nil
+
+  defp river_status(nil), do: nil
+  defp river_status(%{flowing: 0, name: name}), do: "#{capitalize(name)} is dry."
+
+  defp river_status(%{flowing: all, reaches: all, name: name}),
+    do: "#{capitalize(name)} is running."
+
+  defp river_status(%{name: name}), do: "#{capitalize(name)} is running in places."
 
   defp spectated(body) do
     where =
@@ -131,6 +242,8 @@ defmodule Avwe.Prose do
 
     "#{body.name} is #{where}."
   end
+
+  defp capitalize(<<first::utf8, rest::binary>>), do: String.upcase(<<first::utf8>>) <> rest
 
   defp moment(moment) when moment in [:dawn, :sunrise], do: "dawn"
   defp moment(moment) when moment in [:dusk, :sunset], do: "dusk"

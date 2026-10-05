@@ -41,12 +41,16 @@ defmodule Avwe.RegionServer do
     end
   end
 
-  @doc "The region's latest published snapshot. Reads ETS; doesn't call the process."
+  @doc """
+  The region's latest published snapshot, with its terrain. Reads ETS; doesn't
+  call the process.
+  """
   @spec snapshot(term(), term()) :: {:ok, map()} | {:error, :not_found}
   def snapshot(world, region_id) do
     with {:ok, _pid, table} <- lookup(world, region_id) do
       [{:snapshot, snapshot}] = :ets.lookup(table, :snapshot)
-      {:ok, snapshot}
+      [{:terrain, terrain}] = :ets.lookup(table, :terrain)
+      {:ok, Map.put(snapshot, :terrain, terrain)}
     end
   end
 
@@ -64,6 +68,7 @@ defmodule Avwe.RegionServer do
 
     table = :ets.new(__MODULE__, [:set, :protected, read_concurrency: true])
     {:ok, _owner} = Registry.register(Avwe.Registry, {:region, world, region.id}, table)
+    :ets.insert(table, {:terrain, region.terrain})
     publish(table, region)
 
     {:ok, %{world: world, region: region, table: table}}

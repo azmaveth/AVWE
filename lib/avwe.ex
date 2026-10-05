@@ -20,7 +20,14 @@ defmodule Avwe do
   alias Avwe.{Calendar, Clock, Quire, RegionServer}
 
   @default_region {0, 0}
-  @default_systems [Avwe.Systems.Daylight, Avwe.Systems.Movement, Avwe.Systems.Waiting]
+  @default_systems [
+    Avwe.Systems.Daylight,
+    Avwe.Systems.Miracles,
+    Avwe.Systems.River,
+    Avwe.Systems.Movement,
+    Avwe.Systems.Waiting,
+    Avwe.Systems.Discovery
+  ]
 
   @doc """
   Loads a world from Quire and starts it.
@@ -35,6 +42,8 @@ defmodule Avwe do
     * `:seed` - world seed. Default: derived from `id`.
     * `:clock` - `:manual` (default) or `{:live, interval_ms}`.
     * `:systems` - systems to run, in order. Default: `#{inspect(@default_systems)}`.
+    * `:terrain` and `:miracles` - AVWE's own settings for the world. See
+      `Avwe.Worldgen`.
   """
   @spec start_world(atom(), keyword()) :: DynamicSupervisor.on_start_child() | {:error, term()}
   def start_world(id, opts \\ []) do
@@ -43,13 +52,14 @@ defmodule Avwe do
     with {:ok, path} <- quire_path(opts),
          {:ok, quire_world} <- Quire.load(path) do
       region =
-        Quire.Seed.region(quire_world,
+        Avwe.Worldgen.region(quire_world,
           id: @default_region,
           seed: Keyword.get_lazy(opts, :seed, fn -> :erlang.phash2(id) end),
           time: start_time(Keyword.get(opts, :start, 0)),
-          systems: Keyword.get(opts, :systems, @default_systems)
+          systems: Keyword.get(opts, :systems, @default_systems),
+          terrain: Keyword.get(opts, :terrain),
+          miracles: Keyword.get(opts, :miracles, [])
         )
-        |> Avwe.Region.prepare()
 
       DynamicSupervisor.start_child(
         Avwe.Worlds,

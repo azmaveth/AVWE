@@ -17,6 +17,8 @@ defmodule Avwe.Telnet.Connection do
   Commands:
     look              describe where you are
     go <place>        walk to a place you know
+    go <direction>    walk 100 m north, south-east... (or: go west 300)
+    follow upstream   follow the river channel (or: follow downstream)
     say <text>        speak (also: whisper, shout)
     wait [minutes]    let time pass (also: wait 2 hours, wait until dawn, wait until dusk)
     stop              stop what you're doing
@@ -180,6 +182,11 @@ defmodule Avwe.Telnet.Connection do
 
     state
   end
+
+  defp run(state, {:follow, direction}), do: act(state, :follow, params: %{direction: direction})
+
+  defp run(state, {:walk, direction, meters}),
+    do: act(state, :walk, params: %{direction: direction, distance_m: meters})
 
   defp run(state, {:say, volume, text}),
     do: act(state, :say, params: %{text: text, volume: volume})

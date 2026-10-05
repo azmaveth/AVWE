@@ -21,10 +21,13 @@ M0 in progress. Built so far:
   intents, and receive percepts. Every intent ends in exactly one result.
 - Senses: sight that shrinks at night, and hearing by volume (whisper, talk,
   shout).
+- Terrain generated from the map pins, and the Ember: a warm river that the
+  812 miracle drains from its source downward. In 813 it is dry, and its
+  forgotten source can be found by following the old channel upstream.
 - A telnet client.
 
-Next: terrain and the river with its source, heat, water and fire, the event
-log and snapshots, and autopilot for bodies nobody is controlling.
+Next: heat and fire, the event log and snapshots, and autopilot for bodies
+nobody is controlling.
 
 ## Playing
 
@@ -45,7 +48,17 @@ telnet localhost 4040
 ```
 
 Choose Mira Vale (or `watch`), then try `look`, `go to the dry bend`,
-`say hello`, `wait until dawn`, `stop` and `help`.
+`follow the channel upstream`, `go north 200`, `say hello`,
+`wait until dawn`, `stop` and `help`.
+
+To see the river run, and hear it fall silent, start the Ember Reach in 812,
+an hour before its source fails:
+
+```elixir
+# iex -S mix
+Avwe.stop_world(:ember_reach)
+Avwe.start_world(:ember_reach, start: {812, day: 200, hour: 14}, clock: {:live, 1_000})
+```
 
 ## From Elixir
 

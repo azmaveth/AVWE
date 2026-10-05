@@ -68,6 +68,9 @@ when M0 starts.
 | The river's drying | In 812 AR an unknown miraculous event stopped the river's source, so the river upstream of the valley is dry too. Modeled as a declared miracle with `cause: :unknown`. The source is on the map, so it can be discovered | Canon says it happened. Nobody, in the world or out of it, knows why yet |
 | The river's warmth | The river's water was warm and heated the silt banks | Explains the steaming silt. The cold chimneys after 812 then follow from heat physics, with no second miracle |
 | Unobserved regions | Deferred. Every region ticks every tick for now | Premature at the scale of one valley. Section 6.8 records what keeps the option open |
+| Terrain storage | A small seeded description (the channel's line of cells plus rises and clay), with elevation and ground computed per cell on demand | Tiny, fast to generate, and deterministic. A stored, editable grid can come when terrain needs hand-editing |
+| River model | A chain of 100 m reaches from source to exit, each a linear reservoir updated with its exact solution | Stable at any step length, cheap, and it drains from upstream down, as canon needs |
+| When the source failed | 812 AR, day 200, 15:00 | Canon gives only the year. The day and hour are ours, in `config/config.exs` |
 | Magic | Exists, but hasn't been discovered. No rules until it is | Nothing to model yet. Miracles leave room for it later (section 6.6) |
 
 ## 4. Concepts
@@ -145,8 +148,15 @@ avwe/
   spot (hearth, door, loft). That keeps interiors cheap and suits text clients
   well, like rooms in a MUD.
 - Terrain is generated from a seed, constrained by Quire's map pins
-  (section 10.2), and saved. Once accepted, it is fixed and no longer
-  regenerated.
+  (section 10.2). It is kept as a small description, not a grid: the river's
+  channel as a line of cells from source to exit, plus rises and clay.
+  Elevation and ground are computed for any cell on demand (`Avwe.Terrain`).
+  The same seed and pins always give the same land. Saving terrain for
+  review and hand-editing is still to come.
+- Ground runs outward from the channel: the channel bed, reeds along its
+  edges, silt banks to 60 m, then grass, or stone above 50 m. The town's
+  streets are clay. The channel bed falls evenly from 40 m at the source to
+  0 m where it leaves the map, so water always runs downstream.
 
 ### 6.2 State model, and why there is no ECS library
 
@@ -313,7 +323,7 @@ the same declaration mechanism, so the conservation checks keep working.
 | System | Model | What it explains in the Ember Reach |
 |---|---|---|
 | Heat | Temperature field, diffusion, heat capacity per material, sun by day, radiation by night | The town "sits where the silt used to steam at dusk". The river's water was warm and heated the silt banks. Once the river is gone, the silt cools through ordinary heat physics, with no second miracle |
-| Water | Surface water depth over a heightmap, downhill flow, warm inflow at the source, evaporation driven by temperature | The river running dry: the 812 AR miracle event stops the source, and the river drains from upstream down, so the Dry Bend goes quiet first |
+| Water | Built. The river as a chain of 100 m reaches, each draining at volume / τ (τ is the time to cross it at 0.6 m/s), losing a little to seepage, and solved exactly for any step length. Warm inflow (40 °C, 10 m³/s) at the spring. Water cools toward a placeholder 18 °C air until the heat system exists | The river running dry: the 812 AR miracle event stops the source and the river drains from upstream down. In the simulation the Dry Bend goes quiet about 30 minutes after the failure, the town after an hour, and the docks after 70 minutes |
 | Fire | Fuel per cell or item, ignition temperature, burning consumes fuel and produces heat and smoke | "When the river still ran, heat was easy to invite. After the River Runs Dry, many chimneys went cold." Households that keep the Hearth Compact only light a fire that is invited, meaning one that would catch easily. As the silt cools, fewer fires are invited. Smoke can be seen and smelled at a distance |
 
 **Conservation invariants as tests:** each tick, the world's water and energy
@@ -401,9 +411,15 @@ Most intents take time and can be interrupted:
   the old channel until dusk, return.
 - A `stop` intent ends the current action (`interrupted`, reason `stopped`).
 
-**Built so far:** `go` (to a known place), `wait` (for a duration, or until
-dawn or dusk), `say` (whisper, talk or shout) and `stop`. Plans and `until`
-conditions on other verbs come with M1.
+**Built so far:** `go` (to a known place), `follow` (the river channel,
+upstream or downstream, from within 80 m of it), `walk` (a distance in a
+compass direction), `wait` (for a duration, or until dawn or dusk), `say`
+(whisper, talk or shout) and `stop`. Plans and `until` conditions on other
+verbs come with M1.
+
+**Discovery:** a body that comes within 30 m of a place it doesn't know
+learns the way there and perceives it ("You find The Source."). That's how
+the forgotten source becomes known again.
 
 ### 7.4 Salience and interrupts
 
@@ -720,17 +736,21 @@ core. A feature isn't done until its end-to-end test exists.
 
 **Open**
 
-1. **Time scale.** Is one tick per world minute at 1 Hz right for both play and
+1. **The source's name.** It is "The Source" for now, a placeholder. Should
+   it keep that name, get one from canon, or be named by whoever finds it?
+2. **Saving terrain.** Terrain is regenerated from the seed each time. When
+   should it be saved so it can be reviewed and edited by hand?
+3. **Time scale.** Is one tick per world minute at 1 Hz right for both play and
    LLM pacing? What step size does history mode use (section 6.5)?
-2. **Resolution.** Are 10 m outdoor cells plus places for interiors enough?
-3. **Fiction domain.** Does the disclosure proposal in 11.4 fit Arbor's memory
+4. **Resolution.** Are 10 m outdoor cells plus places for interiors enough?
+5. **Fiction domain.** Does the disclosure proposal in 11.4 fit Arbor's memory
    model?
-4. **Canon versus live play.** Canon is fixed up to 813 AR. Can a controlled
+6. **Canon versus live play.** Canon is fixed up to 813 AR. Can a controlled
    body diverge from its article afterwards (Mira deciding to carry the coal)?
    Should articles that the chronicle contradicts get flagged in Quire?
-5. **Persistence.** Files to start, but when does SQLite or Postgres become
+7. **Persistence.** Files to start, but when does SQLite or Postgres become
    worth it?
-6. **Autopilot.** Is a utility AI enough, or will history mode need
+8. **Autopilot.** Is a utility AI enough, or will history mode need
    goal-oriented planning to produce interesting chronicles?
 
 ## 15. Prior art
