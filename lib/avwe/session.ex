@@ -11,6 +11,23 @@ defmodule Avwe.Session do
   `{:avwe_percepts, session, [%Avwe.Percept{}]}`. The session stops, and the
   lease is released, when the sink exits.
 
+  ## Control
+
+  The lease in the `Registry` is the runtime's exclusivity check; the body's
+  `:control` component is the simulation's truth (`Avwe.Systems.Autopilot`
+  reads it, and replay reproduces it). So right after claiming the lease the
+  session submits a `:control` intent, and when it closes or its sink dies
+  it submits `:release` (`terminate/2`). Both go through
+  `Avwe.RegionServer.submit/3` like any other input, and are journaled. The
+  results of those two intents are the session's own and never reach the
+  controller as percepts.
+
+  **Idle.** When no `act/3` has arrived for `:idle_after` real milliseconds
+  (default ten minutes), the session submits `:release` and marks itself
+  yielded, so the body goes back to its routine while the player reads. The
+  next `act/3` submits `:control` first and then the act, in that order.
+  Idleness is real time and lives here, never in the pure core.
+
   Start sessions with `Avwe.connect/2`.
   """
 
@@ -19,6 +36,7 @@ defmodule Avwe.Session do
   alias Avwe.{Intent, Perception, RegionServer}
 
   @region {0, 0}
+  @idle_after 10 * 60 * 1_000
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
@@ -56,16 +74,21 @@ defmodule Avwe.Session do
       Process.monitor(sink)
       {:ok, _owner} = Avwe.subscribe(world)
 
-      {:ok,
-       %{
-         world: world,
-         body: body,
-         controller: controller,
-         sink: sink,
-         terrain: view.terrain,
-         next_ref: 1,
-         next_percept: 1
-       }}
+      state = %{
+        world: world,
+        body: body,
+        controller: controller,
+        sink: sink,
+        terrain: view.terrain,
+        next_ref: 1,
+        next_percept: 1,
+        idle_after: Keyword.get(opts, :idle_after, @idle_after),
+        idle_tag: nil,
+        yielded: false,
+        lease_refs: MapSet.new()
+      }
+
+      {:ok, state |> take_control() |> arm_idle()}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -88,6 +111,7 @@ defmodule Avwe.Session do
   end
 
   def handle_call({:act, verb, opts}, _from, state) do
+    state = if state.yielded, do: take_control(%{state | yielded: false}), else: state
     ref = Keyword.get_lazy(opts, :ref, fn -> "i-#{state.next_ref}" end)
 
     intent =
@@ -99,12 +123,20 @@ defmodule Avwe.Session do
       )
 
     :ok = RegionServer.submit(state.world, @region, intent)
-    {:reply, {:ok, ref}, %{state | next_ref: state.next_ref + 1}}
+    {:reply, {:ok, ref}, arm_idle(%{state | next_ref: state.next_ref + 1})}
   end
 
   @impl true
   def handle_info({:avwe_events, world, events, view}, %{world: world} = state) do
-    case Perception.percepts(Map.put(view, :terrain, state.terrain), state.body, events) do
+    percepts = Perception.percepts(Map.put(view, :terrain, state.terrain), state.body, events)
+    {own, percepts} = Enum.split_with(percepts, &MapSet.member?(state.lease_refs, &1.intent))
+
+    state = %{
+      state
+      | lease_refs: Enum.reduce(own, state.lease_refs, &MapSet.delete(&2, &1.intent))
+    }
+
+    case percepts do
       [] ->
         {:noreply, state}
 
@@ -120,8 +152,56 @@ defmodule Avwe.Session do
     end
   end
 
+  def handle_info({:idle, tag}, %{idle_tag: tag} = state) do
+    {:noreply, yield(state)}
+  end
+
+  def handle_info({:idle, _stale}, state), do: {:noreply, state}
+
   def handle_info({:DOWN, _ref, :process, sink, _reason}, %{sink: sink} = state) do
     {:stop, :normal, state}
+  end
+
+  @impl true
+  def terminate(_reason, %{body: body, yielded: false} = state) when body != nil do
+    release(state)
+    :ok
+  end
+
+  def terminate(_reason, _state), do: :ok
+
+  # Control
+
+  defp take_control(%{body: nil} = state), do: state
+  defp take_control(state), do: lease(state, :control)
+
+  defp yield(%{body: nil} = state), do: state
+  defp yield(state), do: %{release(state) | yielded: true, idle_tag: nil}
+
+  defp release(state), do: lease(state, :release)
+
+  # Submits one of the session's own lease intents, remembering its ref so
+  # the result is kept from the controller. A world that is already gone is
+  # no error here: there is nothing left to release.
+  defp lease(state, verb) do
+    ref = "#{verb}-#{System.unique_integer([:positive])}"
+    intent = Intent.new(state.body, verb, ref: ref, controller: state.controller)
+
+    try do
+      RegionServer.submit(state.world, @region, intent)
+    catch
+      :exit, _gone -> {:error, :not_found}
+    end
+
+    %{state | lease_refs: MapSet.put(state.lease_refs, ref)}
+  end
+
+  defp arm_idle(%{body: nil} = state), do: state
+
+  defp arm_idle(state) do
+    tag = make_ref()
+    Process.send_after(self(), {:idle, tag}, state.idle_after)
+    %{state | idle_tag: tag}
   end
 
   defp snapshot(world) do

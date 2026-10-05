@@ -5,8 +5,10 @@ defmodule Avwe.JourneysTest do
   alias Avwe.{Event, Intent, Region, Space, Terrain}
   alias Avwe.Test.Ember
 
+  # Mira is played here as a session would play her, so autopilot leaves her
+  # to the tests' intents; the property below lets it drive her too.
   setup_all do
-    %{region: Ember.region()}
+    %{region: Ember.region() |> Ember.controlled(), free: Ember.region()}
   end
 
   defp submit(region, verb, opts) do
@@ -112,7 +114,9 @@ defmodule Avwe.JourneysTest do
     end
   end
 
-  property "every intent still ends in exactly one result, with journeys", %{region: region} do
+  property "every intent still ends in exactly one result, with journeys and autopilot's own", %{
+    free: region
+  } do
     verbs =
       one_of([
         tuple(
@@ -139,8 +143,13 @@ defmodule Avwe.JourneysTest do
         )
       ])
 
-    check all batch <- list_of(verbs, min_length: 1, max_length: 6), max_runs: 30 do
-      {_region, events} =
+    # Mira is nobody's here, so autopilot's intents (refs `auto-*`) land
+    # between the batch's; every one of them that was applied has its one
+    # result too, and the ones still queued at the end have none yet.
+    check all batch <- list_of(verbs, min_length: 1, max_length: 6),
+              later <- list_of(verbs, max_length: 3),
+              max_runs: 30 do
+      {region, events} =
         batch
         |> Enum.with_index()
         |> Enum.reduce(region, fn {{verb, opts}, i}, acc ->
@@ -148,8 +157,26 @@ defmodule Avwe.JourneysTest do
         end)
         |> run(60)
 
-      assert events |> results() |> Enum.map(& &1.ref) |> Enum.sort() ==
-               Enum.sort(for i <- 0..(length(batch) - 1), do: "r#{i}")
+      {region, more} =
+        later
+        |> Enum.with_index()
+        |> Enum.reduce(region, fn {{verb, opts}, i}, acc ->
+          submit(acc, verb, [{:ref, "l#{i}"} | opts])
+        end)
+        |> run(60)
+
+      events = events ++ more
+      decided = for %Event{type: :decided, data: %{intent_ref: ref}} <- events, do: ref
+      pending = region |> Region.pending() |> Enum.map(& &1.ref)
+      running = if action = Region.get(region, "mira-vale", :action), do: [action.ref], else: []
+      assert Enum.all?(decided, &String.starts_with?(&1, "auto-mira-vale-"))
+
+      expected =
+        Enum.map(0..(length(batch) - 1), &"r#{&1}") ++
+          Enum.map(Enum.with_index(later), &"l#{elem(&1, 1)}") ++
+          ((decided -- pending) -- running)
+
+      assert events |> results() |> Enum.map(& &1.ref) |> Enum.sort() == Enum.sort(expected)
     end
   end
 end

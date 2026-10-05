@@ -6,8 +6,8 @@ defmodule Avwe.Actions do
   with an outcome from Arbor's vocabulary: `:success`, `:failure`, `:blocked`
   or `:interrupted`.
 
-  Instant actions (speaking, stopping, kindling and dousing a hearth) finish
-  in the step they start. Durative actions (going, following, walking,
+  Instant actions (speaking, stopping, kindling and dousing a hearth, taking
+  and releasing control) finish in the step they start. Durative actions (going, following, walking,
   waiting) live in the body's `:action` component until a system completes
   them, `:stop` interrupts them, or a new action replaces them. Journeys carry
   a `:path` of waypoints that `Avwe.Systems.Movement` walks along.
@@ -173,7 +173,43 @@ defmodule Avwe.Actions do
     end
   end
 
+  # Control is state (`docs/autopilot-spec.md`, 1): who drives a body is
+  # written on it, so the simulation knows and replay reproduces it. Taking
+  # what one already holds, or releasing what nobody holds, still succeeds.
+  defp perform(region, %Intent{verb: :control, controller: nil} = intent, _tick),
+    do: {region, [result(intent, :blocked, :invalid)]}
+
+  defp perform(region, %Intent{verb: :control} = intent, tick) do
+    case control(region, intent.body) do
+      %{holder: holder} when holder == intent.controller ->
+        {region, [result(intent, :success, :already)]}
+
+      _other ->
+        taken =
+          Event.new(:control_taken, entity: intent.body, data: %{controller: intent.controller})
+
+        {put_control(region, intent.body, intent.controller, tick),
+         [taken, result(intent, :success, nil)]}
+    end
+  end
+
+  defp perform(region, %Intent{verb: :release} = intent, tick) do
+    case control(region, intent.body) do
+      %{holder: nil} ->
+        {region, [result(intent, :success, :already)]}
+
+      %{holder: holder} ->
+        released = Event.new(:control_released, entity: intent.body, data: %{controller: holder})
+        {put_control(region, intent.body, nil, tick), [released, result(intent, :success, nil)]}
+    end
+  end
+
   defp perform(region, intent, _tick), do: {region, [result(intent, :blocked, :unknown_verb)]}
+
+  defp control(region, body), do: Region.get(region, body, :control) || %{holder: nil, since: nil}
+
+  defp put_control(region, body, holder, tick),
+    do: Region.put_component(region, body, :control, %{holder: holder, since: tick.time})
 
   # The hearth an intent means: the nearest within reach, or the named one if
   # it is within reach.

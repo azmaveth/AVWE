@@ -102,6 +102,10 @@ defmodule Avwe.Prose do
   def result(:kindle, :blocked, :already_burning, _target, _params), do: "It is already lit."
   def result(:douse, :blocked, :not_burning, _target, _params), do: "It isn't lit."
   def result(:douse, :failure, :unquenchable, _target, _params), do: "It does not go out."
+
+  # Taking and releasing a body is the session's bookkeeping, not something
+  # the body did, so nothing is said.
+  def result(verb, :success, _reason, _target, _params) when verb in [:control, :release], do: nil
   def result(_verb, _outcome, _reason, _target, _params), do: "You can't do that."
 
   @doc "Someone was heard speaking. `direction` is set when they are some way off."

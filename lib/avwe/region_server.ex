@@ -21,7 +21,8 @@ defmodule Avwe.RegionServer do
   env), but the systems come from the region the server was given: they are
   code, not state, and the rules may change while the world runs. The region
   it was given is otherwise ignored, with a warning for each setting of it
-  (seed, climate, hearths, miracles) that differs from the saved world.
+  (seed, climate, hearths, miracles, characters) that differs from the
+  saved world.
 
   A log is only valid under the systems it was recorded with, and replay
   runs the systems of the snapshot it starts from. So when the systems
@@ -240,7 +241,8 @@ defmodule Avwe.RegionServer do
       {:seed, "seed is", & &1.seed},
       {:climate, "wind is", &Map.get(&1.env, :wind)},
       {:hearths, "hearths are", &hearths(&1, lit)},
-      {:miracles, "miracles are", &miracles/1}
+      {:miracles, "miracles are", &miracles/1},
+      {:characters, "characters are", &characters/1}
     ]
     |> Enum.map(fn {setting, phrase, declared} ->
       {setting, phrase, declared.(given), declared.(saved)}
@@ -272,6 +274,15 @@ defmodule Avwe.RegionServer do
     for id <- Region.with_components(region, [:miracle]), into: %{} do
       {id, region |> Region.get(id, :miracle) |> Map.delete(:applied_at)}
     end
+  end
+
+  # A character as declared: the routine and norms of every body that has any.
+  defp characters(region) do
+    for id <- Region.with_components(region, [:body]),
+        declared = Map.take(Region.entity(region, id), [:routine, :norms]),
+        declared != %{},
+        into: %{},
+        do: {id, declared}
   end
 
   defp journal(%{store: nil}, _step, _intent), do: :ok

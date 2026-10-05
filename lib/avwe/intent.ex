@@ -26,12 +26,33 @@ defmodule Avwe.Intent do
       `:too_far`, `:already_burning` or `:no_fuel`.
     * `:douse` - put a hearth out; same target rule. Blocked with
       `:not_burning`; fails with `:unquenchable` when the fire won't go out.
+    * `:control` - the intent's `controller` takes the body: its `:control`
+      component records the holder, and autopilot leaves it alone.
+      `Avwe.Session` submits it when it claims a body. Succeeds with
+      `:already` when that controller holds it; blocked with `:invalid`
+      without a controller.
+    * `:release` - the body is nobody's again and goes back to its routine.
+      Succeeds with `:already` when nobody held it.
+
+  `controller` names the kind of controller behind the intent: `:human`,
+  `:mcp`, `:arbor` or `:autopilot`.
   """
 
   @enforce_keys [:ref, :body, :verb]
   defstruct [:ref, :body, :verb, :target, :controller, params: %{}, seq: 0]
 
-  @type verb :: :go | :follow | :walk | :wait | :say | :stop | :kindle | :douse | atom()
+  @type verb ::
+          :go
+          | :follow
+          | :walk
+          | :wait
+          | :say
+          | :stop
+          | :kindle
+          | :douse
+          | :control
+          | :release
+          | atom()
 
   @type t :: %__MODULE__{
           ref: String.t(),

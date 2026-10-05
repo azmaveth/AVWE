@@ -29,8 +29,25 @@ defmodule AvweTest do
     Avwe.step(@world, 120)
 
     sunrise = Calendar.at(813, day: 220, hour: 6)
-    assert_received {:avwe_events, @world, [%Event{type: :sunrise, time: ^sunrise}], view}
+
+    # Each step's events come with the view of the state they happened in;
+    # Mira is on her own here, so the sunrise step carries her stirring too.
+    assert [view] =
+             for(
+               {:avwe_events, @world, events, view} <- batches(),
+               Enum.any?(events, &match?(%Event{type: :sunrise, time: ^sunrise}, &1)),
+               do: view
+             )
+
     assert view.time == sunrise
+  end
+
+  defp batches do
+    receive do
+      {:avwe_events, _world, _events, _view} = batch -> [batch | batches()]
+    after
+      0 -> []
+    end
   end
 
   test "the same world can't be started twice" do

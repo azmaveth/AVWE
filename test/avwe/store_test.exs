@@ -335,7 +335,8 @@ defmodule Avwe.StoreTest do
 
       assert {:ok, rebuilt} = Store.rebuild(store)
       assert rebuilt.step == 2
-      assert [%Intent{seq: 0, params: %{text: "Not yet."}}] = Region.pending(rebuilt)
+      assert [%Intent{params: %{text: "Not yet."}}] = Region.pending(rebuilt)
+      assert Region.pending(rebuilt) == Region.pending(live)
       assert Region.state_hash(rebuilt) == Region.state_hash(live)
     end
 

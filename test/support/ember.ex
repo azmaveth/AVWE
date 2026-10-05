@@ -1,7 +1,7 @@
 defmodule Avwe.Test.Ember do
   @moduledoc "Builds the Ember Reach's starting region, as configured, for unit tests."
 
-  alias Avwe.{Calendar, Quire, Worldgen}
+  alias Avwe.{Calendar, Quire, Region, Worldgen}
   alias Avwe.Test.Fixtures
 
   @systems [
@@ -14,6 +14,7 @@ defmodule Avwe.Test.Ember do
     Avwe.Systems.Movement,
     Avwe.Systems.Waiting,
     Avwe.Systems.Discovery,
+    Avwe.Systems.Autopilot,
     Avwe.Systems.Smoke
   ]
 
@@ -31,8 +32,18 @@ defmodule Avwe.Test.Ember do
       terrain: opts[:terrain],
       hearths: opts[:hearths],
       miracles: opts[:miracles],
-      climate: opts[:climate]
+      climate: opts[:climate],
+      characters: opts[:characters]
     )
+  end
+
+  @doc """
+  The region with `body` under a controller, as it is when a session plays
+  it: autopilot leaves the body alone, so a test's own intents are the only
+  ones it acts on.
+  """
+  def controlled(region, body \\ "mira-vale", controller \\ :human) do
+    Region.put_component(region, body, :control, %{holder: controller, since: region.time})
   end
 
   @doc "Where the Ember Reach's pinned places are."

@@ -79,6 +79,64 @@ defmodule Avwe.WorldgenTest do
     end
   end
 
+  describe "characters" do
+    @walk [at: "04:30", do: {:go, target: "the-dry-bend"}, note: "walks the banks before dawn"]
+
+    defp with_mira(spec), do: build(characters: ["mira-vale": spec])
+
+    test "every body gets autopilot and control components, and the named ones their routine" do
+      region = build([])
+
+      assert Region.get(region, "mira-vale", :autopilot) == Avwe.Autopilot.fresh()
+      assert Region.get(region, "mira-vale", :control) == %{holder: nil, since: nil}
+      assert Region.get(region, "mira-vale", :norms) == [:invited_fire]
+
+      assert [
+               %{at: 16_200, do: {:go, target: "the-dry-bend"}, note: _walk},
+               %{at: 23_400, do: {:follow, params: %{direction: :upstream}}},
+               %{at: 39_600, note: nil},
+               %{at: 64_800},
+               %{at: 70_200},
+               %{at: 79_200, do: {:rest}}
+             ] = Region.get(region, "mira-vale", :routine)
+    end
+
+    test "sort the routine by time, and leave unnamed bodies without one" do
+      region = with_mira(routine: [[at: "22:00", do: {:rest}], @walk])
+      assert [%{at: 16_200}, %{at: 79_200}] = Region.get(region, "mira-vale", :routine)
+      assert Region.get(region, "mira-vale", :norms) == nil
+
+      assert Region.get(build(characters: []), "mira-vale", :routine) == nil
+      assert Region.get(build(characters: []), "mira-vale", :autopilot) == Avwe.Autopilot.fresh()
+    end
+
+    test "refuse a time that is not HH:MM" do
+      for at <- ["4:30", "04:30:00", "24:00", "04:60", "dawn", 16_200, nil] do
+        assert_raise ArgumentError, ~r/^character "mira-vale": at must be "HH:MM", got /, fn ->
+          with_mira(routine: [Keyword.put(@walk, :at, at)])
+        end
+      end
+    end
+
+    test "refuse a body that is not there, a do that is not a verb, and norms that are not atoms" do
+      assert_raise ArgumentError, ~r/^character "nobody": no such body/, fn ->
+        build(characters: [nobody: [routine: [@walk]]])
+      end
+
+      assert_raise ArgumentError,
+                   ~r/^character "mira-vale": do must be {verb, opts}, got "go"/,
+                   fn ->
+                     with_mira(routine: [Keyword.put(@walk, :do, "go")])
+                   end
+
+      assert_raise ArgumentError,
+                   ~r/^character "mira-vale": norms must be atoms, got \["fire"\]/,
+                   fn ->
+                     with_mira(norms: ["fire"])
+                   end
+    end
+  end
+
   describe "standing miracles" do
     test "are lit hearths that carry no smoke setting" do
       region = build([])

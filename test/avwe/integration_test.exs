@@ -110,7 +110,11 @@ defmodule Avwe.IntegrationTest do
               minutes_before <- integer(-240..240),
               kindle? <- boolean(),
               max_runs: 20 do
-      start = Ember.region({812, day: 200, hour: 15, minute: -minutes_before})
+      # Mira is played, so the only fire is the one this run lights.
+      start =
+        {812, day: 200, hour: 15, minute: -minutes_before}
+        |> Ember.region()
+        |> Ember.controlled()
 
       start =
         if kindle?,

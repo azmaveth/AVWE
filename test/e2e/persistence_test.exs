@@ -191,13 +191,15 @@ defmodule Avwe.E2E.PersistenceTest do
     :ok = start(tmp_dir)
     _sessions = play()
 
+    # Nine intents of hers, and her session taking her at step 0.
     {:ok, store} = Store.open(store_dir(tmp_dir), @region)
     {:ok, records} = Store.records(store)
     advances = Enum.filter(records, &match?({:avwe, 2, {:advance, _entry}}, &1))
-    assert length(records) == 65
+    assert length(records) == 66
     assert length(advances) == 57
     assert Enum.all?(advances, &match?({:avwe, 2, {:advance, %{steps: 1, dt: 60}}}, &1))
-    assert submits_per_step(records) == [{0, 1}, {3, 1}, {4, 2}, {6, 2}, {31, 1}, {51, 1}]
+    assert submits_per_step(records) == [{0, 2}, {3, 1}, {4, 2}, {6, 2}, {31, 1}, {51, 1}]
+    assert [{:avwe, 2, {:submit, 0, %{verb: :control, controller: :human}}} | _rest] = records
     assert Store.snapshots(store) == [0]
 
     assert {:ok, rebuilt} = Store.rebuild_from_start(store)
@@ -222,8 +224,9 @@ defmodule Avwe.E2E.PersistenceTest do
     :ok = start(tmp_dir)
     sessions = play()
     now = Avwe.now(@world)
-    hash = live_hash()
+    # Closing her session queues her release, journaled with the rest.
     :ok = Session.close(sessions.mira)
+    hash = live_hash()
     :ok = Avwe.stop_world(@world)
 
     :ok = start(tmp_dir)
@@ -238,7 +241,14 @@ defmodule Avwe.E2E.PersistenceTest do
     # And it keeps going, and keeps logging, from there.
     assert {:ok, %{step: 58}} = Avwe.step(@world, 1)
     {:ok, store} = Store.open(store_dir(tmp_dir), @region)
-    assert {:ok, [{:avwe, 2, {:advance, %{step: 57, steps: 1}}}]} = Store.records_after(store, 57)
+    # Her release from before the stop, her new session's control, the step.
+    assert {:ok,
+            [
+              {:avwe, 2, {:submit, 57, %{verb: :release}}},
+              {:avwe, 2, {:submit, 57, %{verb: :control}}},
+              {:avwe, 2, {:advance, %{step: 57, steps: 1}}}
+            ]} = Store.records_after(store, 57)
+
     assert {:ok, rebuilt} = Store.rebuild_from_start(store)
     assert Region.state_hash(rebuilt) == live_hash()
     :ok = Store.close(store)
@@ -255,8 +265,8 @@ defmodule Avwe.E2E.PersistenceTest do
     assert %{@hearth => %{burning: true, lit_at: lit_at}} = before.hearth
     assert before.nose == %{"mira-vale" => %{smoke: :clear}}
     assert length(before.puffs) == 32
-    hash = live_hash()
     :ok = Session.close(mira)
+    hash = live_hash()
     :ok = Avwe.stop_world(@world)
 
     :ok = start(tmp_dir, snapshot_every: 5)
@@ -287,14 +297,15 @@ defmodule Avwe.E2E.PersistenceTest do
     assert before.nose == %{"mira-vale" => %{smoke: :clear}}
     assert {:ok, %{fields: %{smoke: %{last_step: %{emitted_g: emitted}}}}} = Avwe.snapshot(@world)
     assert emitted > 0
-    hash = live_hash()
     :ok = Session.close(mira)
+    hash = live_hash()
     :ok = Avwe.stop_world(@world)
 
+    # Nothing is replayed but her release, which touches none of that.
     :ok = start(tmp_dir, snapshot_every: 5)
     {:ok, store} = Store.open(store_dir(tmp_dir), @region)
     assert Store.snapshots(store) == [0, 5]
-    assert {:ok, []} = Store.records_after(store, 5)
+    assert {:ok, [{:avwe, 2, {:submit, 5, %{verb: :release}}}]} = Store.records_after(store, 5)
     :ok = Store.close(store)
     assert live_hash() == hash
     assert live_fire_state() == before
@@ -349,7 +360,11 @@ defmodule Avwe.E2E.PersistenceTest do
 
     crash_region()
 
-    assert [{:avwe, 2, {:submit, 0, %{ref: ^ref, seq: 0}}}] = records(tmp_dir)
+    assert [
+             {:avwe, 2, {:submit, 0, %{verb: :control, seq: 0}}},
+             {:avwe, 2, {:submit, 0, %{ref: ^ref, seq: 1}}}
+           ] = records(tmp_dir)
+
     Avwe.step(@world, 1)
     assert [%{intent: ^ref, outcome: :success}] = results(mira)
 
@@ -486,7 +501,7 @@ defmodule Avwe.E2E.PersistenceTest do
     assert live_hash() == hash
   end
 
-  test "the saved climate, hearths and miracles are kept over the ones the world is restarted with",
+  test "the saved climate, hearths, miracles and characters are kept over the ones the world is restarted with",
        %{tmp_dir: tmp_dir} do
     :ok = start(tmp_dir)
     Avwe.step(@world, 5)
@@ -502,7 +517,8 @@ defmodule Avwe.E2E.PersistenceTest do
           start(tmp_dir,
             climate: [wind: [from: "north", m_s: 1.0]],
             hearths: [Keyword.merge(town, fuel_kg: 20.0, power_w: 6_000.0), lodge],
-            miracles: [source_fails, Keyword.put(last_coal, :heat_w, 900.0)]
+            miracles: [source_fails, Keyword.put(last_coal, :heat_w, 900.0)],
+            characters: ["mira-vale": [norms: [], routine: [[at: "05:00", do: {:rest}]]]]
           )
       end)
 
@@ -535,6 +551,12 @@ defmodule Avwe.E2E.PersistenceTest do
     assert kept =~ ~s("the-source-fails" => %{) and kept =~ "set: %{flow_m3_s: 0.0}"
     assert String.ends_with?(miracles, delete)
     refute log =~ "applied_at"
+
+    [characters] = lines(log, "ignoring :characters")
+    [wanted, kept] = String.split(characters, "; the world's characters are ")
+    assert wanted =~ ~r/"mira-vale" => %\{[^}]*norms: \[\]/ and wanted =~ "at: 18000"
+    assert kept =~ ~r/"mira-vale" => %\{[^}]*norms: \[:invited_fire\]/ and kept =~ "at: 16200"
+    assert String.ends_with?(characters, delete)
     refute log =~ "ignoring :seed"
     assert live_hash() == hash
     assert {:ok, %{env: %{wind: %{from: "south-west", m_s: 0.2}}}} = Avwe.snapshot(@world)
@@ -610,5 +632,93 @@ defmodule Avwe.E2E.PersistenceTest do
     _sessions = play()
 
     assert File.ls!(tmp_dir) == []
+  end
+
+  describe "autopilot" do
+    defp mira_action do
+      {:ok, snapshot} = Avwe.snapshot(@world)
+      get_in(snapshot.components, [:action, "mira-vale"])
+    end
+
+    test "a day on Mira's own replays exactly, and leaves nothing of hers in the journal", %{
+      tmp_dir: tmp_dir
+    } do
+      :ok = start(tmp_dir, snapshot_every: 600)
+      {:ok, watcher} = Avwe.connect(@world)
+      Avwe.step(@world, 1440)
+
+      seen = summaries(watcher)
+      assert "Mira Vale leaves, heading toward The Dry Bend." in seen
+      assert "Mira Vale arrives at Ashwarden Lodge." in seen
+
+      # Autopilot's intents never pass through the journal: a day of them
+      # is 1440 advances and no submit at all.
+      records = records(tmp_dir)
+      assert length(records) == 1440
+      refute Enum.any?(records, &match?({:avwe, 2, {:submit, _step, _intent}}, &1))
+
+      {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+      assert Store.snapshots(store) == [0, 600, 1200]
+      assert {:ok, from_start} = Store.rebuild_from_start(store)
+      assert {:ok, from_midday} = Store.rebuild(store)
+      :ok = Store.close(store)
+      assert from_start.step == 1440
+      assert Region.state_hash(from_start) == live_hash()
+      assert Region.state_hash(from_midday) == live_hash()
+
+      # When someone does take her, the journal holds just that.
+      {:ok, mira} = Avwe.connect(@world, body: "mira-vale")
+      :ok = Session.close(mira)
+
+      assert [
+               {:avwe, 2, {:submit, 1440, %{verb: :control, controller: :human}}},
+               {:avwe, 2, {:submit, 1440, %{verb: :release, controller: :human}}}
+             ] = Enum.drop(records(tmp_dir), 1440)
+    end
+
+    test "a restart mid-journey resumes the journey", %{tmp_dir: tmp_dir} do
+      # She sets off at 04:30 (step 30, a snapshot step): the intent she
+      # decided on in step 29 is pending in that snapshot, and must be.
+      :ok = start(tmp_dir, snapshot_every: 5)
+
+      eventually(
+        fn ->
+          Avwe.step(@world, 1)
+          match?(%{verb: :go, target: "the-dry-bend"}, mira_action())
+        end,
+        10_000
+      )
+
+      Avwe.step(@world, 2)
+      hash = live_hash()
+      assert {:ok, %{step: step}} = Avwe.snapshot(@world)
+      assert step > 30
+      :ok = Avwe.stop_world(@world)
+
+      {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+      assert 30 in Store.snapshots(store)
+      {:ok, records} = Store.records(store)
+      refute Enum.any?(records, &match?({:avwe, 2, {:submit, _step, _intent}}, &1))
+
+      assert {:ok,
+              %Region{step: 30, inbox: [%{ref: "auto-mira-vale-29", controller: :autopilot}]}} =
+               Store.latest_snapshot(store)
+
+      :ok = Store.close(store)
+
+      :ok = start(tmp_dir, snapshot_every: 5)
+      assert live_hash() == hash
+      assert %{verb: :go, target: "the-dry-bend", ref: "auto-mira-vale-29"} = mira_action()
+
+      {:ok, watcher} = Avwe.connect(@world)
+      assert {:ok, %{bodies: [%{going_to: "The Dry Bend"}]}} = Session.look(watcher)
+      Avwe.step(@world, 12)
+      assert "Mira Vale arrives at The Dry Bend." in summaries(watcher)
+
+      {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+      assert {:ok, rebuilt} = Store.rebuild_from_start(store)
+      assert Region.state_hash(rebuilt) == live_hash()
+      :ok = Store.close(store)
+    end
   end
 end

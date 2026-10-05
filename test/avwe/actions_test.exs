@@ -161,6 +161,58 @@ defmodule Avwe.ActionsTest do
     end
   end
 
+  describe "control" do
+    defp holder(region, body), do: Region.get(region, body, :control).holder
+
+    test "is taken and released, and written on the body", %{world: world} do
+      {region, events} =
+        world
+        |> hollow()
+        |> submit("wren", :control, controller: :arbor, ref: "take")
+        |> run(1)
+
+      assert [%{ref: "take", outcome: :success, reason: nil}] = results(events)
+
+      assert [%Event{type: :control_taken, entity: "wren", data: %{controller: :arbor}}] =
+               Enum.filter(events, &(&1.type == :control_taken))
+
+      assert holder(region, "wren") == :arbor
+      assert Region.get(region, "wren", :control).since == region.time - 60
+
+      {region, events} = region |> submit("wren", :release, ref: "give") |> run(1)
+      assert [%{ref: "give", outcome: :success, reason: nil}] = results(events)
+
+      assert [%Event{type: :control_released, data: %{controller: :arbor}}] =
+               Enum.filter(events, &(&1.type == :control_released))
+
+      assert holder(region, "wren") == nil
+    end
+
+    test "taking what one holds, or releasing what nobody holds, still succeeds", %{world: world} do
+      {region, events} =
+        world
+        |> hollow()
+        |> submit("wren", :control, controller: :human, ref: "once")
+        |> submit("wren", :control, controller: :human, ref: "twice")
+        |> submit("pell", :release, ref: "nobody")
+        |> run(1)
+
+      assert [
+               %{ref: "nobody", outcome: :success, reason: :already},
+               %{ref: "once", outcome: :success, reason: nil},
+               %{ref: "twice", outcome: :success, reason: :already}
+             ] = results(events)
+
+      assert Enum.count(events, &(&1.type == :control_taken)) == 1
+      assert holder(region, "wren") == :human
+    end
+
+    test "without a controller there is nobody to take it", %{world: world} do
+      {_region, events} = world |> hollow() |> submit("wren", :control, []) |> run(1)
+      assert [%{outcome: :blocked, reason: :invalid}] = results(events)
+    end
+  end
+
   test "an unknown verb is blocked", %{world: world} do
     {_region, events} = world |> hollow() |> submit("wren", :fly, []) |> run(1)
     assert [%{outcome: :blocked, reason: :unknown_verb}] = results(events)
@@ -200,6 +252,8 @@ defmodule Avwe.ActionsTest do
           tuple({constant(:stop), constant([])}),
           tuple({constant(:kindle), map(member_of([nil, "mill-pond"]), &[target: &1])}),
           tuple({constant(:douse), map(member_of([nil, "mill-pond"]), &[target: &1])}),
+          tuple({constant(:control), map(member_of([:human, :arbor, nil]), &[controller: &1])}),
+          tuple({constant(:release), constant([])}),
           tuple({constant(:juggle), constant([])})
         ])
 

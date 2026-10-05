@@ -57,11 +57,14 @@ defmodule Avwe.Store do
   ## Snapshots and pending intents
 
   A snapshot stands for the state *between* advances, so it holds no pending
-  intents: any still in the inbox are left out and `next_seq` is wound back
-  by as many, as if they had never been submitted. Their `:submit` records
-  re-submit them on replay, which gives them the same sequence numbers again.
-  `Avwe.RegionServer` only snapshots right after an advance, when the inbox
-  is empty anyway.
+  journaled intents: any still in the inbox are left out and `next_seq` is
+  wound back by as many, as if they had never been submitted. Their
+  `:submit` records re-submit them on replay, which gives them the same
+  sequence numbers again. The intents `Avwe.Systems.Autopilot` queued during
+  the last step are kept: they are derived state, never journaled, and the
+  next step's replay must apply them as the live step did.
+  `Avwe.RegionServer` only snapshots right after an advance, when nothing
+  else is pending anyway.
 
   ## Ownership
 
@@ -321,8 +324,15 @@ defmodule Avwe.Store do
     end
   end
 
+  # Autopilot's intents stay: they are derived state, queued by a system
+  # during the step and never journaled, so a snapshot that dropped them
+  # would lose a decision on replay. They were queued during the advance,
+  # before any journaled intent that is still pending, so the pending
+  # journaled ones hold the highest seqs and winding back by their count
+  # leaves autopilot's seqs as they were.
   defp unsubmit_pending(%Region{inbox: inbox, next_seq: next_seq} = region) do
-    %{region | inbox: [], outbox: [], next_seq: next_seq - length(inbox)}
+    kept = Enum.filter(inbox, &(&1.controller == :autopilot))
+    %{region | inbox: kept, outbox: [], next_seq: next_seq - (length(inbox) - length(kept))}
   end
 
   # Written to a .tmp file, fsynced, then renamed into place, so the snapshot

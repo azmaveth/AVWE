@@ -30,6 +30,7 @@ defmodule Avwe do
     Avwe.Systems.Movement,
     Avwe.Systems.Waiting,
     Avwe.Systems.Discovery,
+    Avwe.Systems.Autopilot,
     Avwe.Systems.Smoke
   ]
 
@@ -46,16 +47,16 @@ defmodule Avwe do
     * `:seed` - world seed. Default: derived from `id`.
     * `:clock` - `:manual` (default) or `{:live, interval_ms}`.
     * `:systems` - systems to run, in order. Default: `#{inspect(@default_systems)}`.
-    * `:terrain`, `:hearths`, `:miracles` and `:climate` - AVWE's own
-      settings for the world. See `Avwe.Worldgen`.
+    * `:terrain`, `:hearths`, `:miracles`, `:climate` and `:characters` -
+      AVWE's own settings for the world. See `Avwe.Worldgen`.
     * `:data_dir` - where worlds keep their logs and snapshots; this world's
       go under `<data_dir>/<id>`. Default: `config :avwe, :data_dir`. `nil`
       means no persistence. A world whose state is already there resumes
-      from it: `:start`, `:seed`, `:terrain`, `:hearths`, `:miracles` and
-      `:climate` are ignored (with a warning naming each of `:seed`,
-      `:climate`, `:hearths` and `:miracles` that differs from the saved
-      world), but `:systems` is applied, since the rules are code, not
-      state. Replaying a log is only valid under the systems it was recorded
+      from it: `:start`, `:seed`, `:terrain`, `:hearths`, `:miracles`,
+      `:climate` and `:characters` are ignored (with a warning naming each
+      of `:seed`, `:climate`, `:hearths`, `:miracles` and `:characters` that
+      differs from the saved world), but `:systems` is applied, since the
+      rules are code, not state. Replaying a log is only valid under the systems it was recorded
       with; after changing them, the region is snapshotted at once so the
       log from that point on belongs to the new rules.
     * `:snapshot_every` - steps between snapshots. A snapshot is written at
@@ -80,7 +81,8 @@ defmodule Avwe do
           terrain: Keyword.get(opts, :terrain),
           hearths: Keyword.get(opts, :hearths, []),
           miracles: Keyword.get(opts, :miracles, []),
-          climate: Keyword.get(opts, :climate)
+          climate: Keyword.get(opts, :climate),
+          characters: Keyword.get(opts, :characters, [])
         )
 
       DynamicSupervisor.start_child(
@@ -137,12 +139,16 @@ defmodule Avwe do
 
   @doc """
   The bodies in a world that a controller could take, with whether each is
-  already taken.
+  already `taken` (a session holds its lease) and who its `controller` is in
+  the simulation: the holder written on the body's `:control` component, or
+  `:autopilot` when nobody holds it (a taken body whose session has gone
+  idle is autopilot's until the session acts again).
   """
   @spec bodies(atom()) :: {:ok, [map()]} | {:error, :not_found}
   def bodies(world) do
     with {:ok, snapshot} <- snapshot(world) do
       repr = Map.get(snapshot.components, :repr, %{})
+      control = Map.get(snapshot.components, :control, %{})
 
       bodies =
         for id <- snapshot.components |> Map.get(:body, %{}) |> Map.keys() |> Enum.sort() do
@@ -150,7 +156,8 @@ defmodule Avwe do
             id: id,
             name: get_in(repr, [id, :name]) || id,
             description: get_in(repr, [id, :description]),
-            taken: Registry.lookup(Avwe.Registry, {:lease, world, id}) != []
+            taken: Registry.lookup(Avwe.Registry, {:lease, world, id}) != [],
+            controller: get_in(control, [id, :holder]) || :autopilot
           }
         end
 
@@ -165,7 +172,10 @@ defmodule Avwe do
 
     * `:body` - the body to control. Leave it out to watch as a spectator.
     * `:sink` - the process that receives percepts. Default: the caller.
-    * `:controller` - `:human` (default), `:mcp`, `:arbor` or `:autopilot`.
+    * `:controller` - `:human` (default), `:mcp` or `:arbor`.
+    * `:idle_after` - real milliseconds without an `Avwe.Session.act/3`
+      after which the session yields the body to autopilot until its next
+      act. Default: ten minutes.
 
   Fails with `:no_such_world`, `:no_such_body` or `:body_taken`.
   """

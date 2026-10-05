@@ -67,6 +67,26 @@ config :avwe, :worlds,
         cause: :unknown,
         note: "Heat without fuel, declared: the Last Coal does not eat wood."
       ]
+    ],
+    # What the bodies do on their own (Avwe.Autopilot). "She walks the banks
+    # before dawn ... she stops at the lodge on the way home and warms her
+    # hands"; her kiln-house keeps the Hearth Compact.
+    characters: [
+      "mira-vale": [
+        norms: [:invited_fire],
+        routine: [
+          [at: "04:30", do: {:go, target: "the-dry-bend"}, note: "walks the banks before dawn"],
+          [at: "06:30", do: {:follow, params: %{direction: :upstream}}, note: "the survey"],
+          [at: "11:00", do: {:go, target: "ember-reach"}],
+          [
+            at: "18:00",
+            do: {:go, target: "ashwarden-lodge"},
+            note: "warms her hands at the lodge"
+          ],
+          [at: "19:30", do: {:go, target: "ember-reach"}],
+          [at: "22:00", do: {:rest}]
+        ]
+      ]
     ]
   ]
 

@@ -27,12 +27,21 @@ defmodule Avwe.Worldgen do
       directions (`Avwe.Space.directions/0`) and `m_s` at least zero; a bad
       value raises `ArgumentError` here, as a bad hearth does, rather than
       in the smoke system's first step. Default: 2 m/s from the south-west.
+    * `:characters` - what the bodies do on their own (`Avwe.Autopilot`).
+      Every seeded body gets an `:autopilot` and a `:control` component, so
+      it rests at night and keeps warm. A body named here, by its id, also
+      gets a `:routine` (entries `[at: "HH:MM", do: {verb, opts}, note:
+      string]`, sorted by time; `{:rest}` means wait until dawn) and
+      `:norms` (atoms such as `:invited_fire`). A bad time, an unknown body
+      or a `do` that is not a verb raises `ArgumentError` here, like a bad
+      hearth. This is the shape a routine compiled from the body's Quire
+      article would take (`docs/DESIGN.md`, 10.3).
 
   Finally each system prepares the region for its starting time
   (`Avwe.Region.prepare/1`).
   """
 
-  alias Avwe.{Calendar, Quire, Region, Space, Terrain}
+  alias Avwe.{Autopilot, Calendar, Quire, Region, Space, Terrain}
   alias Avwe.Systems.{Fire, River}
   alias Avwe.Terrain.Generator
 
@@ -41,7 +50,7 @@ defmodule Avwe.Worldgen do
 
   @doc """
   Builds the region. Options: those of `Avwe.Region.new/1`, plus `:terrain`,
-  `:hearths`, `:miracles` and `:climate` as above.
+  `:hearths`, `:miracles`, `:climate` and `:characters` as above.
   """
   @spec region(Quire.World.t(), keyword()) :: Region.t()
   def region(quire_world, opts) do
@@ -51,7 +60,83 @@ defmodule Avwe.Worldgen do
     |> add_hearths(Keyword.get(opts, :hearths) || [])
     |> add_miracles(Keyword.get(opts, :miracles) || [], quire_world)
     |> add_climate(Keyword.get(opts, :climate))
+    |> add_characters(Keyword.get(opts, :characters) || [])
     |> Region.prepare()
+  end
+
+  @doc """
+  Gives every body its `:autopilot` and `:control` components, and the
+  bodies named in `characters` their `:routine` and `:norms`.
+  """
+  @spec add_characters(Region.t(), keyword()) :: Region.t()
+  def add_characters(region, characters) do
+    region =
+      Enum.reduce(Region.with_components(region, [:body]), region, fn id, acc ->
+        Region.put_entity(acc, id, %{
+          autopilot: Autopilot.fresh(),
+          control: %{holder: nil, since: nil}
+        })
+      end)
+
+    Enum.reduce(characters, region, fn {name, spec}, acc ->
+      id = to_string(name)
+
+      if Region.get(acc, id, :body) == nil,
+        do: raise(ArgumentError, "character #{inspect(id)}: no such body to give a routine")
+
+      acc
+      |> put_unless_nil(id, :routine, spec[:routine] && routine!(id, spec[:routine]))
+      |> put_unless_nil(id, :norms, spec[:norms] && norms!(id, spec[:norms]))
+    end)
+  end
+
+  defp put_unless_nil(region, _id, _name, nil), do: region
+  defp put_unless_nil(region, id, name, value), do: Region.put_component(region, id, name, value)
+
+  defp routine!(id, entries) do
+    entries
+    |> Enum.map(fn entry ->
+      %{
+        at: time_of_day!(id, Keyword.fetch!(entry, :at)),
+        do: todo!(id, Keyword.fetch!(entry, :do)),
+        note: Keyword.get(entry, :note)
+      }
+    end)
+    |> Enum.sort_by(& &1.at)
+  end
+
+  # "HH:MM" as seconds of day, checked where a bad one is easiest to
+  # explain: the autopilot would never find the moment to cross.
+  defp time_of_day!(id, at) do
+    with true <- is_binary(at),
+         [hour, minute] <- Regex.run(~r/^(\d\d):(\d\d)$/, at, capture: :all_but_first),
+         {hour, minute} when hour < 24 and minute < 60 <-
+           {String.to_integer(hour), String.to_integer(minute)} do
+      hour * Calendar.hour() + minute * Calendar.minute()
+    else
+      _bad ->
+        raise ArgumentError, "character #{inspect(id)}: at must be \"HH:MM\", got #{inspect(at)}"
+    end
+  end
+
+  defp todo!(_id, {verb} = todo) when is_atom(verb), do: todo
+  defp todo!(_id, {verb, opts} = todo) when is_atom(verb) and is_list(opts), do: todo
+
+  defp todo!(id, todo),
+    do:
+      raise(
+        ArgumentError,
+        "character #{inspect(id)}: do must be {verb, opts}, got #{inspect(todo)}"
+      )
+
+  defp norms!(id, norms) do
+    if is_list(norms) and Enum.all?(norms, &is_atom/1),
+      do: norms,
+      else:
+        raise(
+          ArgumentError,
+          "character #{inspect(id)}: norms must be atoms, got #{inspect(norms)}"
+        )
   end
 
   defp add_climate(region, climate) do
