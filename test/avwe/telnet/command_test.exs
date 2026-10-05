@@ -49,6 +49,20 @@ defmodule Avwe.Telnet.CommandTest do
       assert Command.parse("go west rise") == {:go, "west rise"}
     end
 
+    test "lighting and dousing the fire" do
+      assert Command.parse("kindle") == :kindle
+      assert Command.parse("light") == :kindle
+      assert Command.parse("light the fire") == :kindle
+      assert Command.parse("Light fire") == :kindle
+      assert Command.parse("light the hearth") == :kindle
+      assert Command.parse("douse") == :douse
+      assert Command.parse("douse the fire") == :douse
+      assert Command.parse("put out the fire") == :douse
+      assert Command.parse("put out") == :douse
+      assert Command.parse("light a candle") == {:unknown, "light a candle"}
+      assert Command.parse("put on a hat") == {:unknown, "put on a hat"}
+    end
+
     test "anything else is unknown" do
       assert Command.parse("dance wildly") == {:unknown, "dance wildly"}
     end

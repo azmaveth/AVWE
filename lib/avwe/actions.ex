@@ -6,15 +6,20 @@ defmodule Avwe.Actions do
   with an outcome from Arbor's vocabulary: `:success`, `:failure`, `:blocked`
   or `:interrupted`.
 
-  Instant actions (speaking, stopping) finish in the step they start. Durative
-  actions (going, following, walking, waiting) live in the body's `:action`
-  component until a system completes them, `:stop` interrupts them, or a new
-  action replaces them. Journeys carry a `:path` of waypoints that
-  `Avwe.Systems.Movement` walks along.
+  Instant actions (speaking, stopping, kindling and dousing a hearth) finish
+  in the step they start. Durative actions (going, following, walking,
+  waiting) live in the body's `:action` component until a system completes
+  them, `:stop` interrupts them, or a new action replaces them. Journeys carry
+  a `:path` of waypoints that `Avwe.Systems.Movement` walks along.
+
+  Kindling and dousing act on a hearth within 20 m: the nearest one when the
+  intent names no target. They change the hearth at once and emit `:fire_lit`
+  or `:fire_out` before the result, so `Avwe.Systems.Fire`, which runs later
+  in the same step, burns from the moment of the intent.
   """
 
   alias Avwe.{Calendar, Event, Intent, Region, Space, Terrain, Tick}
-  alias Avwe.Systems.Daylight
+  alias Avwe.Systems.{Daylight, Fire}
 
   @volumes [:whisper, :talk, :shout]
   @max_speech 500
@@ -129,7 +134,81 @@ defmodule Avwe.Actions do
     end
   end
 
+  defp perform(region, %Intent{verb: :kindle} = intent, tick) do
+    with {:ok, id, hearth, position} <- hearth_target(region, intent),
+         :ok <- kindleable(region, id, hearth) do
+      lit = %{hearth | burning: true, lit_at: tick.time, out_at: nil}
+
+      event =
+        Event.new(:fire_lit,
+          entity: id,
+          time: tick.time,
+          data: %{position: position, by: intent.body}
+        )
+
+      {Region.put_component(region, id, :hearth, lit),
+       [event, result(%{intent | target: id}, :success, nil)]}
+    else
+      {:error, reason} -> {region, [result(intent, :blocked, reason)]}
+    end
+  end
+
+  defp perform(region, %Intent{verb: :douse} = intent, tick) do
+    with {:ok, id, hearth, position} <- hearth_target(region, intent),
+         :ok <- quenchable(region, id, hearth) do
+      out = %{hearth | burning: false, out_at: tick.time}
+
+      event =
+        Event.new(:fire_out,
+          entity: id,
+          time: tick.time,
+          data: %{position: position, reason: :doused, by: intent.body}
+        )
+
+      {Region.put_component(region, id, :hearth, out),
+       [event, result(%{intent | target: id}, :success, nil)]}
+    else
+      {:error, :unquenchable} -> {region, [result(intent, :failure, :unquenchable)]}
+      {:error, reason} -> {region, [result(intent, :blocked, reason)]}
+    end
+  end
+
   defp perform(region, intent, _tick), do: {region, [result(intent, :blocked, :unknown_verb)]}
+
+  # The hearth an intent means: the nearest within reach, or the named one if
+  # it is within reach.
+  defp hearth_target(region, %Intent{target: nil, body: body}) do
+    case Fire.hearth_near(region, Region.get(region, body, :position)) do
+      [{id, hearth, _distance} | _rest] -> {:ok, id, hearth, Region.get(region, id, :position)}
+      [] -> {:error, :no_hearth}
+    end
+  end
+
+  defp hearth_target(region, %Intent{target: id, body: body}) do
+    here = Region.get(region, body, :position)
+
+    case {Region.get(region, id, :hearth), Region.get(region, id, :position)} do
+      {hearth, position} when hearth == nil or position == nil ->
+        {:error, :no_such_hearth}
+
+      {hearth, position} ->
+        if Space.distance(here, position) <= Fire.at_place_cells(),
+          do: {:ok, id, hearth, position},
+          else: {:error, :too_far}
+    end
+  end
+
+  defp kindleable(_region, _id, %{burning: true}), do: {:error, :already_burning}
+
+  defp kindleable(region, id, hearth) do
+    if hearth.fuel_kg > 0 or Fire.standing?(region, id), do: :ok, else: {:error, :no_fuel}
+  end
+
+  defp quenchable(_region, _id, %{burning: false}), do: {:error, :not_burning}
+
+  defp quenchable(region, id, _hearth) do
+    if Fire.unquenchable?(region, id), do: {:error, :unquenchable}, else: :ok
+  end
 
   defp travel(region, intent, path, heading) do
     action =

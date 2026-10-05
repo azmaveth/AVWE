@@ -25,10 +25,12 @@ defmodule Avwe do
     Avwe.Systems.Miracles,
     Avwe.Systems.Weather,
     Avwe.Systems.River,
+    Avwe.Systems.Fire,
     Avwe.Systems.Heat,
     Avwe.Systems.Movement,
     Avwe.Systems.Waiting,
-    Avwe.Systems.Discovery
+    Avwe.Systems.Discovery,
+    Avwe.Systems.Smoke
   ]
 
   @doc """
@@ -44,14 +46,13 @@ defmodule Avwe do
     * `:seed` - world seed. Default: derived from `id`.
     * `:clock` - `:manual` (default) or `{:live, interval_ms}`.
     * `:systems` - systems to run, in order. Default: `#{inspect(@default_systems)}`.
-    * `:terrain`, `:miracles` and `:climate` - AVWE's own settings for the
-      world. See `Avwe.Worldgen`.
+    * `:terrain`, `:hearths`, `:miracles` and `:climate` - AVWE's own
+      settings for the world. See `Avwe.Worldgen`.
     * `:data_dir` - where worlds keep their logs and snapshots; this world's
       go under `<data_dir>/<id>`. Default: `config :avwe, :data_dir`. `nil`
       means no persistence. A world whose state is already there resumes
-      from it: `:start`, `:seed`, `:terrain`, `:miracles` and `:climate` are
-      ignored (with
-      a warning if the seed differs), but `:systems` is applied, since the
+      from it: `:start`, `:seed`, `:terrain`, `:hearths`, `:miracles` and
+      `:climate` are ignored (with a warning if the seed differs), but `:systems` is applied, since the
       rules are code, not state. Replaying a log is only valid under the
       systems it was recorded with; after changing them, the log from that
       point on belongs to the new rules.
@@ -75,6 +76,7 @@ defmodule Avwe do
           time: start_time(Keyword.get(opts, :start, 0)),
           systems: Keyword.get(opts, :systems, @default_systems),
           terrain: Keyword.get(opts, :terrain),
+          hearths: Keyword.get(opts, :hearths, []),
           miracles: Keyword.get(opts, :miracles, []),
           climate: Keyword.get(opts, :climate)
         )

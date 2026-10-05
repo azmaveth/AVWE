@@ -14,12 +14,17 @@ defmodule Avwe.Intent do
       `%{until: :dawn | :dusk}`.
     * `:say` - speak. `params`: `%{text: text, volume: :whisper | :talk | :shout}`.
     * `:stop` - stop the current action.
+    * `:kindle` - light a hearth within 20 m. `target` is the hearth's id, or
+      `nil` for the nearest. Blocked with `:no_hearth`, `:no_such_hearth`,
+      `:too_far`, `:already_burning` or `:no_fuel`.
+    * `:douse` - put a hearth out; same target rule. Blocked with
+      `:not_burning`; fails with `:unquenchable` when the fire won't go out.
   """
 
   @enforce_keys [:ref, :body, :verb]
   defstruct [:ref, :body, :verb, :target, :controller, params: %{}, seq: 0]
 
-  @type verb :: :go | :wait | :say | :stop | atom()
+  @type verb :: :go | :follow | :walk | :wait | :say | :stop | :kindle | :douse | atom()
 
   @type t :: %__MODULE__{
           ref: String.t(),

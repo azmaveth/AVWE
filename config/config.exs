@@ -30,6 +30,22 @@ config :avwe, :worlds,
       clay: [{"ember-reach", radius_cells: 4}]
     ],
     climate: [wind: [from: "south-west", m_s: 2.0]],
+    hearths: [
+      [
+        id: "town-hearth",
+        at: "ember-reach",
+        name: "the kiln-house hearth",
+        fuel_kg: 8.0,
+        power_w: 5_000.0
+      ],
+      [
+        id: "lodge-hearth",
+        at: "ashwarden-lodge",
+        name: "the lodge hearth",
+        fuel_kg: 12.0,
+        power_w: 5_000.0
+      ]
+    ],
     miracles: [
       [
         id: "the-source-fails",
@@ -40,6 +56,16 @@ config :avwe, :worlds,
         set: %{flow_m3_s: 0.0},
         cause: :unknown,
         note: "The Ember's source stops, for reasons nobody knows yet."
+      ],
+      # "It does not smoke. It does not eat wood. It simply stays warm."
+      [
+        id: "the-last-coal",
+        kind: :standing,
+        at: "ashwarden-lodge",
+        heat_w: 800.0,
+        breaks: [:fuel, :dousing],
+        cause: :unknown,
+        note: "Heat without fuel, declared: the Last Coal does not eat wood."
       ]
     ]
   ]

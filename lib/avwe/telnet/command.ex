@@ -40,6 +40,8 @@ defmodule Avwe.Telnet.Command do
           | {:say, :whisper | :talk | :shout, String.t()}
           | {:wait, map()}
           | :stop
+          | :kindle
+          | :douse
           | :time
           | :help
           | :quit
@@ -92,6 +94,21 @@ defmodule Avwe.Telnet.Command do
   defp command("shout", rest, _line), do: speech(:shout, rest)
   defp command("wait", rest, _line), do: wait(String.downcase(rest))
   defp command("stop", _rest, _line), do: :stop
+  defp command("kindle", _rest, _line), do: :kindle
+  defp command("douse", _rest, _line), do: :douse
+
+  defp command("light", rest, line) do
+    if String.downcase(rest) in ["", "fire", "the fire", "hearth", "the hearth"],
+      do: :kindle,
+      else: {:unknown, line}
+  end
+
+  defp command("put", rest, line) do
+    if String.downcase(rest) in ["out", "out fire", "out the fire"],
+      do: :douse,
+      else: {:unknown, line}
+  end
+
   defp command("time", _rest, _line), do: :time
   defp command(word, _rest, _line) when word in ["help", "?"], do: :help
   defp command(word, _rest, _line) when word in ["quit", "exit"], do: :quit

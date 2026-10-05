@@ -130,7 +130,13 @@ defmodule Avwe.JourneysTest do
           {constant(:go),
            map(member_of(["the-dry-bend", "river-source", "willow-docks"]), &[target: &1])}
         ),
-        tuple({constant(:stop), constant([])})
+        tuple({constant(:stop), constant([])}),
+        tuple(
+          {constant(:kindle), map(member_of([nil, "lodge-hearth", "nowhere"]), &[target: &1])}
+        ),
+        tuple(
+          {constant(:douse), map(member_of([nil, "town-hearth", "the-last-coal"]), &[target: &1])}
+        )
       ])
 
     check all batch <- list_of(verbs, min_length: 1, max_length: 6), max_runs: 30 do

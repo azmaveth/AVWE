@@ -198,6 +198,8 @@ defmodule Avwe.ActionsTest do
              )}
           ),
           tuple({constant(:stop), constant([])}),
+          tuple({constant(:kindle), map(member_of([nil, "mill-pond"]), &[target: &1])}),
+          tuple({constant(:douse), map(member_of([nil, "mill-pond"]), &[target: &1])}),
           tuple({constant(:juggle), constant([])})
         ])
 

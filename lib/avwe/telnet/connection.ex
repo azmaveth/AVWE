@@ -21,6 +21,8 @@ defmodule Avwe.Telnet.Connection do
     follow upstream   follow the river channel (or: follow downstream)
     say <text>        speak (also: whisper, shout)
     wait [minutes]    let time pass (also: wait 2 hours, wait until dawn, wait until dusk)
+    kindle            light the hearth here (also: light the fire)
+    douse             put the fire out (also: put out the fire)
     stop              stop what you're doing
     time              the time in the world
     quit              leave\
@@ -193,6 +195,8 @@ defmodule Avwe.Telnet.Connection do
 
   defp run(state, {:wait, params}), do: act(state, :wait, params: params)
   defp run(state, :stop), do: act(state, :stop, [])
+  defp run(state, :kindle), do: act(state, :kindle, [])
+  defp run(state, :douse), do: act(state, :douse, [])
 
   defp run(state, :time) do
     write(state, Avwe.now(state.world))
