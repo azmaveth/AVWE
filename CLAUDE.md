@@ -36,10 +36,12 @@ mix test
 mix format
 mix credo --strict
 mix compile --warnings-as-errors
+mix test --include perf     # also runs the per-step cost bound (< 10 ms)
 ```
 
 Tests use worlds in `test/fixtures/quire/`: a copy of the Ember Reach, and
-Lantern Hollow, a tiny world laid out to test hearing and sight ranges.
+Lantern Hollow, a tiny world laid out to test hearing and sight ranges (fire
+and smoke tests add hearths and a wind to it through start options).
 `Avwe.Test.Fixtures.ember_reach_opts/1` starts the Ember Reach with its real
 settings (terrain, river, the 812 miracle) from the fixture copy, and
 `Avwe.Test.Ember.region/2` builds its region directly for unit tests.

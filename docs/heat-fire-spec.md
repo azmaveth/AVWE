@@ -53,6 +53,51 @@ Changes to the panel's spec:
 
 Everything else stands as written.
 
+## As built: errata
+
+Where the code deliberately differs from the body below, the code and its
+moduledocs are right. The differences, with their reasons:
+
+- **Steam threshold (§4.2, §4.4):** `@steam_dc` is 12 K, not 8 K, and there
+  is one rule everywhere: a reach steams when its bank mean is at least 12 K
+  above the end-of-step air, with no light condition; a body's `look` uses
+  the flag of the reach beside it, and so does the river prose. With the
+  model's 40 °C spring the water by the town is about 37.7 °C (not the ~34 °C
+  the reference day assumed) and the bank silt at d = 3 runs 29 to 32 °C, so
+  with 8 K the banks steamed from mid-afternoon in full sun; with 12 K the
+  first reach steams about 16:40 and the last about 17:50, and they clear
+  between 06:50 and 08:00. The banks are `:hot` (15 K over the air) through
+  the night while the river runs.
+- **River at long steps (§5):** the chain of reaches is sub-stepped at 60 s
+  inside the river system (a 300 s sub-step left a 5.6 % storage error), so
+  hour and day steps drain the river at the right speed; each reach is still
+  solved exactly. The river's temperature is the exact solution of the
+  well-mixed reach, not the spec's mix-then-cool.
+- **Smoke (§7):** `@g_min` is 0.25 mg (0.01 g culled minute-step puffs that
+  hour steps kept), and each hearth emits up to four parcels per step along
+  the drift line (`n = min(4, ceil(dt / 15))`), each with the closed form of
+  its own sub-interval, so a body 100 m downwind does not lose the smell
+  between minutes; the puff bound is therefore 4 × the spec's (at most 304
+  per hearth at 60 s steps). A body within one cell of a burning hearth
+  smells at least `:clear`. Puffs are bounded by the terrain's height as
+  well as its width.
+- **Heat budget (§10):** `last_step` has an `activated_mj` line for cells
+  inserted during the step, and the delta identity includes it;
+  `Heat.activate/3` returns `{field, joules}`.
+- **Fire (§6.2, §6.4):** dousing an unquenchable hearth is outcome
+  `:failure` with reason `:unquenchable` (you try, and it does not go out),
+  not `:blocked`; standing miracles never smoke and the `smoke` key is gone.
+  Telnet accepts a hearth name after `kindle`, `light`, `douse` and
+  `put out`, resolved against the hearths within reach.
+- **Perception (§9):** `look` carries `hearths`, every hearth within 2 cells
+  (the nearest is also `hearth`), and `warmth.sources`, every burning source
+  felt; `fires` excludes hearths within 2 cells, which are listed as hearths.
+  `smoke` is present whenever the smoke field exists, even without terrain.
+  "The fire burns low." and "The fire goes out." name the hearth when the
+  observer is not at it.
+- **Weather:** `Worldgen` validates the wind (`from` a compass direction,
+  `m_s` at least 0) at build time.
+
 ---
 
 Repo `/Users/azmaveth/code/avwe`, branch `m0-scaffold`. This is the synthesis: Proposal 2 (favoured by two of three judges) is the base; Proposal 1's energy-relative storage, compensated sums, closed-form puff emission and constant-forcing exactness test are grafted in; Proposal 3's split budget lines, `out_at`, `Heat.sources/1` and no-terrain clause are grafted in. Section 0 lists every judge objection and what was done with it.

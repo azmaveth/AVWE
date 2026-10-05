@@ -28,9 +28,15 @@ M0 in progress. Built so far:
 - Persistence: every intent and advance is journaled, snapshots are taken as
   the world runs, replaying the journal reproduces the world exactly, and a
   restarted or crashed world resumes where it was.
+- Weather and heat: a diurnal air temperature, and a heat field where the sun,
+  the air, the sky and the warm river warm and cool the ground by material.
+  The silt banks steam while the river runs and are cold a year after it
+  stops. Energy is conserved and property-tested at any step length.
+- Fire and smoke: hearths at the town and the lodge that you can `kindle` and
+  `douse`, which burn their fuel, warm the ground, and send smoke downwind
+  that bodies smell; the Last Coal burns without fuel and cannot be put out.
 
-Next: heat and fire (in progress), and autopilot for bodies nobody is
-controlling.
+Next: autopilot for bodies nobody is controlling.
 
 ## Playing
 
@@ -54,7 +60,9 @@ telnet localhost 4040
 
 Choose Mira Vale (or `watch`), then try `look`, `go to the dry bend`,
 `follow the channel upstream`, `go north 200`, `say hello`,
-`wait until dawn`, `stop` and `help`.
+`light the fire`, `douse`, `wait until dawn`, `stop` and `help`. Go to the
+lodge to feel the Last Coal; stand by the kiln-house hearth, light it, and
+watch it burn low and out over eight world hours.
 
 To see the river run, and hear it fall silent, start the Ember Reach in 812,
 an hour before its source fails:

@@ -71,6 +71,10 @@ when M0 starts.
 | Terrain storage | A small seeded description (the channel's line of cells plus rises and clay), with elevation and ground computed per cell on demand | Tiny, fast to generate, and deterministic. A stored, editable grid can come when terrain needs hand-editing |
 | River model | A chain of 100 m reaches from source to exit, each a linear reservoir updated with its exact solution | Stable at any step length, cheap, and it drains from upstream down, as canon needs |
 | When the source failed | 812 AR, day 200, 15:00 | Canon gives only the year. The day and hour are ours, in `config/config.exs` |
+| Weather | A fixed late-summer diurnal air curve (13 to 25 °C), a constant wind per region from config, no randomness | Enough for the Ember Reach's one season; seasons and changing weather come later, and nothing in the physics would change |
+| Heat storage | Energy per cell relative to 15 °C on a sparse active set (cells near the channel, the clay, and wherever a hearth stands), with per-cell exact exponential relaxation and no lateral conduction | Soil conducts about 0.2 m a day; what warms the banks is seepage from the river, modelled as a per-material coupling. No stencil means no step-size limit, and the budget is testable to 1e-8 MJ |
+| Smoke | Sparse puffs that drift with the wind and decay, not a grid | Cheap, bounded, exact in mass at any step length, and nobody sniffs a grid |
+| Fire | Hearth entities with fuel, lit by a `kindle` intent; the Last Coal is a declared standing miracle (heat without fuel) | Ignition temperature and the Hearth Compact's "invited fire" rule are behaviour, for autopilot, not physics |
 | Magic | Exists, but hasn't been discovered. No rules until it is | Nothing to model yet. Miracles leave room for it later (section 6.6) |
 
 ## 4. Concepts
@@ -124,8 +128,9 @@ which is what keeps the core deterministic and testable.
 avwe/
   lib/avwe/              simulation core, no I/O
     world.ex region.ex tick.ex system.ex
-    systems/             heat, water, fire, movement, needs, autopilot
-    fields/              dense grid helpers, Nx later
+    systems/             daylight, miracles, weather, river, fire, heat,
+                         movement, waiting, discovery, smoke (built);
+                         needs and autopilot to come
     perception/          senses, salience, representation layers
     protocol/            intent and percept structs, JSON codecs
   lib/avwe/session.ex    controller sessions and leases
@@ -186,14 +191,16 @@ The model is plain data owned by the region process:
   step: 0,
   time: 25_657_704_000,                # 813 AR, day 220, 04:00, in world seconds
   dt: 60,
-  systems: [Avwe.Systems.Daylight],    # run in this order every step
+  systems: [Avwe.Systems.Daylight, ...],   # run in this order every step
   components: %{
     position: %{"mira-vale" => {121, 138}},
     repr:     %{"mira-vale" => %{name: "Mira Vale", description: "..."}},
-    body:     %{"mira-vale" => %{species: "riverfolk"}}
+    body:     %{"mira-vale" => %{species: "riverfolk"}},
+    hearth:   %{"town-hearth" => %{fuel_kg: 8.0, burning: false, ...}},
+    river:    %{"river" => %{reaches: {...}, ...}}
   },
-  fields: %{temperature: grid, water: grid, fuel: grid, smoke: grid},
-  env: %{light: 0.42},                 # region-wide values
+  fields: %{heat: %Avwe.Systems.Heat.Field{}, smoke: %{puffs: [...]}},
+  env: %{light: 0.42, air_c: 13.1, wind: %{from: "south-west", m_s: 2.0}},
   outbox: []                           # events since the last drain
 }
 ```
@@ -221,9 +228,11 @@ events into percepts and chronicle entries.
 it and never assume a step is one minute, so history mode can take larger
 steps (section 6.5).
 
-**Fields are not entities.** Heat, water, fuel and smoke are dense grids
-updated by stencil operations (diffusion and flow). They start as tuples or
-binaries in plain Elixir and move to Nx when profiling says so.
+**Fields are not entities.** Heat is a field: energy per cell over a sparse
+active set, kept in tuples (`Avwe.Systems.Heat.Field`), with no stencil (see
+the decisions in section 3). Smoke is a list of puffs. Water lives on the
+river entity as a tuple of reaches, and fuel on hearth entities. Nothing has
+needed Nx yet: the whole step costs about 2 ms.
 
 **Reads don't block the tick.** After each tick the region writes a snapshot
 and a spatial index to an ETS table it owns (`:protected`,
@@ -238,9 +247,13 @@ Each tick, in order:
    `(body_id, intent_seq)`.
 2. Validate each one against the body's affordances. Reject with a `blocked`
    result, or start or continue the action.
-3. Run systems in a fixed order: movement → needs → fire → heat → water →
-   weather → autopilot (autopilot queues intents for the next tick, the same
-   way any controller does).
+3. Run systems in a fixed order. Built: daylight → miracles → weather →
+   river → fire → heat → movement → waiting → discovery → smoke. The order
+   is load-bearing: weather before the river so water cools toward the real
+   air; river and fire before heat so the ground sees this step's reach
+   state and burn; smoke last so smell is judged at bodies' end-of-step
+   positions. Needs and autopilot will go after movement (autopilot queues
+   intents for the next tick, the same way any controller does).
 4. Swap the halo cells along borders with neighbouring regions, and send
    entities that crossed a border to the region that now owns them.
 5. Publish the snapshot. Append inputs and significant events to the log.
@@ -269,8 +282,9 @@ What it takes:
 ### 6.5 Time and modes
 
 - **One tick = one world minute.** Live mode runs one tick per real second by
-  default, so a world day lasts 24 real minutes. Systems can run less often:
-  weather once an hour, needs every 10 minutes.
+  default, so a world day lasts 24 real minutes. Every system runs every
+  step today (the whole step is about 2 ms); a system that only acts at
+  certain moments checks `Tick.crossed?/3`.
 - **Live mode** is real time, with controllers attached. The clock never pauses.
 - **History mode** runs as fast as it can, with every body on autopilot and no
   LLMs anywhere. This is how centuries get simulated and how the chronicle is
@@ -322,13 +336,17 @@ the same declaration mechanism, so the conservation checks keep working.
 
 | System | Model | What it explains in the Ember Reach |
 |---|---|---|
-| Heat | Temperature field, diffusion, heat capacity per material, sun by day, radiation by night | The town "sits where the silt used to steam at dusk". The river's water was warm and heated the silt banks. Once the river is gone, the silt cools through ordinary heat physics, with no second miracle |
-| Water | Built. The river as a chain of 100 m reaches, each draining at volume / τ (τ is the time to cross it at 0.6 m/s), losing a little to seepage, and solved exactly for any step length. Warm inflow (40 °C, 10 m³/s) at the spring. Water cools toward a placeholder 18 °C air until the heat system exists | The river running dry: the 812 AR miracle event stops the source and the river drains from upstream down. In the simulation the Dry Bend goes quiet about 30 minutes after the failure, the town after an hour, and the docks after 70 minutes |
-| Fire | Fuel per cell or item, ignition temperature, burning consumes fuel and produces heat and smoke | "When the river still ran, heat was easy to invite. After the River Runs Dry, many chimneys went cold." Households that keep the Hearth Compact only light a fire that is invited, meaning one that would catch easily. As the silt cools, fewer fires are invited. Smoke can be seen and smelled at a distance |
+| Heat | Built. Energy per cell relative to 15 °C on a sparse active set; each step relaxes every cell exactly toward an equilibrium of air exchange, sky radiation, sun (by the step's mean light), river seepage where a reach flows, and hearth or miracle heat; no lateral conduction by design. Materials from the terrain: silt holds heat about 16 times longer than stone. A diurnal air curve from `Avwe.Systems.Weather` | The town "sits where the silt used to steam at dusk". The river's water was warm and heated the silt banks; with the model's 40 °C spring the banks beside a flowing reach steam from late afternoon through the night (12 K above the air). Once the river is gone, the silt cools through ordinary heat physics, with no second miracle: a year later the banks are as cold as dry silt |
+| Water | Built. The river as a chain of 100 m reaches, each draining at volume / τ (τ is the time to cross it at 0.6 m/s), losing a little to seepage. Each reach is solved exactly, and long steps are sub-stepped at 60 s inside the river system so the drain front moves at the right speed at hour and day steps. Warm inflow (40 °C, 10 m³/s) at the spring; water cools toward the real mean air of each step | The river running dry: the 812 AR miracle event stops the source and the river drains from upstream down. In the simulation the Dry Bend goes quiet about 30 minutes after the failure, the town after an hour, and the docks after 70 minutes |
+| Fire | Built. Hearths are entities with fuel in kg and a power; `kindle` lights the one you stand at, `douse` puts it out; burning consumes fuel linearly (exact at any step), 30 % of the heat enters the ground cell, the rest is vented, and 10 g of smoke per kg burned becomes puffs that drift with the wind, decay, and are smelt (faint, clear, thick). The Last Coal is a standing miracle: a hearth that burns without fuel, gives no smoke, and cannot be doused | "When the river still ran, heat was easy to invite. After the River Runs Dry, many chimneys went cold." The Hearth Compact rule (only light a fire that is invited, meaning one that would catch easily; fewer are invited as the silt cools) is behaviour and waits for autopilot. Fires are seen from afar by their smoke by day and their glow by night |
 
-**Conservation invariants as tests:** each tick, the world's water and energy
-budgets balance against declared inputs (rain, inflow, sun, miracles) and
-outputs (evaporation, outflow, radiation). Property tests check this.
+**Conservation invariants as tests:** every step, the river reports inflow,
+outflow and loss; the heat field reports sun, air and sky exchange in and
+out, river seepage, hearths, miracles and newly activated cells; smoke
+reports emitted, decayed, dropped and left. Property tests at random step
+lengths from a minute to a day assert that storage changes by exactly the
+sum of the lines (water to 1e-6 m³, heat to 1e-8 MJ, smoke to 1e-9 g), and
+an integrated property runs every system with a random `kindle`.
 
 ### 6.7 Persistence
 
@@ -359,9 +377,16 @@ Built. All file I/O lives in `Avwe.Store`; the core stays pure.
   A log with no snapshot refuses to start rather than silently beginning
   again over it.
 - **Durability:** a region crash loses nothing (the log process outlives it);
-  a VM crash can lose the tail since the last sync, which happens at every
-  snapshot. Files are enough for now. SQLite or Postgres come later if
-  needed, as does log rotation (the log is never truncated yet).
+  a VM crash loses at most the log's write cache (2 s or 64 KB). The log is
+  synced before a snapshot is renamed into place, so a snapshot on disk
+  always has the log behind it. Snapshots carry a version tag and an
+  unreadable one is skipped for an older one. When the systems list changes
+  at a restart a snapshot is written at once, so the log from that point
+  belongs to the new rules. Files are enough for now: a snapshot of the
+  Ember Reach is about 0.5 MB (mostly the heat field's static part), the log
+  grows about 0.3 MB an hour of live play, and resume streams only the tail
+  after the latest snapshot. SQLite or Postgres come later if needed, as does
+  log rotation (the log is never truncated yet).
 
 ### 6.8 Unobserved regions (deferred)
 
@@ -440,8 +465,11 @@ Most intents take time and can be interrupted:
 **Built so far:** `go` (to a known place), `follow` (the river channel,
 upstream or downstream, from within 80 m of it), `walk` (a distance in a
 compass direction), `wait` (for a duration, or until dawn or dusk), `say`
-(whisper, talk or shout) and `stop`. Plans and `until` conditions on other
-verbs come with M1.
+(whisper, talk or shout), `stop`, `kindle` (light the hearth you stand at, or
+one you name within 20 m) and `douse`. `kindle` and `douse` are instant;
+their refusals are `blocked` (no hearth, too far, no fuel, already lit, not
+lit), and dousing the Last Coal is the first `failure`: you try, and it does
+not go out. Plans and `until` conditions on other verbs come with M1.
 
 **Discovery:** a body that comes within 30 m of a place it doesn't know
 learns the way there and perceives it ("You find The Source."). That's how
@@ -493,6 +521,14 @@ Sensed percept (world → controller, unsolicited):
  "repr": {"name": "smoke", "glyph": "~", "sprite": "fx/smoke"}}
 ```
 
+(The built smell percept carries the level and the wind's direction but not
+yet a `source`; `repr` layers are still to come.)
+
+```json
+{"t": "percept", "kind": "sensed", "modality": "smell", "type": "smoke_smelled",
+ "salience": 0.5, "summary": "You smell woodsmoke, faint, from the north."}
+```
+
 Result percept:
 
 ```json
@@ -512,10 +548,10 @@ Senses are capabilities on the body, each with a range and conditions:
 
 | Sense | Rules |
 |---|---|
-| Sight | 50 m at night, about 500 m at noon. Blocked by terrain and walls (once there is terrain) |
-| Hearing | Range set by volume: whisper about 2 m, talk about 15 m, shout about 100 m |
-| Smell | Carried by wind. Smoke is the main thing to smell |
-| Touch | Temperature of the cell or place, wet or dry underfoot |
+| Sight | 50 m at night, about 500 m at noon. A fire is its own light: seen at least 200 m off whatever the hour, by its smoke by day and its glow when the light is below a tenth. Blocking by terrain and walls is still to come |
+| Hearing | Range set by volume: whisper about 2 m, talk about 15 m, shout about 100 m. The river's stretch beside you falling silent or starting to run is heard within 120 m |
+| Smell | Smoke only, so far: a Gaussian density from the puffs, read at the body's cell as faint, clear or thick, with the wind's direction; standing at a burning hearth is at least clear. Only the body's own nose smells. Wind is constant per region, from config |
+| Touch | Built as bands: the air (cool, warm), the ground underfoot (cold, warm, hot, against the air), steam off the silt, reeds or water while the reach beside you steams, and felt warmth from fires within reach. Wet or dry underfoot is still to come |
 | Self | Needs, fatigue, inventory |
 
 Perception is partial on purpose. Confidence drops with distance and darkness,
@@ -549,7 +585,7 @@ updated in lockstep.
 
 | Client | Milestone | Description |
 |---|---|---|
-| Text (telnet) | M0 | `look`, `go dry bend`, `say ...`, `wait until dusk`. The quickest way to be in the world |
+| Text (telnet) | M0 | `look`, `go dry bend`, `go north 200`, `follow upstream`, `say ...`, `whisper`, `shout`, `wait until dusk`, `light the fire`, `douse the coal`, `stop`, `time`, `help`. The quickest way to be in the world |
 | MCP | M1 | Claude plays a body |
 | Web | M2 | LiveView page with a canvas hook. **Embodied view** shows what your body perceives. **Spectator view** shows everything, with overlays for heat, water and smoke |
 | Arbor | M3 | Agents control villagers through a `world` capability |
@@ -738,7 +774,7 @@ core. A feature isn't done until its end-to-end test exists.
 
 | | Name | Scope | Done when |
 |---|---|---|---|
-| **M0** | The valley breathes | Mix project. Read-only Quire import. One region holding the whole valley. Terrain from pins, including the river's source. Heat, water and fire systems. Places for the lodge and kiln-houses. Mira and a few riverfolk on autopilot. Day and night. Telnet client with `look`, `go`, `say`, `wait`. Log and snapshots (built: 6.7) | Two telnet sessions see the same events (built). Replaying the log reproduces the same state hash (built). Conservation property tests pass (water built; heat and smoke in progress) |
+| **M0** | The valley breathes | Mix project. Read-only Quire import. One region holding the whole valley. Terrain from pins, including the river's source (built). Heat, water and fire systems (built, with weather and smoke). Places for the lodge and kiln-houses (the lodge and town are places; kiln-houses as interiors still to come). Mira and a few riverfolk on autopilot (to come). Day and night (built). Telnet client (built). Log and snapshots (built: 6.7) | Two telnet sessions see the same events (built). Replaying the log reproduces the same state hash (built). Conservation property tests pass for water, heat and smoke (built) |
 | **M1** | Claude walks the banks | MCP adapter. Leases. Intents that take time, interrupts and salience. Notebook item | Claude plays Mira across two sessions and finds the notes from the first |
 | **M2** | Many lenses | Phoenix and a LiveView canvas. Representation layers. Embodied and spectator views with field overlays | A telnet player, a web player and Claude are in the world at once and each perceives the others |
 | **M3** | Agents move in | Arbor `world` capability over Channels. `world-player` trust profile. Percept mapping. Earshot engagements. Taint | Two Arbor agents live in the Reach for a world week unattended. Conversation engagements are scoped correctly. An injection attempt through in-world speech stays contained |
@@ -764,8 +800,9 @@ core. A feature isn't done until its end-to-end test exists.
 
 1. **The source's name.** It is "The Source" for now, a placeholder. Should
    it keep that name, get one from canon, or be named by whoever finds it?
-2. **Saving terrain.** Terrain is regenerated from the seed each time. When
-   should it be saved so it can be reviewed and edited by hand?
+2. **Editing terrain.** Terrain is inside every snapshot, so a world that has
+   run keeps its terrain; but there is no way yet to review or hand-edit the
+   generated land before a world starts. When is that worth building?
 3. **Time scale.** Is one tick per world minute at 1 Hz right for both play and
    LLM pacing? What step size does history mode use (section 6.5)?
 4. **Resolution.** Are 10 m outdoor cells plus places for interiors enough?
