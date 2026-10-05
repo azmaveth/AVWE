@@ -232,6 +232,10 @@ defmodule Avwe.Region do
     |> Enum.sort()
   end
 
+  @doc "The intents waiting for the next step, in the order they were submitted."
+  @spec pending(t()) :: [Intent.t()]
+  def pending(%__MODULE__{inbox: inbox}), do: Enum.reverse(inbox)
+
   @doc "Takes the events emitted since the last drain, oldest first."
   @spec drain_events(t()) :: {[Event.t()], t()}
   def drain_events(%__MODULE__{outbox: outbox} = region) do

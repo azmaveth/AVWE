@@ -3,8 +3,10 @@ defmodule Avwe.World do
   Supervises one running world: a `Avwe.RegionServer` per region, then the
   `Avwe.Clock` that steps them.
 
-  Until persistence lands, a restarted region starts again from the state it
-  was given at startup.
+  With a `:store` dir each region keeps its log and snapshots under it, so a
+  restarted region (after a crash, or when the world is started again) resumes
+  where it was. Without one, a restarted region starts again from the state
+  it was given at startup.
   """
 
   use Supervisor
@@ -13,8 +15,10 @@ defmodule Avwe.World do
 
   @doc """
   Options: `:id` (the world's id), `:regions` (a list of `Avwe.Region` structs),
-  `:clock` (`:manual` or `{:live, interval_ms}`) and `:info` (a map with the
-  world's `:name` and `:tagline`, shown to people choosing a world).
+  `:clock` (`:manual` or `{:live, interval_ms}`), `:info` (a map with the
+  world's `:name` and `:tagline`, shown to people choosing a world), `:store`
+  (a dir for the regions' logs and snapshots, or `nil` for no persistence)
+  and `:snapshot_every` (steps between snapshots). See `Avwe.RegionServer`.
   """
   def start_link(opts) do
     id = Keyword.fetch!(opts, :id)
@@ -53,7 +57,10 @@ defmodule Avwe.World do
     id = Keyword.fetch!(opts, :id)
     regions = Keyword.fetch!(opts, :regions)
 
-    region_children = Enum.map(regions, &{RegionServer, world: id, region: &1})
+    persistence = Keyword.take(opts, [:store, :snapshot_every])
+
+    region_children =
+      Enum.map(regions, &{RegionServer, [world: id, region: &1] ++ persistence})
 
     clock =
       {Clock,

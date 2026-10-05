@@ -44,6 +44,11 @@ defmodule Avwe do
     * `:systems` - systems to run, in order. Default: `#{inspect(@default_systems)}`.
     * `:terrain` and `:miracles` - AVWE's own settings for the world. See
       `Avwe.Worldgen`.
+    * `:data_dir` - where worlds keep their logs and snapshots; this world's
+      go under `<data_dir>/<id>`. Default: `config :avwe, :data_dir`. `nil`
+      means no persistence. A world whose state is already there resumes
+      from it and ignores `:start`.
+    * `:snapshot_every` - steps between snapshots. Default: 1000.
   """
   @spec start_world(atom(), keyword()) :: DynamicSupervisor.on_start_child() | {:error, term()}
   def start_world(id, opts \\ []) do
@@ -67,10 +72,15 @@ defmodule Avwe do
          id: id,
          regions: [region],
          clock: Keyword.get(opts, :clock, :manual),
-         info: %{name: quire_world.name, tagline: quire_world.tagline}}
+         info: %{name: quire_world.name, tagline: quire_world.tagline},
+         store: store_dir(id, Keyword.get(opts, :data_dir, Application.get_env(:avwe, :data_dir))),
+         snapshot_every: Keyword.get(opts, :snapshot_every, 1_000)}
       )
     end
   end
+
+  defp store_dir(_id, nil), do: nil
+  defp store_dir(id, data_dir), do: data_dir |> Path.expand() |> Path.join(to_string(id))
 
   @doc "Stops a running world."
   @spec stop_world(atom()) :: :ok | {:error, :not_found}
