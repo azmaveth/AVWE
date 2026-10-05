@@ -204,11 +204,9 @@ defmodule Avwe.RegionServer do
   # A log with no snapshot to replay it onto can't be resumed and must not be
   # started over: the world fails to start instead.
   defp start_fresh(store, region, keep) do
-    case Store.records(store) do
-      {:ok, []} -> with :ok <- Store.snapshot(store, region, keep: keep), do: {:ok, region}
-      {:ok, _records} -> {:error, :log_without_snapshot}
-      {:error, _reason} = error -> error
-    end
+    if Store.empty?(store),
+      do: with(:ok <- Store.snapshot(store, region, keep: keep), do: {:ok, region}),
+      else: {:error, :log_without_snapshot}
   end
 
   # Configuration beats the snapshot for code; the snapshot wins for state.

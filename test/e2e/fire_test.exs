@@ -168,7 +168,7 @@ defmodule Avwe.E2E.FireTest do
   end
 
   test "hearths can be named: the coal does not go out, the lodge hearth lights, and a stranger is refused",
-       %{mira: mira} do
+       %{mira: mira, port: port} do
     send_line(mira, "go lodge")
     sync(mira)
     Avwe.step(@world, 8)
@@ -182,6 +182,10 @@ defmodule Avwe.E2E.FireTest do
     # Refused at once, by the connection, not by the world.
     send_line(mira, "kindle the kiln-house hearth")
     expect(mira, "There is no hearth called \"kiln-house hearth\" here.")
+
+    watcher = join(port, "watch", "You are watching.")
+    send_line(watcher, "douse the coal")
+    expect(watcher, "You're only watching.")
 
     act(mira, "light the lodge hearth")
     expect(mira, "You light the lodge hearth.")

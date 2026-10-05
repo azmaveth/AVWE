@@ -70,6 +70,10 @@ defmodule Avwe.Telnet.CommandTest do
       assert Command.parse("put out the fire at the lodge hearth") == {:douse, "lodge hearth"}
       # A name that matches no hearth is the connection's to refuse.
       assert Command.parse("light a candle") == {:kindle, "a candle"}
+      # Only whole words are stripped, and a bare article is no name.
+      assert Command.parse("douse the fireplace") == {:douse, "fireplace"}
+      assert Command.parse("douse the") == {:douse, nil}
+      assert Command.parse("put out the fire in the lodge") == {:douse, "lodge"}
       assert Command.parse("put on a hat") == {:unknown, "put on a hat"}
       assert Command.parse("put the fire out") == {:unknown, "put the fire out"}
     end

@@ -205,6 +205,14 @@ defmodule Avwe.PerceptionTest do
       assert day.light > 0.3
       refute day.channel.steaming
 
+      # And when the banks do steam before sunset, the look says so in daylight.
+      evening =
+        Perception.look(ember_snapshot({812, day: 199, hour: 17, minute: 30}), "mira-vale")
+
+      assert evening.light > 0.3
+      assert evening.channel.steaming
+      assert Prose.look(evening) =~ "warm, with steam lifting off it."
+
       steams = Prose.look(put_in(day.channel.steaming, true))
       assert steams =~ "The river runs 60 m to the east, warm, with steam lifting off it."
 

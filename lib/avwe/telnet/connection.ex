@@ -203,11 +203,9 @@ defmodule Avwe.Telnet.Connection do
     {:ok, look} = Session.look(state.session)
     hearths = Enum.map(look[:hearths] || [], &{&1.id, &1.name})
 
-    case Command.resolve(query, hearths) do
-      {:ok, hearth} -> act(state, verb, target: hearth)
-      {:ambiguous, names} -> write(state, "Which do you mean: #{Enum.join(names, ", ")}?")
-      :none -> write(state, "There is no hearth called \"#{query}\" here.")
-    end
+    if look.spectator,
+      do: write(state, "You're only watching."),
+      else: name_hearth(state, verb, query, hearths)
 
     state
   end
@@ -237,6 +235,14 @@ defmodule Avwe.Telnet.Connection do
   defp run(state, {:unknown, line}) do
     write(state, "I don't understand \"#{line}\". Type help for a list of commands.")
     state
+  end
+
+  defp name_hearth(state, verb, query, hearths) do
+    case Command.resolve(query, hearths) do
+      {:ok, hearth} -> act(state, verb, target: hearth)
+      {:ambiguous, names} -> write(state, "Which do you mean: #{Enum.join(names, ", ")}?")
+      :none -> write(state, "There is no hearth called \"#{query}\" here.")
+    end
   end
 
   defp act(state, verb, opts) do

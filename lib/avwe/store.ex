@@ -134,6 +134,10 @@ defmodule Avwe.Store do
     end
   end
 
+  @doc "True when the log has no records at all. Reads one chunk, never the whole log."
+  @spec empty?(t()) :: boolean()
+  def empty?(%__MODULE__{log: log}), do: :disk_log.chunk(log, :start) == :eof
+
   @doc "Closes the calling process's handle on the store's log."
   @spec close(t()) :: :ok | {:error, term()}
   def close(%__MODULE__{log: log}), do: :disk_log.close(log)
@@ -376,6 +380,7 @@ defmodule Avwe.Store do
   defp decode_snapshot(binary, path) do
     case :erlang.binary_to_term(binary) do
       {@snapshot_tag, @snapshot_version, %Region{} = region} -> {:ok, region}
+      {@snapshot_tag, @snapshot_version, _not_a_region} -> {:error, {:corrupt_snapshot, path}}
       other -> {:error, {:unknown_snapshot, path, snapshot_tag(other)}}
     end
   rescue

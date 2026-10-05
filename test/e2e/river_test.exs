@@ -112,8 +112,8 @@ defmodule Avwe.E2E.RiverTest do
       send_line(mira, "look")
       expect(mira, "812 AR, day 200, 07:40. It is daylight.")
       expect(mira, "The river runs 30 m to the west, warm. Upstream")
-      expect(mira, "The ground is warm underfoot.")
-      refute_line(mira, "Steam lifts off the silt.")
+      # The whole line: the steam clause would be appended to it.
+      expect(mira, ~r/^(The air is (cool|warm)\. )?The ground is warm underfoot\.$/)
     end
 
     test "a watcher sees the banks steam place by place down the river, and clear in the morning",

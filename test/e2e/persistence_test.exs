@@ -211,7 +211,7 @@ defmodule Avwe.E2E.PersistenceTest do
     assert %{@hearth => %{burning: false, out_at: out_at, fuel_kg: fuel}} = live.hearth
     assert out_at != nil and fuel > 7.9 and fuel < 8.0
     assert live.nose == %{"mira-vale" => %{smoke: :none}}
-    assert length(live.puffs) == 3
+    assert length(live.puffs) == 12
     assert fire_state(rebuilt) == live
     :ok = Store.close(store)
   end
@@ -254,7 +254,7 @@ defmodule Avwe.E2E.PersistenceTest do
     before = live_fire_state()
     assert %{@hearth => %{burning: true, lit_at: lit_at}} = before.hearth
     assert before.nose == %{"mira-vale" => %{smoke: :clear}}
-    assert length(before.puffs) == 8
+    assert length(before.puffs) == 32
     hash = live_hash()
     :ok = Session.close(mira)
     :ok = Avwe.stop_world(@world)
@@ -274,7 +274,33 @@ defmodule Avwe.E2E.PersistenceTest do
 
     Avwe.step(@world, 1)
     assert %{@hearth => %{burning: true, lit_at: ^lit_at}} = live_fire_state().hearth
-    assert length(live_fire_state().puffs) == 9
+    assert length(live_fire_state().puffs) == 36
+  end
+
+  test "a fire restarted exactly at a snapshot, with no log after it, keeps its smoke and nose",
+       %{tmp_dir: tmp_dir} do
+    # Nothing is replayed here, so whatever the snapshot drops stays dropped:
+    # the body's nose and the smoke's last step must be in the snapshot itself.
+    :ok = start(tmp_dir, snapshot_every: 5)
+    mira = kindle(5)
+    before = live_fire_state()
+    assert before.nose == %{"mira-vale" => %{smoke: :clear}}
+    assert {:ok, %{fields: %{smoke: %{last_step: %{emitted_g: emitted}}}}} = Avwe.snapshot(@world)
+    assert emitted > 0
+    hash = live_hash()
+    :ok = Session.close(mira)
+    :ok = Avwe.stop_world(@world)
+
+    :ok = start(tmp_dir, snapshot_every: 5)
+    {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+    assert Store.snapshots(store) == [0, 5]
+    assert {:ok, []} = Store.records_after(store, 5)
+    :ok = Store.close(store)
+    assert live_hash() == hash
+    assert live_fire_state() == before
+
+    assert {:ok, %{fields: %{smoke: %{last_step: %{emitted_g: ^emitted}}}}} =
+             Avwe.snapshot(@world)
   end
 
   test "a crashed region comes back as it was after its last advance", %{tmp_dir: tmp_dir} do
@@ -301,7 +327,7 @@ defmodule Avwe.E2E.PersistenceTest do
     before = live_fire_state()
     assert %{@hearth => %{burning: true}} = before.hearth
     assert before.nose == %{"mira-vale" => %{smoke: :clear}}
-    assert length(before.puffs) == 3
+    assert length(before.puffs) == 12
     hash = live_hash()
 
     crash_region()

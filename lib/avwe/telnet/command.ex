@@ -181,17 +181,16 @@ defmodule Avwe.Telnet.Command do
   # The hearth a player named after kindle, light, douse or put out, or nil
   # for the nearest: "the fire", "the hearth" and "the fire in the ..." are
   # ways of saying it, not names.
+  # "the coal", "the fire in the lodge hearth", "fire" (meaning the nearest)...
   defp hearth_name(rest) do
     name =
       rest
       |> String.downcase()
-      |> strip_prefix("the fire in ")
-      |> strip_prefix("the fire at ")
-      |> strip_prefix("the fire")
-      |> strip_prefix("the ")
+      |> String.replace(~r/^(the\s+)?fire(\s+(in|at))?\b/, "")
+      |> String.replace(~r/^\s*the\b/, "")
       |> String.trim()
 
-    if name in ["", "fire", "hearth"], do: nil, else: name
+    if name in ["", "the", "fire", "hearth"], do: nil, else: name
   end
 
   defp strip_prefix(text, prefix) do
