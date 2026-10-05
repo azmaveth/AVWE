@@ -26,9 +26,10 @@ defmodule Avwe.Systems.Fire do
   ## Standing miracles
 
   A hearth that also carries `miracle: %{kind: :standing, heat_w: w, breaks:
-  [...]}` burns without fuel: it never goes out, burns nothing, gives `w · dt`
-  joules and, unless its miracle says otherwise, no smoke. When `:dousing` is
-  among the things it breaks, `:douse` fails with `:unquenchable`. Nothing here
+  [...]}` burns without fuel: it never goes out, burns nothing and gives
+  `w · dt` joules. Standing miracles never smoke: nothing burns, so `smoke_g`
+  is always 0.0 and the smoke system never sees them. When `:dousing` is among
+  the things it breaks, `:douse` fails with `:unquenchable`. Nothing here
   names the Last Coal; it is just configured this way.
 
   ## Events

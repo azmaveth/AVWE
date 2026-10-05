@@ -46,6 +46,19 @@ defmodule Avwe.Systems.Heat do
   demand, starting from its material's background, which is exactly what the
   dense field would hold there.
 
+  ## Settling at prepare
+
+  The field starts at the region's time as if it had always been there: every
+  cell at its daily-mean equilibrium with the river flowing, then two days of
+  hourly steps to set the diurnal phase and, if the spring has stopped, as
+  long as it has been stopped (up to two weeks) under the river as it is now.
+  A cell's step depends only on its material, its area, its river coupling
+  (which reach, how strongly), the watts it gets from standing miracles and
+  its energy, and alike cells start the settle at the same equilibrium, so
+  the replay steps one representative of each such class and copies its
+  energy to the members (`settle_classes/1`): about 320 classes stand for
+  3 500 cells, and the result is bit for bit what stepping every cell gives.
+
   ## Steam
 
   A reach's banks steam when the reach flows and its silt cells are, on
@@ -57,7 +70,7 @@ defmodule Avwe.Systems.Heat do
   @behaviour Avwe.System
 
   alias Avwe.{Event, Region, Space, Terrain, Tick}
-  alias Avwe.Systems.{Daylight, River, Weather}
+  alias Avwe.Systems.{Daylight, Fire, River, Weather}
 
   defmodule Field do
     @moduledoc """
@@ -158,7 +171,7 @@ defmodule Avwe.Systems.Heat do
   @materials %{
     channel_bed: %{cap_j_m2k: 1.0e6, absorb: 0.30, k_riv_w_m2k: 100.0},
     reeds: %{cap_j_m2k: 1.0e6, absorb: 0.35, k_riv_w_m2k: 40.0},
-    silt: %{cap_j_m2k: 2.5e6, absorb: 0.35, k_riv_w_m2k: :by_distance},
+    silt: %{cap_j_m2k: 2.5e6, absorb: 0.35, k_riv_w_m2k: 40.0},
     clay: %{cap_j_m2k: 3.0e5, absorb: 0.55, k_riv_w_m2k: 0.0},
     grass: %{cap_j_m2k: 2.0e5, absorb: 0.45, k_riv_w_m2k: 0.0},
     stone: %{cap_j_m2k: 1.5e5, absorb: 0.60, k_riv_w_m2k: 0.0}
@@ -166,6 +179,7 @@ defmodule Avwe.Systems.Heat do
 
   @type forcing :: %{air_c: float(), sky_c: float(), light: float()}
   @type sources :: %{non_neg_integer() => {float(), float()}}
+  @type sources_w :: %{non_neg_integer() => float()}
 
   # Lifecycle
 
@@ -301,11 +315,8 @@ defmodule Avwe.Systems.Heat do
   snapshot has no heat field.
   """
   @spec at(map(), Space.cell()) :: map() | nil
-  def at(
-        %{fields: %{heat: %Field{} = field}, terrain: %Terrain{} = terrain, env: env} = view,
-        cell
-      ) do
-    air = env.air_c
+  def at(%{fields: %{heat: %Field{} = field}, terrain: %Terrain{} = terrain} = view, cell) do
+    air = air_c(view)
     ground = ground_c(field, terrain, cell)
     above = ground - air
 
@@ -361,7 +372,12 @@ defmodule Avwe.Systems.Heat do
     |> Kernel./(1.0e6)
   end
 
-  @doc "The materials: heat capacity per m², absorptance and river coupling per m²."
+  @doc """
+  The materials: heat capacity per m², absorptance and river coupling per m²
+  when the cell's reach flows. Silt's `k_riv_w_m2k` is the coupling at the
+  reed line; it falls off with distance from the channel through
+  `k_riv_w_m2k/2`.
+  """
   @spec materials() :: %{Terrain.ground() => map()}
   def materials, do: @materials
 
@@ -374,7 +390,7 @@ defmodule Avwe.Systems.Heat do
   the channel: full for the bed and the reeds, falling off through the silt.
   """
   @spec k_riv_w_m2k(Terrain.ground(), float()) :: float()
-  def k_riv_w_m2k(:silt, d), do: 40.0 * :math.exp(-(d - 2) / 4)
+  def k_riv_w_m2k(:silt, d), do: @materials.silt.k_riv_w_m2k * :math.exp(-(d - 2) / 4)
 
   def k_riv_w_m2k(ground, _d) when ground in [:channel_bed, :reeds],
     do: @materials[ground].k_riv_w_m2k
@@ -461,6 +477,38 @@ defmodule Avwe.Systems.Heat do
     }
   end
 
+  @doc """
+  Puts every cell at its equilibrium under a constant `forcing`, `sources_w`
+  watts of standing heat per cell index and the given reaches: where
+  `prepare/1` starts the settle from. Replaces the energies.
+  """
+  @spec equilibrate(Field.t(), forcing(), sources_w(), tuple()) :: Field.t()
+  def equilibrate(%Field{} = field, forcing, sources_w, reaches) do
+    energies =
+      for {static, i} <- Enum.with_index(Tuple.to_list(field.static)) do
+        %{area_m2: a, cap_j_k: cap, absorb_m2: absorb} = static
+        {k_riv, t_w} = coupling(static.river, reaches, a)
+        q_w = @s_peak * absorb * forcing.light + Map.get(sources_w, i, 0.0)
+        cap * (equilibrium(a, @k_air + @k_rad + k_riv, k_riv, t_w, q_w, forcing) - field.t_ref_c)
+      end
+
+    %{field | energy: List.to_tuple(energies)}
+  end
+
+  @doc """
+  The classes of cells `prepare/1` settles together, each a list of cell
+  indices in index order, ordered by first member: cells of one material and
+  area, coupled to the same reach with the same strength and warmed by the
+  same standing watts see identical forcing from the same start, so one
+  representative's energy is every member's.
+  """
+  @spec settle_classes(Region.t()) :: [[non_neg_integer()]]
+  def settle_classes(%Region{fields: %{heat: %Field{} = field}} = region) do
+    field
+    |> classes(standing_w(region, field))
+    |> Enum.map(fn {_static, _watts, _energy, members} -> members end)
+  end
+
   # Settling at prepare
 
   # The field at the region's starting time: every cell at its daily-mean
@@ -521,37 +569,15 @@ defmodule Avwe.Systems.Heat do
     end)
   end
 
-  defp equilibrate(field, forcing, standing_w, reaches) do
-    energies =
-      for {static, i} <- Enum.with_index(Tuple.to_list(field.static)) do
-        %{area_m2: a, cap_j_k: cap, absorb_m2: absorb} = static
-        {k_riv, t_w} = coupling(static.river, reaches, a)
-        q_w = @s_peak * absorb * forcing.light + Map.get(standing_w, i, 0.0)
-        cap * (equilibrium(a, @k_air + @k_rad + k_riv, k_riv, t_w, q_w, forcing) - field.t_ref_c)
-      end
-
-    %{field | energy: List.to_tuple(energies)}
-  end
-
-  # Replays the field from `from` to `to` in hourly steps and a remainder.
-  # Cells that share a material, an area, a river coupling and a source see
-  # identical inputs and hold identical energy throughout, so each such class
-  # is stepped once and its members copy the result: bit for bit what stepping
-  # every cell would give, at a fraction of the cost.
+  # Replays the field from `from` to `to` in hourly steps and a remainder,
+  # one representative per class (`classes/2`), then copies each class's
+  # energy to its members: bit for bit what stepping every cell would give,
+  # at a tenth of the cost.
   defp replay(field, from, to, _standing_w, _reaches) when from >= to, do: field
 
   defp replay(field, from, to, standing_w, reaches) do
-    classes =
-      field.static
-      |> Tuple.to_list()
-      |> Enum.with_index()
-      |> Enum.group_by(fn {static, i} -> {static, Map.get(standing_w, i, 0.0)} end)
-      |> Enum.map(fn {{static, watts}, [{_static, first} | _] = members} ->
-        {static, watts, elem(field.energy, first), Enum.map(members, &elem(&1, 1))}
-      end)
-
     stepped =
-      Enum.reduce(hourly_steps(from, to), classes, fn {t0, dt}, classes ->
+      Enum.reduce(hourly_steps(from, to), classes(field, standing_w), fn {t0, dt}, classes ->
         forcing = forcing(t0, t0 + dt)
 
         Enum.map(classes, fn {static, watts, energy, members} ->
@@ -569,6 +595,24 @@ defmodule Avwe.Systems.Heat do
 
     energies = Enum.map(0..(tuple_size(field.static) - 1)//1, &Map.fetch!(by_index, &1))
     %{field | energy: List.to_tuple(energies)}
+  end
+
+  # The cells grouped by everything `relax/7` reads apart from the energy:
+  # material, area, river coupling and standing watts, and nothing that names
+  # the cell. Each class is `{static, watts, energy, members}` with the first
+  # member's static and energy; alike cells left `equilibrate/4` with the same
+  # energy, so the first member's is every member's. Ordered by first member.
+  defp classes(field, standing_w) do
+    field.static
+    |> Tuple.to_list()
+    |> Enum.with_index()
+    |> Enum.group_by(fn {static, i} ->
+      {static.material, static.area_m2, static.river, Map.get(standing_w, i, 0.0)}
+    end)
+    |> Enum.map(fn {{_material, _area, _river, watts}, [{static, first} | _] = members} ->
+      {static, watts, elem(field.energy, first), Enum.map(members, &elem(&1, 1))}
+    end)
+    |> Enum.sort_by(fn {_static, _watts, _energy, [first | _]} -> first end)
   end
 
   defp hourly_steps(from, to) do
@@ -705,13 +749,16 @@ defmodule Avwe.Systems.Heat do
   end
 
   # Joules entering each cell this step from hearths and from standing
-  # miracles, read from the fire system's `last_step` on each hearth.
+  # miracles, read from the fire system's `last_step` on each hearth. A hearth
+  # the fire system has not stepped yet (or one built by hand without a
+  # `last_step`) has given nothing.
   defp sources_j(region, field) do
     region
     |> Region.with_components([:hearth, :position])
     |> Enum.reduce(%{}, fn id, acc ->
       i = Map.fetch!(field.index, Region.get(region, id, :position))
-      %{ground_j: joules, miracle?: miracle?} = Region.get(region, id, :hearth).last_step
+      hearth = Region.get(region, id, :hearth)
+      %{ground_j: joules, miracle?: miracle?} = Map.get(hearth, :last_step, Fire.zero_step())
       added = if miracle?, do: {0.0, joules}, else: {joules, 0.0}
       Map.update(acc, i, added, fn {h, m} -> {h + elem(added, 0), m + elem(added, 1)} end)
     end)
@@ -757,6 +804,11 @@ defmodule Avwe.Systems.Heat do
   end
 
   # Shared lookups
+
+  # The air a view carries, or the air at its time when the weather system
+  # has not published one.
+  defp air_c(%{env: %{air_c: air}}), do: air
+  defp air_c(%{time: time}), do: Weather.air_c(time)
 
   defp reaches(%{components: components}) do
     case get_in(components, [:river, River.id()]) do

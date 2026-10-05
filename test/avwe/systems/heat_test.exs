@@ -99,7 +99,6 @@ defmodule Avwe.Systems.HeatTest do
         kind: :standing,
         breaks: [:fuel, :dousing],
         heat_w: @coal_w,
-        smoke: false,
         cause: :unknown,
         note: "Heat without fuel, declared."
       }
@@ -457,6 +456,10 @@ defmodule Avwe.Systems.HeatTest do
 
     test "the table and the seepage coupling" do
       assert Heat.materials()[:silt].cap_j_m2k == 2.5e6
+      # Every column is a number; silt's coupling is the base the distance law scales.
+      assert Enum.all?(Heat.materials(), fn {_ground, m} -> is_float(m.k_riv_w_m2k) end)
+      assert Heat.materials()[:silt].k_riv_w_m2k == 40.0
+      assert Heat.k_riv_w_m2k(:silt, 2.0) == 40.0
       assert_in_delta Heat.k_riv_w_m2k(:silt, 3.0), 31.2, 0.1
       assert_in_delta Heat.k_riv_w_m2k(:silt, 6.0), 14.7, 0.1
       assert Heat.k_riv_w_m2k(:channel_bed, 0.0) == 100.0
@@ -541,6 +544,30 @@ defmodule Avwe.Systems.HeatTest do
 
       assert Enum.map(fades, & &1.time) == Enum.sort(Enum.map(fades, & &1.time))
       assert Enum.all?(Tuple.to_list(field(stepped).steaming), &(&1 == false))
+    end
+
+    test "the banks do not steam beside a silent reach, however warm they still are" do
+      # 812/200 18:30: the source failed at 15:00 and the town reach has run
+      # silent, but its banks are still well over 8 K above the air.
+      silent = region({812, day: 200, hour: 18, minute: 30})
+      town = reach_near(silent, :town)
+      river = Region.get(silent, River.id(), :river)
+      assert elem(river.reaches, town).silent
+
+      cell = elem(field(silent).static, bank_cell(silent, :town, 3.0)).cell
+      assert %{steam?: false, ground_c: ground, air_c: air} = Heat.at(silent, cell)
+      assert ground - air > 8
+      refute Heat.steaming?(field(silent), town)
+
+      # The same field, air and cell, with the reaches as they ran the evening
+      # before: only the flow clause stands between the banks and steam.
+      flowing = Region.get(region({812, day: 199, hour: 18, minute: 30}), River.id(), :river)
+      refute elem(flowing.reaches, town).silent
+
+      with_flow =
+        Region.put_component(silent, River.id(), :river, %{river | reaches: flowing.reaches})
+
+      assert %{steam?: true, ground_c: ^ground, air_c: ^air} = Heat.at(with_flow, cell)
     end
 
     test "a year later the banks are cold" do
@@ -687,6 +714,131 @@ defmodule Avwe.Systems.HeatTest do
 
       assert Heat.ground_c(field(warmed), warmed.terrain, lodge) >
                Heat.ground_c(field(plain), plain.terrain, lodge)
+    end
+  end
+
+  describe "settling" do
+    # Prepare's schedule (§4.3 of the spec): hourly steps and a remainder from
+    # `from` to `to`, each under `reaches`.
+    defp hourly(from, to, reaches) do
+      Stream.unfold(from, fn
+        t when t >= to -> nil
+        t -> {{t, min(@hour, to - t), reaches}, t + min(@hour, to - t)}
+      end)
+      |> Enum.to_list()
+    end
+
+    defp forcing(t0, t1) do
+      %{
+        air_c: Weather.mean_air_c(t0, t1),
+        sky_c: Weather.mean_sky_c(t0, t1),
+        light: Daylight.mean_light(t0, t1)
+      }
+    end
+
+    # Watts of standing heat per cell index, from the miracles the view lists.
+    defp standing_w(region) do
+      for %{kind: :miracle, position: cell, power_w: w} <- Heat.sources(Region.view(region)),
+          reduce: %{} do
+        acc -> Map.update(acc, field(region).index[cell], @f_ground * w, &(&1 + @f_ground * w))
+      end
+    end
+
+    # What prepare must give: every cell stepped on its own with the public
+    # step_field over prepare's schedule, from the equilibrium prepare starts
+    # at. Two days under the river as it ran, then as long as the spring has
+    # been stopped (up to two weeks) under the river as it is now.
+    defp settled_cell_by_cell(region) do
+      river = Region.get(region, River.id(), :river)
+      spring = Region.get(region, river.source, :spring)
+      daily = Weather.daily_mean_air_c()
+      era = River.steady_reaches(region.terrain, spring.natural_m3_s, spring.temp_c, daily)
+
+      stopped =
+        if spring.flow_m3_s == 0, do: min(region.time - spring.changed_at, 14 * @day), else: 0
+
+      stop = region.time - stopped
+      watts = standing_w(region)
+
+      mean = %{
+        air_c: daily,
+        sky_c: daily - Weather.sky_drop(),
+        light: Daylight.mean_light(0, @day)
+      }
+
+      (hourly(stop - 2 * @day, stop, era) ++ hourly(stop, region.time, river.reaches))
+      |> Enum.reduce(Heat.equilibrate(field(region), mean, watts, era), fn {t0, dt, reaches}, f ->
+        sources = Map.new(watts, fn {i, w} -> {i, {0.0, w * dt}} end)
+        {f, _budget} = Heat.step_field(f, forcing(t0, t0 + dt), sources, reaches, dt)
+        f
+      end)
+    end
+
+    test "steps one cell per class and lands exactly where stepping every cell does" do
+      # The river stopped two weeks and more ago, and the river still running.
+      for at <- [{813, day: 220, hour: 4}, {812, day: 199, hour: 19, minute: 30}] do
+        region = region(at)
+        field = field(region)
+        n = tuple_size(field.static)
+        {us, again} = :timer.tc(fn -> Heat.prepare(region) end)
+        assert field(again).energy == field.energy
+
+        classes = Heat.settle_classes(region)
+        assert classes |> Enum.concat() |> Enum.sort() == Enum.to_list(0..(n - 1))
+        assert Enum.map(classes, &hd/1) == Enum.sort(Enum.map(classes, &hd/1))
+
+        for members <- classes do
+          alike =
+            Enum.map(members, &Map.take(elem(field.static, &1), [:material, :area_m2, :river]))
+
+          assert members == Enum.sort(members)
+          assert length(Enum.uniq(alike)) == 1
+        end
+
+        assert settled_cell_by_cell(region).energy == field.energy
+
+        IO.puts(
+          "\nheat: prepare #{Float.round(us / 1_000, 1)} ms, #{length(classes)} classes for #{n} cells"
+        )
+
+        # Grouping by anything that names the cell would give n classes.
+        assert length(classes) < div(n, 5)
+      end
+    end
+  end
+
+  describe "robustness" do
+    test "a hearth without a last_step has given nothing" do
+      start = region({812, day: 199, hour: 4})
+      town = Ember.places().town
+
+      bare =
+        Region.put_entity(start, "bare", %{
+          position: town,
+          repr: %{name: "a bare hearth", description: nil},
+          hearth: %{
+            fuel_kg: 12.0,
+            burning: true,
+            lit_at: start.time,
+            out_at: nil,
+            power_w: @hearth_w,
+            low_kg: 1.0
+          }
+        })
+
+      stepped = Region.advance(bare, 1)
+      assert budget(stepped).hearths_mj == 0.0
+      assert budget(stepped).miracles_mj == 0.0
+      assert field(stepped).energy == field(Region.advance(start, 1)).energy
+    end
+
+    test "at/2 falls back to the air at the view's time when none is published" do
+      evening = region({812, day: 199, hour: 17})
+      town = Ember.places().town
+      bare = %{evening | env: Map.delete(evening.env, :air_c)}
+
+      assert Heat.at(bare, town) == Heat.at(evening, town)
+      assert Heat.at(bare, town).air_c == Weather.air_c(evening.time)
     end
   end
 

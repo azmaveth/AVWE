@@ -124,6 +124,24 @@ defmodule Avwe.Systems.SmokeTest do
       assert_in_delta hx, elem(Ember.places().lodge, 0) + 0.5, 1.0e-9
     end
 
+    test "a fresh puff blown off the map within the step has left, not stayed", %{region: region} do
+      # An hour at 2 m/s from the north puts the lodge's plume 170 cells
+      # south, past the map's edge: nothing is stored, and what survived the
+      # hour is booked as having left.
+      {stepped, _events} = region |> wind("north", 2.0) |> light(@lodge) |> run(1, 3_600)
+      b = smoke(stepped).last_step
+
+      assert smoke(stepped).puffs == []
+      assert b.emitted_g > 0 and b.survived_g > 0
+      assert b.left_g == b.survived_g
+      assert b.dropped_g == 0.0
+      assert b.storage_after_g == 0.0
+
+      assert_in_delta b.storage_after_g - b.storage_before_g,
+                      b.emitted_g - b.decayed_g - b.dropped_g - b.left_g,
+                      1.0e-9
+    end
+
     test "puffs are sorted and bounded", %{region: region} do
       {region, _events} = region |> light(@lodge) |> run(300)
       puffs = smoke(region).puffs

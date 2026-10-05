@@ -11,15 +11,17 @@ defmodule Avwe.Worldgen do
       spring, and the river becomes an entity whose reaches the river system
       simulates.
     * `:hearths` - fires people can light (`Avwe.Systems.Fire`), each a
-      keyword list with `:id`, `:at` (a place id), `:name`, `:fuel_kg` and
-      `:power_w`.
+      keyword list with `:id`, `:at` (a place id), `:name`, `:fuel_kg` (at
+      least zero: an empty hearth is allowed) and `:power_w` (above zero: the
+      fire system divides by it). A bad value raises `ArgumentError` here,
+      at build time, rather than in a step.
     * `:miracles` - miracle events, each a keyword list with `:id`, `:at`
       (a world time, or `{year, opts}`), `:target`, `:component`, `:set`,
       `:cause` and `:note`; or standing miracles (`kind: :standing`), hearths
-      that burn without fuel, with `:id`, `:at` (a place id), `:heat_w`,
-      `:breaks`, `:cause` and `:note`. A standing miracle takes its name and
-      description from the Quire article with its id when there is one, else
-      from `:name` and `:description`.
+      that burn without fuel, with `:id`, `:at` (a place id), `:heat_w`
+      (above zero), `:breaks`, `:cause` and `:note`. A standing miracle takes
+      its name and description from the Quire article with its id when there
+      is one, else from `:name` and `:description`. It never smokes.
     * `:climate` - `wind: [from: direction, m_s: speed]`, the region's
       constant wind (`env.wind`). Default: 2 m/s from the south-west.
 
@@ -101,13 +103,15 @@ defmodule Avwe.Worldgen do
 
   defp add_hearths(region, hearths) do
     Enum.reduce(hearths, region, fn hearth, acc ->
-      Region.put_entity(acc, Keyword.fetch!(hearth, :id), %{
+      id = Keyword.fetch!(hearth, :id)
+
+      Region.put_entity(acc, id, %{
         hearth: %{
-          fuel_kg: Keyword.fetch!(hearth, :fuel_kg) * 1.0,
+          fuel_kg: non_negative!(hearth, :fuel_kg, id),
           burning: false,
           lit_at: nil,
           out_at: nil,
-          power_w: Keyword.fetch!(hearth, :power_w) * 1.0,
+          power_w: positive!(hearth, :power_w, id),
           low_kg: 1.0,
           last_step: Fire.zero_step()
         },
@@ -115,6 +119,24 @@ defmodule Avwe.Worldgen do
         repr: %{name: Keyword.fetch!(hearth, :name), description: nil}
       })
     end)
+  end
+
+  # A hearth's numbers, checked where a bad one is easiest to explain: the
+  # fire system divides by `power_w`, and negative fuel is not a hearth.
+  defp positive!(config, key, id) do
+    value = Keyword.fetch!(config, key) * 1.0
+
+    if value > 0,
+      do: value,
+      else: raise(ArgumentError, "hearth #{inspect(id)}: #{key} must be above 0, got #{value}")
+  end
+
+  defp non_negative!(config, key, id) do
+    value = Keyword.fetch!(config, key) * 1.0
+
+    if value >= 0,
+      do: value,
+      else: raise(ArgumentError, "hearth #{inspect(id)}: #{key} must be at least 0, got #{value}")
   end
 
   defp add_miracles(region, miracles, quire_world) do
@@ -141,9 +163,10 @@ defmodule Avwe.Worldgen do
     }
   end
 
-  # A standing miracle is a hearth that burns without fuel, already lit.
+  # A standing miracle is a hearth that burns without fuel, already lit. It
+  # never smokes (`Avwe.Systems.Fire`), so nothing here says so.
   defp standing_miracle(region, miracle, quire_world) do
-    heat_w = Keyword.fetch!(miracle, :heat_w) * 1.0
+    heat_w = positive!(miracle, :heat_w, Keyword.fetch!(miracle, :id))
 
     %{
       position: position_of(region, Keyword.fetch!(miracle, :at)),
@@ -161,7 +184,6 @@ defmodule Avwe.Worldgen do
         kind: :standing,
         breaks: Keyword.get(miracle, :breaks, []),
         heat_w: heat_w,
-        smoke: Keyword.get(miracle, :smoke, false),
         cause: Keyword.get(miracle, :cause, :unknown),
         note: Keyword.get(miracle, :note)
       }

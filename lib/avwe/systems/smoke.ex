@@ -19,7 +19,9 @@ defmodule Avwe.Systems.Smoke do
   decay-weighted mean age have closed forms, so the mass is exact at any step
   length: a minute's step leaves a fresh puff just downwind, an hour's step
   leaves one puff at the plume's centre of mass. Only the plume's shape
-  coarsens with long steps.
+  coarsens with long steps. A fresh puff is judged like an old one: too light
+  it is dropped, and blown off the map within the step it is booked as left
+  at once rather than kept for a step.
 
   ## Conservation
 
@@ -97,7 +99,7 @@ defmodule Avwe.Systems.Smoke do
     }
 
     {kept, acc} = age_puffs(field.puffs, acc, wind, width, tick)
-    {fresh, acc} = emit_puffs(region, acc, wind, tick)
+    {fresh, acc} = emit_puffs(region, acc, wind, width, tick)
     puffs = Enum.sort_by(kept ++ fresh, &{&1.born, &1.x, &1.y})
 
     last_step = %{
@@ -143,8 +145,9 @@ defmodule Avwe.Systems.Smoke do
 
   # One puff per hearth that smoked this step: the closed-form survived mass
   # of smoke released uniformly over [t0, t0 + burn_s] and decaying until t1,
-  # placed at its decay-weighted mean age along the wind.
-  defp emit_puffs(region, acc, wind, tick) do
+  # placed at its decay-weighted mean age along the wind. Culled on the same
+  # terms as an aged puff: too light is dropped, off the map has left.
+  defp emit_puffs(region, acc, wind, width, tick) do
     t1 = Tick.end_time(tick)
 
     region
@@ -163,9 +166,11 @@ defmodule Avwe.Systems.Smoke do
         |> add(:survived, survived)
         |> add(:decayed, m - survived)
 
-      if survived < @g_min,
-        do: {fresh, add(acc, :dropped, survived)},
-        else: {[puff | fresh], acc}
+      cond do
+        survived < @g_min -> {fresh, add(acc, :dropped, survived)}
+        not on_map?(puff, width) -> {fresh, add(acc, :left, survived)}
+        true -> {[puff | fresh], acc}
+      end
     end)
     |> then(fn {fresh, acc} -> {Enum.reverse(fresh), acc} end)
   end

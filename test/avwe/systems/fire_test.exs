@@ -273,4 +273,37 @@ defmodule Avwe.Systems.FireTest do
     assert Fire.hearth_near(region, {x + 3, y}) == []
     assert Fire.hearth_near(Region.view(region), {x, y}) == Fire.hearth_near(region, {x, y})
   end
+
+  test "hearth_near's order owes nothing to the order the component map yields" do
+    {x, y} = cell = {50, 50}
+    ids = for n <- 0..39, do: "hearth-#{String.pad_leading(Integer.to_string(n), 2, "0")}"
+    {evens, odds} = Enum.split_with(Enum.with_index(ids), fn {_id, n} -> rem(n, 2) == 0 end)
+
+    hearth = %{
+      fuel_kg: 1.0,
+      burning: false,
+      lit_at: nil,
+      out_at: nil,
+      power_w: 1_000.0,
+      low_kg: 1.0,
+      last_step: Fire.zero_step()
+    }
+
+    placed =
+      Enum.map(evens, fn {id, _n} -> {id, cell} end) ++
+        Enum.map(odds, fn {id, _n} -> {id, {x + 2, y}} end)
+
+    region =
+      Enum.reduce(placed, Region.new(id: {0, 0}, seed: 1, systems: [Fire]), fn {id, at}, acc ->
+        Region.put_entity(acc, id, %{hearth: hearth, position: at})
+      end)
+
+    # Past 32 keys a map stops iterating in key order, so a sort that leaned
+    # on it would show here.
+    refute Map.keys(region.components.hearth) == ids
+
+    assert Enum.map(Fire.hearth_near(region, cell), fn {id, _hearth, d} -> {id, d} end) ==
+             Enum.map(evens, fn {id, _n} -> {id, 0.0} end) ++
+               Enum.map(odds, fn {id, _n} -> {id, 2.0} end)
+  end
 end
