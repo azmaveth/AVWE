@@ -12,11 +12,25 @@ defmodule Avwe.World do
   alias Avwe.{Clock, RegionServer}
 
   @doc """
-  Options: `:id` (the world's id), `:regions` (a list of `Avwe.Region` structs)
-  and `:clock` (`:manual` or `{:live, interval_ms}`).
+  Options: `:id` (the world's id), `:regions` (a list of `Avwe.Region` structs),
+  `:clock` (`:manual` or `{:live, interval_ms}`) and `:info` (a map with the
+  world's `:name` and `:tagline`, shown to people choosing a world).
   """
   def start_link(opts) do
-    Supervisor.start_link(__MODULE__, opts, name: via(Keyword.fetch!(opts, :id)))
+    id = Keyword.fetch!(opts, :id)
+    info = Keyword.get(opts, :info, %{name: to_string(id), tagline: nil})
+
+    Supervisor.start_link(__MODULE__, opts,
+      name: {:via, Registry, {Avwe.Registry, {:world, id}, info}}
+    )
+  end
+
+  @doc "Every running world as `{id, info}`, sorted by id."
+  @spec list() :: [{term(), map()}]
+  def list do
+    Avwe.Registry
+    |> Registry.select([{{{:world, :"$1"}, :_, :"$2"}, [], [{{:"$1", :"$2"}}]}])
+    |> Enum.sort()
   end
 
   @doc "The supervisor pid of a running world."

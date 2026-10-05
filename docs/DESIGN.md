@@ -391,9 +391,19 @@ Most intents take time and can be interrupted:
 - While it runs, the body emits `progress` percepts. It ends with a `result`
   percept whose outcome uses Arbor's vocabulary exactly: `success`, `failure`,
   `partial`, `blocked`, `interrupted`.
+- **Every intent ends in exactly one result**, carrying the intent's ref, even
+  when it is blocked, replaced by a newer action, or stopped. Agents can rely
+  on that to know when to stop waiting. A property test checks it against
+  random batches of valid and invalid intents.
+- A body does one durative thing at a time. A new durative intent replaces the
+  current one, which ends `interrupted` (reason `replaced`).
 - A controller can queue a plan of several intents: walk to the Dry Bend, sketch
   the old channel until dusk, return.
-- A `cancel` intent stops the current action.
+- A `stop` intent ends the current action (`interrupted`, reason `stopped`).
+
+**Built so far:** `go` (to a known place), `wait` (for a duration, or until
+dawn or dusk), `say` (whisper, talk or shout) and `stop`. Plans and `until`
+conditions on other verbs come with M1.
 
 ### 7.4 Salience and interrupts
 
@@ -409,9 +419,16 @@ own, and the mind is only called when something matters.
 ### 8.1 Sessions
 
 Every connection, whatever its transport, becomes an `Avwe.Session` process. A
-session holds one body lease (or spectator rights), reads the region snapshot
-each tick, computes and filters percepts for its body, and forwards intents.
-The core API is Elixir messages. Transports adapt to it.
+session holds one body lease (or spectator rights), computes and filters
+percepts for its body, and forwards intents. The core API is Elixir messages.
+Transports adapt to it.
+
+- Each step's events reach sessions **together with a view of the state they
+  happened in** (the snapshot without fields). A session that falls a few
+  steps behind still perceives each event against the right positions.
+- `look` reads the latest snapshot from ETS and never blocks the tick.
+- A lease is a unique Registry key held by the session process, so it is
+  released automatically when the session or its controller goes away.
 
 ### 8.2 Messages
 
@@ -453,7 +470,7 @@ Senses are capabilities on the body, each with a range and conditions:
 
 | Sense | Rules |
 |---|---|
-| Sight | Range depends on light. Blocked by terrain and walls. Darkness matters |
+| Sight | 50 m at night, about 500 m at noon. Blocked by terrain and walls (once there is terrain) |
 | Hearing | Range set by volume: whisper about 2 m, talk about 15 m, shout about 100 m |
 | Smell | Carried by wind. Smoke is the main thing to smell |
 | Touch | Temperature of the cell or place, wet or dry underfoot |
@@ -671,6 +688,11 @@ items. Writing in them is an in-world action, and reading them next session is
 how Claude remembers. The world provides persistence the model doesn't have.
 
 ## 13. Milestones
+
+**Testing rule:** every user- or agent-facing feature has an end-to-end test
+through its real transport: telnet over TCP, sessions as agents use them, MCP
+over its transport, Arbor through its capability. Unit tests are for the pure
+core. A feature isn't done until its end-to-end test exists.
 
 | | Name | Scope | Done when |
 |---|---|---|---|

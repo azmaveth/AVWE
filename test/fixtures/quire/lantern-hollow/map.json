@@ -1,0 +1,8 @@
+{
+  "title": "Lantern Hollow",
+  "pins": [
+    { "id": "hollow-green", "x": 20.0, "y": 50.0, "label": "Hollow Green", "articleId": "hollow-green" },
+    { "id": "mill-pond", "x": 23.0, "y": 50.0, "label": "Mill Pond", "articleId": "mill-pond" },
+    { "id": "far-tower", "x": 80.0, "y": 50.0, "label": "Far Tower", "articleId": "far-tower" }
+  ]
+}

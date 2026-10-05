@@ -11,15 +11,16 @@ defmodule Avwe do
 
       {:ok, _pid} = Avwe.start_world(:ember_reach)
       Avwe.now(:ember_reach)          # "813 AR, day 220, 04:00"
-      Avwe.subscribe(:ember_reach)
-      Avwe.step(:ember_reach, 120)    # two world hours
-      flush()                         # {:avwe_events, :ember_reach, [%Avwe.Event{type: :sunrise}]}
+      {:ok, mira} = Avwe.connect(:ember_reach, body: "mira-vale")
+      Avwe.Session.act(mira, :go, target: "the-dry-bend")
+      Avwe.step(:ember_reach, 10)     # ten world minutes
+      flush()                         # {:avwe_percepts, _, [%Avwe.Percept{summary: "You arrive at The Dry Bend."}]}
   """
 
   alias Avwe.{Calendar, Clock, Quire, RegionServer}
 
   @default_region {0, 0}
-  @default_systems [Avwe.Systems.Daylight]
+  @default_systems [Avwe.Systems.Daylight, Avwe.Systems.Movement, Avwe.Systems.Waiting]
 
   @doc """
   Loads a world from Quire and starts it.
@@ -48,10 +49,15 @@ defmodule Avwe do
           time: start_time(Keyword.get(opts, :start, 0)),
           systems: Keyword.get(opts, :systems, @default_systems)
         )
+        |> Avwe.Region.prepare()
 
       DynamicSupervisor.start_child(
         Avwe.Worlds,
-        {Avwe.World, id: id, regions: [region], clock: Keyword.get(opts, :clock, :manual)}
+        {Avwe.World,
+         id: id,
+         regions: [region],
+         clock: Keyword.get(opts, :clock, :manual),
+         info: %{name: quire_world.name, tagline: quire_world.tagline}}
       )
     end
   end
@@ -81,10 +87,55 @@ defmodule Avwe do
 
   @doc """
   Subscribes the calling process to a world's events. They arrive as
-  `{:avwe_events, world, [%Avwe.Event{}]}`.
+  `{:avwe_events, world, [%Avwe.Event{}], view}`, where `view` is the region's
+  state just after the events (`Avwe.Region.view/1`).
   """
   @spec subscribe(atom()) :: {:ok, pid()} | {:error, term()}
   def subscribe(world), do: Registry.register(Avwe.PubSub, {:events, world}, nil)
+
+  @doc "Every running world as `{id, %{name: name, tagline: tagline}}`."
+  @spec worlds() :: [{atom(), map()}]
+  def worlds, do: Avwe.World.list()
+
+  @doc """
+  The bodies in a world that a controller could take, with whether each is
+  already taken.
+  """
+  @spec bodies(atom()) :: {:ok, [map()]} | {:error, :not_found}
+  def bodies(world) do
+    with {:ok, snapshot} <- snapshot(world) do
+      repr = Map.get(snapshot.components, :repr, %{})
+
+      bodies =
+        for id <- snapshot.components |> Map.get(:body, %{}) |> Map.keys() |> Enum.sort() do
+          %{
+            id: id,
+            name: get_in(repr, [id, :name]) || id,
+            description: get_in(repr, [id, :description]),
+            taken: Registry.lookup(Avwe.Registry, {:lease, world, id}) != []
+          }
+        end
+
+      {:ok, bodies}
+    end
+  end
+
+  @doc """
+  Connects a controller to a world and returns its `Avwe.Session`.
+
+  Options:
+
+    * `:body` - the body to control. Leave it out to watch as a spectator.
+    * `:sink` - the process that receives percepts. Default: the caller.
+    * `:controller` - `:human` (default), `:mcp`, `:arbor` or `:autopilot`.
+
+  Fails with `:no_such_world`, `:no_such_body` or `:body_taken`.
+  """
+  @spec connect(atom(), keyword()) :: {:ok, pid()} | {:error, term()}
+  def connect(world, opts \\ []) do
+    opts = opts |> Keyword.put(:world, world) |> Keyword.put_new(:sink, self())
+    DynamicSupervisor.start_child(Avwe.Sessions, {Avwe.Session, opts})
+  end
 
   defp quire_path(opts) do
     case Keyword.fetch(opts, :quire) do

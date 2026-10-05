@@ -12,11 +12,21 @@ The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Status
 
-M0 scaffolding. A world loads from Quire, its map pins become places and its
-characters start at home, and the clock runs deterministically with one system
-(daylight). Terrain, heat, water, fire, sessions and the telnet client are next.
+M0 in progress. Built so far:
 
-## Running it
+- Worlds load from Quire. Map pins become places, and characters start at home
+  knowing the way to every pinned place.
+- A deterministic clock with daylight, walking, waiting and speech.
+- Sessions: any controller can take a body (one at a time) or watch, act with
+  intents, and receive percepts. Every intent ends in exactly one result.
+- Senses: sight that shrinks at night, and hearing by volume (whisper, talk,
+  shout).
+- A telnet client.
+
+Next: terrain and the river with its source, heat, water and fire, the event
+log and snapshots, and autopilot for bodies nobody is controlling.
+
+## Playing
 
 Requirements: Erlang/OTP 28 and Elixir 1.19 (see `.tool-versions`), and a Quire
 checkout next to this one (`../quire`), or `AVWE_QUIRE_ROOT` pointing at Quire's
@@ -24,18 +34,37 @@ checkout next to this one (`../quire`), or `AVWE_QUIRE_ROOT` pointing at Quire's
 
 ```bash
 mix deps.get
-mix test
+mix run --no-halt
 ```
+
+That runs the Ember Reach in real time, one world minute per second. In
+another terminal:
+
+```bash
+telnet localhost 4040
+```
+
+Choose Mira Vale (or `watch`), then try `look`, `go to the dry bend`,
+`say hello`, `wait until dawn`, `stop` and `help`.
+
+## From Elixir
 
 ```elixir
 # iex -S mix
-{:ok, _pid} = Avwe.start_world(:ember_reach)
-Avwe.now(:ember_reach)          # "813 AR, day 220, 04:00"
-Avwe.subscribe(:ember_reach)
-Avwe.step(:ember_reach, 120)    # two world hours
-flush()                         # {:avwe_events, :ember_reach, [%Avwe.Event{type: :sunrise, ...}]}
-Avwe.snapshot(:ember_reach)
+{:ok, mira} = Avwe.connect(:ember_reach, body: "mira-vale")
+Avwe.Session.look(mira)
+Avwe.Session.act(mira, :go, target: "the-dry-bend")
+flush()   # {:avwe_percepts, _, [%Avwe.Percept{summary: "You set off toward The Dry Bend."}]} ...
 ```
+
+## Tests
+
+```bash
+mix test
+```
+
+End-to-end tests in `test/e2e/` play through the real transports: telnet over
+TCP, and sessions as agents use them.
 
 ## License
 

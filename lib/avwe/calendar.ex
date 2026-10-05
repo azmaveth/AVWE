@@ -69,6 +69,20 @@ defmodule Avwe.Calendar do
     }
   end
 
+  @doc """
+  The first moment strictly after `time` that repeats every `interval` seconds,
+  shifted by `offset`.
+
+      iex> Avwe.Calendar.at(813, hour: 4)
+      ...> |> Avwe.Calendar.next(Avwe.Calendar.day(), 6 * Avwe.Calendar.hour())
+      ...> |> Avwe.Calendar.format()
+      "813 AR, day 1, 06:00"
+  """
+  @spec next(time(), pos_integer(), integer()) :: time()
+  def next(time, interval, offset \\ 0) do
+    Integer.floor_div(time - offset, interval) * interval + offset + interval
+  end
+
   @doc "Seconds since midnight."
   @spec time_of_day(time()) :: non_neg_integer()
   def time_of_day(time), do: Integer.mod(time, @day)

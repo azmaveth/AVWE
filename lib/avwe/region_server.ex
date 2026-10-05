@@ -3,8 +3,10 @@ defmodule Avwe.RegionServer do
   Runs one `Avwe.Region` as a process.
 
   After every advance it publishes a snapshot to an ETS table it owns, so
-  readers (perception, clients) never block the tick and never call this
-  process. Events go to subscribers registered with `Avwe.subscribe/1`.
+  readers never block the tick and never call this process. Events go to
+  subscribers registered with `Avwe.subscribe/1`, together with a view of the
+  state they happened in (`Avwe.Region.view/1`). Intents queue in the region's
+  inbox until the next step.
   """
 
   use GenServer
@@ -26,6 +28,15 @@ defmodule Avwe.RegionServer do
   def advance(world, region_id, steps) do
     case lookup(world, region_id) do
       {:ok, pid, _table} -> GenServer.call(pid, {:advance, steps}, :infinity)
+      error -> error
+    end
+  end
+
+  @doc "Queues an intent for the region's next step."
+  @spec submit(term(), term(), Avwe.Intent.t()) :: :ok | {:error, :not_found}
+  def submit(world, region_id, intent) do
+    case lookup(world, region_id) do
+      {:ok, pid, _table} -> GenServer.call(pid, {:submit, intent})
       error -> error
     end
   end
@@ -59,11 +70,15 @@ defmodule Avwe.RegionServer do
   end
 
   @impl true
+  def handle_call({:submit, intent}, _from, state) do
+    {:reply, :ok, %{state | region: Region.submit(state.region, intent)}}
+  end
+
   def handle_call({:advance, steps}, _from, state) do
     {events, region} = state.region |> Region.advance(steps) |> Region.drain_events()
 
     publish(state.table, region)
-    broadcast(state.world, events)
+    broadcast(state.world, events, Region.view(region))
 
     {:reply, {:ok, %{step: region.step, time: region.time}}, %{state | region: region}}
   end
@@ -72,11 +87,11 @@ defmodule Avwe.RegionServer do
     :ets.insert(table, {:snapshot, Region.snapshot(region)})
   end
 
-  defp broadcast(_world, []), do: :ok
+  defp broadcast(_world, [], _view), do: :ok
 
-  defp broadcast(world, events) do
+  defp broadcast(world, events, view) do
     Registry.dispatch(Avwe.PubSub, {:events, world}, fn subscribers ->
-      for {pid, _value} <- subscribers, do: send(pid, {:avwe_events, world, events})
+      for {pid, _value} <- subscribers, do: send(pid, {:avwe_events, world, events, view})
     end)
   end
 end

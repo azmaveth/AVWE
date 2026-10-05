@@ -11,7 +11,8 @@ defmodule Avwe.Region do
       just an id that appears in one or more component maps.
     * **fields**, dense per-cell values such as temperature or water.
     * **env**, region-wide values such as light.
-    * an **outbox** of events emitted since it was last drained.
+    * an **inbox** of intents waiting for the next step, and an **outbox** of
+      events emitted since it was last drained.
 
   Build one with `new/1`, change it with the reducers, move it through time
   with `advance/3`, and read it with the converters.
@@ -24,7 +25,7 @@ defmodule Avwe.Region do
   depend on map iteration order.
   """
 
-  alias Avwe.{Event, Tick}
+  alias Avwe.{Actions, Event, Intent, Tick}
 
   @type entity_id :: String.t()
   @type component :: atom()
@@ -40,6 +41,8 @@ defmodule Avwe.Region do
     components: %{},
     fields: %{},
     env: %{},
+    inbox: [],
+    next_seq: 0,
     outbox: []
   ]
 
@@ -53,6 +56,8 @@ defmodule Avwe.Region do
           components: %{component() => %{entity_id() => term()}},
           fields: %{atom() => term()},
           env: %{atom() => term()},
+          inbox: [Intent.t()],
+          next_seq: non_neg_integer(),
           outbox: [Event.t()]
         }
 
@@ -101,10 +106,41 @@ defmodule Avwe.Region do
     }
   end
 
+  @doc "Removes one component from an entity."
+  @spec delete_component(t(), entity_id(), component()) :: t()
+  def delete_component(%__MODULE__{components: components} = region, id, name) do
+    case components do
+      %{^name => by_id} -> %{region | components: %{components | name => Map.delete(by_id, id)}}
+      _no_component -> region
+    end
+  end
+
+  @doc """
+  Queues an intent for the next step and numbers it. Intents are applied at
+  the start of the step, sorted by `{body, seq}`.
+  """
+  @spec submit(t(), Intent.t()) :: t()
+  def submit(%__MODULE__{inbox: inbox, next_seq: seq} = region, %Intent{} = intent) do
+    %{region | inbox: [%{intent | seq: seq} | inbox], next_seq: seq + 1}
+  end
+
   @doc "Sets a region-wide environment value."
   @spec put_env(t(), atom(), term()) :: t()
   def put_env(%__MODULE__{env: env} = region, key, value) do
     %{region | env: Map.put(env, key, value)}
+  end
+
+  @doc """
+  Lets each system set up state that depends on the starting time (see
+  `c:Avwe.System.prepare/1`). Call once, after building the region and before
+  the first step.
+  """
+  @spec prepare(t()) :: t()
+  def prepare(%__MODULE__{systems: systems} = region) do
+    Enum.reduce(systems, region, fn system, acc ->
+      Code.ensure_loaded!(system)
+      if function_exported?(system, :prepare, 1), do: system.prepare(acc), else: acc
+    end)
   end
 
   @doc """
@@ -130,13 +166,31 @@ defmodule Avwe.Region do
       region: region.id
     }
 
-    region.systems
-    |> Enum.reduce(region, &run_system(&2, &1, tick))
+    region
+    |> apply_intents(tick)
+    |> run_systems(tick)
     |> finish_step(tick)
   end
 
-  defp run_system(region, system, tick) do
-    {region, events} = system.run(region, tick)
+  defp apply_intents(%__MODULE__{inbox: []} = region, _tick), do: region
+
+  defp apply_intents(%__MODULE__{inbox: inbox} = region, tick) do
+    inbox
+    |> Enum.sort_by(&{&1.body, &1.seq})
+    |> Enum.reduce(%{region | inbox: []}, fn intent, acc ->
+      {acc, events} = Actions.handle(acc, intent, tick)
+      emit(acc, events, tick)
+    end)
+  end
+
+  defp run_systems(region, tick) do
+    Enum.reduce(region.systems, region, fn system, acc ->
+      {acc, events} = system.run(acc, tick)
+      emit(acc, events, tick)
+    end)
+  end
+
+  defp emit(region, events, tick) do
     stamped = Enum.map(events, &stamp(&1, region.id, tick))
     %{region | outbox: Enum.reverse(stamped, region.outbox)}
   end
@@ -191,9 +245,19 @@ defmodule Avwe.Region do
     :sha256 |> :crypto.hash(binary) |> Base.encode16(case: :lower)
   end
 
-  @doc "A read-only view of the region for perception and clients."
+  @doc "A read-only copy of the region's state for clients, including fields."
   @spec snapshot(t()) :: map()
   def snapshot(%__MODULE__{} = region) do
     Map.take(region, [:id, :step, :time, :components, :fields, :env])
+  end
+
+  @doc """
+  What perception needs: the snapshot without fields. Sent to subscribers with
+  each step's events, so they perceive the events against the state the events
+  happened in.
+  """
+  @spec view(t()) :: map()
+  def view(%__MODULE__{} = region) do
+    Map.take(region, [:id, :step, :time, :components, :env])
   end
 end

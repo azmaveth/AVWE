@@ -15,10 +15,23 @@ defmodule Avwe.Systems.Daylight do
   @sunset 19 * 3_600
 
   @impl Avwe.System
+  def prepare(region) do
+    Region.put_env(region, :light, region.time |> Calendar.time_of_day() |> light())
+  end
+
+  @impl Avwe.System
   def run(region, tick) do
     light = tick |> Tick.end_time() |> Calendar.time_of_day() |> light()
     {Region.put_env(region, :light, light), events(tick)}
   end
+
+  @doc "Sunrise, in seconds since midnight."
+  @spec sunrise() :: non_neg_integer()
+  def sunrise, do: @sunrise
+
+  @doc "Sunset, in seconds since midnight."
+  @spec sunset() :: non_neg_integer()
+  def sunset, do: @sunset
 
   @doc "Sunlight for a time of day given in seconds since midnight."
   @spec light(non_neg_integer()) :: float()

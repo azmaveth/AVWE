@@ -29,7 +29,8 @@ defmodule AvweTest do
     Avwe.step(@world, 120)
 
     sunrise = Calendar.at(813, day: 220, hour: 6)
-    assert_received {:avwe_events, @world, [%Event{type: :sunrise, time: ^sunrise}]}
+    assert_received {:avwe_events, @world, [%Event{type: :sunrise, time: ^sunrise}], view}
+    assert view.time == sunrise
   end
 
   test "the same world can't be started twice" do

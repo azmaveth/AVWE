@@ -1,0 +1,46 @@
+defmodule Avwe.Intent do
+  @moduledoc """
+  A controller's request for its body to do something.
+
+  `ref` identifies the intent. Its outcome always comes back as exactly one
+  result percept carrying the same ref. Intents wait in the region's inbox and
+  are applied at the start of the next step, sorted by `{body, seq}`; the
+  region assigns `seq` when it receives the intent.
+
+  Verbs:
+
+    * `:go` - walk to a place the body knows. `target` is the place's id.
+    * `:wait` - let time pass. `params`: `%{for: seconds}` or
+      `%{until: :dawn | :dusk}`.
+    * `:say` - speak. `params`: `%{text: text, volume: :whisper | :talk | :shout}`.
+    * `:stop` - stop the current action.
+  """
+
+  @enforce_keys [:ref, :body, :verb]
+  defstruct [:ref, :body, :verb, :target, :controller, params: %{}, seq: 0]
+
+  @type verb :: :go | :wait | :say | :stop | atom()
+
+  @type t :: %__MODULE__{
+          ref: String.t(),
+          body: String.t(),
+          verb: verb(),
+          target: String.t() | nil,
+          controller: atom() | nil,
+          params: map(),
+          seq: non_neg_integer()
+        }
+
+  @doc "Creates an intent. Options: `:ref` (required), `:target`, `:params`, `:controller`."
+  @spec new(String.t(), verb(), keyword()) :: t()
+  def new(body, verb, opts) do
+    %__MODULE__{
+      ref: Keyword.fetch!(opts, :ref),
+      body: body,
+      verb: verb,
+      target: opts[:target],
+      params: Keyword.get(opts, :params, %{}),
+      controller: opts[:controller]
+    }
+  end
+end

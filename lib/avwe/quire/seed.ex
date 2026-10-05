@@ -6,7 +6,9 @@ defmodule Avwe.Quire.Seed do
 
     * a **place** for every map pin, at the pin's cell on the grid
     * a **body** for every character article, at its home if the home
-      resolves to a pinned place
+      resolves to a pinned place. Characters know the way to every pinned
+      place (`:knows`); places that aren't pinned, such as the river's
+      source, have to be discovered.
 
   Every entity gets a `:repr` component with its name and description (the
   article summary) and an `:article` component linking back to canon. Terrain,
@@ -49,18 +51,21 @@ defmodule Avwe.Quire.Seed do
   end
 
   defp add_characters(region, world, grid) do
+    knows = MapSet.new(world.pins, & &1.id)
+
     world.articles
     |> Map.values()
     |> Enum.filter(&(&1.type == :character))
     |> Enum.sort_by(& &1.id)
-    |> Enum.reduce(region, &Region.put_entity(&2, &1.id, character(&1, world, grid)))
+    |> Enum.reduce(region, &Region.put_entity(&2, &1.id, character(&1, world, grid, knows)))
   end
 
-  defp character(%Article{} = article, world, grid) do
+  defp character(%Article{} = article, world, grid, knows) do
     components = %{
       body: %{species: species(article, world)},
       repr: %{name: article.title, description: article.summary},
-      article: article.id
+      article: article.id,
+      knows: knows
     }
 
     case home_pin(article, world) do
