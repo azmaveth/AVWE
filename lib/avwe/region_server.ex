@@ -20,7 +20,14 @@ defmodule Avwe.RegionServer do
   The saved state wins for state (seed, time, terrain, components, fields,
   env), but the systems come from the region the server was given: they are
   code, not state, and the rules may change while the world runs. The region
-  it was given is otherwise ignored, with a warning if its seed differs.
+  it was given is otherwise ignored, with a warning for each setting of it
+  (seed, climate, hearths, miracles) that differs from the saved world.
+
+  A log is only valid under the systems it was recorded with, and replay
+  runs the systems of the snapshot it starts from. So when the systems
+  change on a resume, the reconfigured region is snapshotted at once: the
+  log from that point belongs to the new rules, and a crash before the next
+  regular snapshot replays the gap under them, not the old ones.
   """
 
   use GenServer
@@ -167,15 +174,32 @@ defmodule Avwe.RegionServer do
           "Resumed region #{inspect(saved.id)} at step #{saved.step} from #{store.path}"
         )
 
-        {:ok, reconfigure(saved, region)}
+        resumed = reconfigure(saved, region, store.dir)
+        with :ok <- snapshot_if_rules_changed(store, saved, resumed, keep), do: {:ok, resumed}
 
       :none ->
         start_fresh(store, region, keep)
+
+      {:error, {:unknown_snapshot, path, tag}} = error ->
+        Logger.error(
+          "Region #{inspect(region.id)}: no snapshot this build can read; #{path} is " <>
+            "tagged #{inspect(tag)} and this build reads {:avwe_snapshot, 1}. " <>
+            "Delete the world folder #{store.dir} to start over."
+        )
+
+        error
 
       {:error, _reason} = error ->
         error
     end
   end
+
+  # Replay runs the systems of the snapshot it starts from, so a log written
+  # under new systems must begin at a snapshot that carries them.
+  defp snapshot_if_rules_changed(_store, %{systems: same}, %{systems: same}, _keep), do: :ok
+
+  defp snapshot_if_rules_changed(store, _saved, resumed, keep),
+    do: Store.snapshot(store, resumed, keep: keep)
 
   # A log with no snapshot to replay it onto can't be resumed and must not be
   # started over: the world fails to start instead.
@@ -188,11 +212,13 @@ defmodule Avwe.RegionServer do
   end
 
   # Configuration beats the snapshot for code; the snapshot wins for state.
-  defp reconfigure(saved, given) do
-    if given.seed != saved.seed do
+  # The settings the given region was built from (`Avwe.Worldgen`) are state
+  # too, so each one that differs from the saved world is named and ignored.
+  defp reconfigure(saved, given, dir) do
+    for {setting, phrase, wanted, kept} <- ignored_settings(saved, given) do
       Logger.warning(
-        "Region #{inspect(saved.id)}: ignoring :seed #{inspect(given.seed)}; " <>
-          "the world's seed is #{inspect(saved.seed)}"
+        "Region #{inspect(saved.id)}: ignoring :#{setting} #{inspect(wanted)}; " <>
+          "the world's #{phrase} #{inspect(kept)}; delete #{dir} to start over"
       )
     end
 
@@ -205,6 +231,49 @@ defmodule Avwe.RegionServer do
 
     added = given.systems -- saved.systems
     Region.prepare(%{saved | systems: given.systems}, only: added)
+  end
+
+  # The settings of `given` that the saved world cannot take on, as
+  # `{setting, "what is", wanted, kept}` for the warning.
+  defp ignored_settings(saved, given) do
+    lit = lit_hearths(saved)
+
+    [
+      {:seed, "seed is", & &1.seed},
+      {:climate, "wind is", &Map.get(&1.env, :wind)},
+      {:hearths, "hearths are", &hearths(&1, lit)},
+      {:miracles, "miracles are", &miracles/1}
+    ]
+    |> Enum.map(fn {setting, phrase, declared} ->
+      {setting, phrase, declared.(given), declared.(saved)}
+    end)
+    |> Enum.reject(fn {_setting, _phrase, wanted, kept} -> wanted == kept end)
+  end
+
+  # A hearth as declared: its power and the wood laid in it. A hearth that
+  # has been lit has burned some of that wood, so for those (`lit`) the fuel
+  # is state by now and only the power is compared. Standing miracles carry
+  # a hearth too, but are declared as miracles.
+  defp hearths(region, lit) do
+    for id <- Region.with_components(region, [:hearth]),
+        Region.get(region, id, :miracle) == nil,
+        into: %{} do
+      keys = if id in lit, do: [:power_w], else: [:fuel_kg, :power_w]
+      {id, region |> Region.get(id, :hearth) |> Map.take(keys)}
+    end
+  end
+
+  defp lit_hearths(region) do
+    for id <- Region.with_components(region, [:hearth]),
+        Region.get(region, id, :hearth).lit_at != nil,
+        do: id
+  end
+
+  # A miracle as declared: everything but when it was applied.
+  defp miracles(region) do
+    for id <- Region.with_components(region, [:miracle]), into: %{} do
+      {id, region |> Region.get(id, :miracle) |> Map.delete(:applied_at)}
+    end
   end
 
   defp journal(%{store: nil}, _step, _intent), do: :ok

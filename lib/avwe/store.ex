@@ -27,8 +27,11 @@ defmodule Avwe.Store do
           and `:dt` from before the advance, the number of `:steps`, and the
           `:events` emitted.
       Version-1 records (intents inside the advance record) are rejected.
-    * `snap-<step>.bin` - `:erlang.term_to_binary` of the region at `step`,
-      with the step zero-padded so names sort by step.
+    * `snap-<step>.bin` - `:erlang.term_to_binary` of `{:avwe_snapshot, 1,
+      region}` for the region at `step`, with the step zero-padded so names
+      sort by step. The `1` is the snapshot version: a file with any other
+      tag is refused with `{:unknown_snapshot, path, tag}`, so a region never
+      resumes from a snapshot that a different build of the code wrote.
 
   ## Durability
 
@@ -36,13 +39,20 @@ defmodule Avwe.Store do
   acknowledged survives the region crashing before its next advance; that is
   what keeps "every intent ends in exactly one result percept" true across a
   restart. `:disk_log.log/2` hands the record to the log's own process, which
-  writes it to disk when the log is synced or closed. The contract is:
+  keeps it in a write cache and writes the cache out after 2 s, when it
+  reaches 64 KB, or when the log is synced or closed. The contract is:
 
     * A crash of the region process loses nothing: the log process outlives
       it, and closes (flushing) when its last owner is gone.
-    * A crash of the VM may lose the tail of the log since the last sync. The
-      log is synced at every snapshot; a snapshot is written to a `.tmp` file,
-      fsynced and renamed, so it is either complete or absent.
+    * A crash of the VM loses at most the log's write cache: the records of
+      the last 2 s, or the last 64 KB, whichever is less. What was written
+      out is in the operating system's hands; a crash of the machine can also
+      lose what it had not yet put on disk since the last sync.
+    * The log is synced (fsynced) at every snapshot, *before* the snapshot is
+      renamed into place, so a snapshot on disk always has the log up to its
+      step behind it: a crash between the two leaves an unneeded tail of
+      log, never a gap below a snapshot. The snapshot itself is written to a
+      `.tmp` file, fsynced and renamed, so it is either complete or absent.
 
   ## Snapshots and pending intents
 
@@ -65,6 +75,8 @@ defmodule Avwe.Store do
   require Logger
 
   @version 2
+  @snapshot_tag :avwe_snapshot
+  @snapshot_version 1
   @log_name "log"
   @snapshot_prefix "snap-"
   @snapshot_suffix ".bin"
@@ -190,50 +202,72 @@ defmodule Avwe.Store do
     :disk_log.log(log, record)
   end
 
-  @doc "Every record in the log, oldest first."
+  @doc """
+  Every record in the log, oldest first. This reads the whole log into
+  memory; it is for tests and tools. A region resuming uses
+  `records_after/2`.
+  """
   @spec records(t()) :: {:ok, [record()]} | {:error, term()}
-  def records(%__MODULE__{log: log}), do: read_chunks(log, :start, [])
+  def records(%__MODULE__{} = store), do: read_log(store, fn _record -> true end)
 
   @doc """
   The records from `step` on: what replaying a snapshot taken at `step` needs.
   Records of an unknown shape are kept, so replay can reject them.
+
+  The log is read one `:disk_log` chunk (64 KB) at a time and the records
+  below `step` are dropped as each chunk is read, so what this holds at once
+  is the tail plus one chunk, however long the history before the snapshot
+  has grown. A world's log is never truncated, so this is what keeps a
+  restart's memory from growing with the world's age.
   """
   @spec records_after(t(), non_neg_integer()) :: {:ok, [record()]} | {:error, term()}
   def records_after(%__MODULE__{} = store, step) do
-    with {:ok, records} <- records(store) do
-      {:ok, Enum.filter(records, fn record -> (record_step(record) || step) >= step end)}
-    end
+    read_log(store, fn record -> (record_step(record) || step) >= step end)
   end
 
   defp record_step({:avwe, @version, {:submit, step, _intent}}), do: step
   defp record_step({:avwe, @version, {:advance, %{step: step}}}), do: step
   defp record_step(_record), do: nil
 
-  defp read_chunks(log, continuation, acc) do
+  # Reads the log chunk by chunk, keeping only the records `keep?` accepts.
+  # A chunk's terms are kept or dropped before the next chunk is asked for,
+  # so a rejected head is never in memory as a whole.
+  defp read_log(%__MODULE__{log: log}, keep?), do: read_chunks(log, :start, keep?, [])
+
+  defp read_chunks(log, continuation, keep?, acc) do
     case :disk_log.chunk(log, continuation) do
       :eof -> {:ok, Enum.reverse(acc)}
       {:error, reason} -> {:error, {:read_log, log, reason}}
-      {next, terms} -> read_chunks(log, next, Enum.reverse(terms, acc))
-      {next, terms, _badbytes} -> read_chunks(log, next, Enum.reverse(terms, acc))
+      {next, terms} -> read_chunks(log, next, keep?, keep(terms, keep?, acc))
+      {next, terms, _badbytes} -> read_chunks(log, next, keep?, keep(terms, keep?, acc))
     end
+  end
+
+  defp keep(terms, keep?, acc) do
+    Enum.reduce(terms, acc, fn term, acc -> if keep?.(term), do: [term | acc], else: acc end)
   end
 
   # Snapshots
 
   @doc """
-  Writes the region as the snapshot for its step and syncs the log, then
-  prunes old snapshots. Option `:keep` (default #{@default_keep}) is how many
-  of the newest snapshots to keep besides the first one, which is always
-  kept so the whole history can be replayed; `:infinity` keeps them all.
+  Syncs the log, writes the region as the snapshot for its step, then prunes
+  old snapshots. Option `:keep` (default #{@default_keep}) is how many of the
+  newest snapshots to keep besides the first one, which is always kept so
+  the whole history can be replayed; `:infinity` keeps them all.
+
+  The log is synced first, on purpose: a snapshot that is on disk before the
+  log behind it would, after a crash between the two, leave a gap below the
+  snapshot that `rebuild_from_start/1` could never close. A log that reaches
+  further than the newest snapshot is only a longer replay.
   """
   @spec snapshot(t(), Region.t(), keyword()) :: :ok | {:error, term()}
   def snapshot(%__MODULE__{} = store, %Region{} = region, opts \\ []) do
     keep = Keyword.get(opts, :keep, @default_keep)
     path = snapshot_path(store, region.step)
-    binary = :erlang.term_to_binary(unsubmit_pending(region))
+    binary = :erlang.term_to_binary({@snapshot_tag, @snapshot_version, unsubmit_pending(region)})
 
-    with :ok <- write_atomically(path, binary),
-         :ok <- :disk_log.sync(store.log) do
+    with :ok <- :disk_log.sync(store.log),
+         :ok <- write_atomically(path, binary) do
       prune(store, keep)
     end
   end
@@ -335,14 +369,21 @@ defmodule Avwe.Store do
     end
   end
 
+  # A file that doesn't decode at all is corrupt. One that decodes but isn't
+  # `{:avwe_snapshot, 1, region}` was written by other code: a later version
+  # of this one, or the untagged format from before the tag. The tag names
+  # which, so the error can say what the file is.
   defp decode_snapshot(binary, path) do
     case :erlang.binary_to_term(binary) do
-      %Region{} = region -> {:ok, region}
-      _other -> {:error, {:corrupt_snapshot, path}}
+      {@snapshot_tag, @snapshot_version, %Region{} = region} -> {:ok, region}
+      other -> {:error, {:unknown_snapshot, path, snapshot_tag(other)}}
     end
   rescue
     ArgumentError -> {:error, {:corrupt_snapshot, path}}
   end
+
+  defp snapshot_tag({tag, version, _payload}) when is_atom(tag), do: {tag, version}
+  defp snapshot_tag(_other), do: :untagged
 
   defp snapshot_path(%__MODULE__{path: path}, step) do
     padded = step |> Integer.to_string() |> String.pad_leading(@snapshot_digits, "0")
@@ -362,10 +403,10 @@ defmodule Avwe.Store do
 
   @doc """
   The region as it was after the last logged record: the newest snapshot
-  with every later record replayed onto it. A snapshot that doesn't decode
-  is skipped for the next older one (with a warning), since the log reaches
-  back to the first; it is an error only if none decodes. `:none` if nothing
-  was saved.
+  with every later record replayed onto it. A snapshot that doesn't decode,
+  or carries another version's tag, is skipped for the next older one (with
+  a warning), since the log reaches back to the first; it is an error only
+  if none can be read. `:none` if nothing was saved.
   """
   @spec rebuild(t()) :: {:ok, Region.t()} | :none | {:error, term()}
   def rebuild(%__MODULE__{} = store), do: replay_from(store, newest_readable_snapshot(store))

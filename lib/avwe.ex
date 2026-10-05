@@ -52,10 +52,12 @@ defmodule Avwe do
       go under `<data_dir>/<id>`. Default: `config :avwe, :data_dir`. `nil`
       means no persistence. A world whose state is already there resumes
       from it: `:start`, `:seed`, `:terrain`, `:hearths`, `:miracles` and
-      `:climate` are ignored (with a warning if the seed differs), but `:systems` is applied, since the
-      rules are code, not state. Replaying a log is only valid under the
-      systems it was recorded with; after changing them, the log from that
-      point on belongs to the new rules.
+      `:climate` are ignored (with a warning naming each of `:seed`,
+      `:climate`, `:hearths` and `:miracles` that differs from the saved
+      world), but `:systems` is applied, since the rules are code, not
+      state. Replaying a log is only valid under the systems it was recorded
+      with; after changing them, the region is snapshotted at once so the
+      log from that point on belongs to the new rules.
     * `:snapshot_every` - steps between snapshots. A snapshot is written at
       the end of any advance that crosses a multiple of this; a multi-step
       advance that crosses one snapshots at the end of that advance, not at

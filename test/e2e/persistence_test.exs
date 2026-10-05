@@ -7,6 +7,11 @@ defmodule Avwe.E2E.PersistenceTest do
   the same state hash. It also covers restarting a world from disk,
   recovering a crashed region (with the intents it had accepted), changing
   the rules on restart, and persistence being off by default in tests.
+
+  The world is the Ember Reach with a light wind from the south-west, so
+  that when Mira lights the kiln-house hearth and sets off for the bend she
+  walks downwind through its smoke: fire, smoke, her nose and the warmed
+  ground all go through the store and back.
   """
 
   use ExUnit.Case, async: false
@@ -19,9 +24,13 @@ defmodule Avwe.E2E.PersistenceTest do
   @moduletag :tmp_dir
   @world :ember_persist
   @region {0, 0}
+  @wind [from: "south-west", m_s: 0.2]
+  @hearth "town-hearth"
 
   defp start(tmp_dir, overrides \\ []) do
-    opts = ember_reach_opts(Keyword.merge([data_dir: tmp_dir], overrides))
+    opts =
+      ember_reach_opts(Keyword.merge([data_dir: tmp_dir, climate: [wind: @wind]], overrides))
+
     {:ok, _pid} = Avwe.start_world(@world, opts)
     :ok
   end
@@ -31,6 +40,27 @@ defmodule Avwe.E2E.PersistenceTest do
   defp live_hash do
     {:ok, hash} = RegionServer.state_hash(@world, @region)
     hash
+  end
+
+  # The live region's fire, smoke, noses and heat, as published after its
+  # last advance: what a restart or a replay must give back exactly.
+  defp fire_state(%{components: components, fields: fields}) do
+    %{
+      hearth: components[:hearth],
+      nose: components[:nose],
+      puffs: fields.smoke.puffs,
+      heat: fields.heat
+    }
+  end
+
+  defp live_fire_state do
+    {:ok, snapshot} = Avwe.snapshot(@world)
+    fire_state(snapshot)
+  end
+
+  # The summaries of the percepts in `percepts` that came through the nose.
+  defp smells(percepts) do
+    percepts |> Enum.filter(&(&1.modality == :smell)) |> Enum.map(& &1.summary)
   end
 
   defp records(tmp_dir) do
@@ -73,16 +103,51 @@ defmodule Avwe.E2E.PersistenceTest do
 
   defp results(session), do: session |> percepts() |> Enum.filter(&(&1.kind == :result))
 
+  # The log lines mentioning `text`, without the logger's own prefix.
+  defp lines(log, text) do
+    for line <- String.split(log, "\n"),
+        line =~ text,
+        do: line |> String.split("] ") |> List.last()
+  end
+
+  # A warning's hearths as `%{id => [fuel_kg, power_w]}`, whatever order the
+  # keys were printed in.
+  defp hearth_values(text) do
+    for [id, body] <- Regex.scan(~r/"([^"]+)" => %\{([^}]*)\}/, text, capture: :all_but_first),
+        into: %{} do
+      {id,
+       for key <- ["fuel_kg", "power_w"] do
+         [value] = Regex.run(~r/#{key}: ([\d.]+)/, body, capture: :all_but_first)
+         String.to_float(value)
+       end}
+    end
+  end
+
   defp light do
     {:ok, %{env: %{light: light}}} = Avwe.snapshot(@world)
     light
   end
 
-  # Mira sets off for the bend but is stopped in the same step (order matters),
-  # then really goes, talks, follows the channel up to the source, and waits.
+  # Mira lights the kiln-house hearth, smells its smoke, and douses it a few
+  # minutes later. She sets off for the bend but is stopped in the same step
+  # (order matters), then really goes, talks, follows the channel up to the
+  # source, and waits; the smoke thins behind her on the way.
   defp play do
     {:ok, mira} = Avwe.connect(@world, body: "mira-vale")
     {:ok, watcher} = Avwe.connect(@world)
+
+    {:ok, _ref} = Session.act(mira, :kindle)
+    Avwe.step(@world, 1)
+    lit = percepts(mira)
+    assert "You light the kiln-house hearth." in Enum.map(lit, & &1.summary)
+    assert smells(lit) == ["You smell woodsmoke on the wind from the south-west."]
+    Avwe.step(@world, 2)
+    {:ok, _ref} = Session.act(mira, :douse)
+    Avwe.step(@world, 1)
+    doused = percepts(mira)
+    assert "You douse the kiln-house hearth." in Enum.map(doused, & &1.summary)
+    assert smells(doused) == ["You smell woodsmoke, faint, from the south-west."]
+    assert "Mira Vale douses the kiln-house hearth." in summaries(watcher)
 
     {:ok, _ref} = Session.act(mira, :go, target: "the-dry-bend")
     {:ok, _ref} = Session.act(mira, :stop)
@@ -95,11 +160,24 @@ defmodule Avwe.E2E.PersistenceTest do
     {:ok, _ref} = Session.act(mira, :wait, params: %{for: 300})
     Avwe.step(@world, 6)
 
-    assert Enum.any?(summaries(mira), &String.starts_with?(&1 || "", "You find The Source."))
+    walked = percepts(mira)
+    assert smells(walked) == ["The smell of smoke fades."]
+    assert Enum.any?(walked, &String.starts_with?(&1.summary || "", "You find The Source."))
     assert "Mira Vale leaves, heading upstream." in summaries(watcher)
     assert {:ok, %{here: %{name: "The Source"}}} = Session.look(mira)
 
     %{mira: mira, watcher: watcher}
+  end
+
+  # Mira lights the hearth and stands in its smoke for `steps` minutes.
+  defp kindle(steps) do
+    {:ok, mira} = Avwe.connect(@world, body: "mira-vale")
+    {:ok, _ref} = Session.act(mira, :kindle)
+    Avwe.step(@world, steps)
+    lit = percepts(mira)
+    assert "You light the kiln-house hearth." in Enum.map(lit, & &1.summary)
+    assert smells(lit) == ["You smell woodsmoke on the wind from the south-west."]
+    mira
   end
 
   setup %{tmp_dir: tmp_dir} do
@@ -116,15 +194,25 @@ defmodule Avwe.E2E.PersistenceTest do
     {:ok, store} = Store.open(store_dir(tmp_dir), @region)
     {:ok, records} = Store.records(store)
     advances = Enum.filter(records, &match?({:avwe, 2, {:advance, _entry}}, &1))
-    assert length(records) == 59
-    assert length(advances) == 53
+    assert length(records) == 65
+    assert length(advances) == 57
     assert Enum.all?(advances, &match?({:avwe, 2, {:advance, %{steps: 1, dt: 60}}}, &1))
-    assert submits_per_step(records) == [{0, 2}, {2, 2}, {27, 1}, {47, 1}]
+    assert submits_per_step(records) == [{0, 1}, {3, 1}, {4, 2}, {6, 2}, {31, 1}, {51, 1}]
     assert Store.snapshots(store) == [0]
 
     assert {:ok, rebuilt} = Store.rebuild_from_start(store)
-    assert rebuilt.step == 53
+    assert rebuilt.step == 57
     assert Region.state_hash(rebuilt) == live_hash()
+
+    # The fire, its smoke, Mira's nose and the warmed ground came back as
+    # they are live, not only as a hash: the hearth doused with wood left,
+    # the smoke still thinning behind her, her nose clear of it again.
+    live = live_fire_state()
+    assert %{@hearth => %{burning: false, out_at: out_at, fuel_kg: fuel}} = live.hearth
+    assert out_at != nil and fuel > 7.9 and fuel < 8.0
+    assert live.nose == %{"mira-vale" => %{smoke: :none}}
+    assert length(live.puffs) == 3
+    assert fire_state(rebuilt) == live
     :ok = Store.close(store)
   end
 
@@ -140,7 +228,7 @@ defmodule Avwe.E2E.PersistenceTest do
 
     :ok = start(tmp_dir)
 
-    assert {:ok, %{step: 53}} = Avwe.snapshot(@world)
+    assert {:ok, %{step: 57}} = Avwe.snapshot(@world)
     assert Avwe.now(@world) == now
     assert live_hash() == hash
 
@@ -148,12 +236,45 @@ defmodule Avwe.E2E.PersistenceTest do
     assert {:ok, %{here: %{name: "The Source"}}} = Session.look(mira)
 
     # And it keeps going, and keeps logging, from there.
-    assert {:ok, %{step: 54}} = Avwe.step(@world, 1)
+    assert {:ok, %{step: 58}} = Avwe.step(@world, 1)
     {:ok, store} = Store.open(store_dir(tmp_dir), @region)
-    assert {:ok, [{:avwe, 2, {:advance, %{step: 53, steps: 1}}}]} = Store.records_after(store, 53)
+    assert {:ok, [{:avwe, 2, {:advance, %{step: 57, steps: 1}}}]} = Store.records_after(store, 57)
     assert {:ok, rebuilt} = Store.rebuild_from_start(store)
     assert Region.state_hash(rebuilt) == live_hash()
     :ok = Store.close(store)
+  end
+
+  test "a fire lit before a restart is still burning after it, with its smoke and its heat", %{
+    tmp_dir: tmp_dir
+  } do
+    # Eight minutes of fire cross the snapshot at step 5, so the restart
+    # resumes from a snapshot taken mid-fire plus three minutes of log.
+    :ok = start(tmp_dir, snapshot_every: 5)
+    mira = kindle(8)
+    before = live_fire_state()
+    assert %{@hearth => %{burning: true, lit_at: lit_at}} = before.hearth
+    assert before.nose == %{"mira-vale" => %{smoke: :clear}}
+    assert length(before.puffs) == 8
+    hash = live_hash()
+    :ok = Session.close(mira)
+    :ok = Avwe.stop_world(@world)
+
+    :ok = start(tmp_dir, snapshot_every: 5)
+    {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+    assert Store.snapshots(store) == [0, 5]
+    :ok = Store.close(store)
+    assert live_hash() == hash
+    assert live_fire_state() == before
+
+    # And the fire burns on for her: lit when it was, still smoking.
+    {:ok, mira} = Avwe.connect(@world, body: "mira-vale")
+
+    assert {:ok, %{hearth: %{id: @hearth, burning: true}, smoke: %{level: :clear}}} =
+             Session.look(mira)
+
+    Avwe.step(@world, 1)
+    assert %{@hearth => %{burning: true, lit_at: ^lit_at}} = live_fire_state().hearth
+    assert length(live_fire_state().puffs) == 9
   end
 
   test "a crashed region comes back as it was after its last advance", %{tmp_dir: tmp_dir} do
@@ -164,12 +285,35 @@ defmodule Avwe.E2E.PersistenceTest do
     crash_region()
 
     assert live_hash() == hash
-    assert {:ok, %{step: 53}} = Avwe.snapshot(@world)
+    assert {:ok, %{step: 57}} = Avwe.snapshot(@world)
 
     {:ok, _ref} = Session.act(sessions.mira, :say, params: %{text: "Still here."})
     Avwe.step(@world, 1)
     assert [%{outcome: :success}] = results(sessions.mira)
     assert ~s(Mira Vale says, "Still here.") in summaries(sessions.watcher)
+  end
+
+  test "a region that crashes mid-fire comes back with the fire, its smoke and its heat", %{
+    tmp_dir: tmp_dir
+  } do
+    :ok = start(tmp_dir)
+    mira = kindle(3)
+    before = live_fire_state()
+    assert %{@hearth => %{burning: true}} = before.hearth
+    assert before.nose == %{"mira-vale" => %{smoke: :clear}}
+    assert length(before.puffs) == 3
+    hash = live_hash()
+
+    crash_region()
+
+    assert live_hash() == hash
+    assert live_fire_state() == before
+
+    # The fire is hers to put out, as it was.
+    {:ok, douse} = Session.act(mira, :douse)
+    Avwe.step(@world, 1)
+    assert [%{intent: ^douse, outcome: :success}] = results(mira)
+    assert %{@hearth => %{burning: false}} = live_fire_state().hearth
   end
 
   test "an intent accepted before a crash still gets its one result", %{tmp_dir: tmp_dir} do
@@ -211,7 +355,7 @@ defmodule Avwe.E2E.PersistenceTest do
 
     {:ok, store} = Store.open(store_dir(tmp_dir), @region)
     assert Store.snapshots(store) == [0, 10, 20, 30, 40, 50]
-    assert {:ok, %Region{step: 53}} = Store.rebuild(store)
+    assert {:ok, %Region{step: 57}} = Store.rebuild(store)
     assert {:ok, %Region{step: 50}} = Store.latest_snapshot(store)
     :ok = Store.close(store)
   end
@@ -271,6 +415,38 @@ defmodule Avwe.E2E.PersistenceTest do
     assert light() > 0.0
   end
 
+  test "a rules change is snapshotted at once, so a crash before the next snapshot replays under the new rules",
+       %{tmp_dir: tmp_dir} do
+    # Two hours from 04:00 under the usual rules, logged, no snapshot but step 0.
+    :ok = start(tmp_dir, snapshot_every: 1_000)
+    Avwe.step(@world, 100)
+    assert light() == 0.0
+    :ok = Avwe.stop_world(@world)
+
+    # Restarted without any systems, and run past 06:00 (step 120): without
+    # Daylight the sun does not rise.
+    :ok = start(tmp_dir, snapshot_every: 1_000, systems: [])
+    {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+    assert Store.snapshots(store) == [0, 100]
+    assert {:ok, %Region{step: 100, systems: []}} = Store.latest_snapshot(store)
+    Avwe.step(@world, 30)
+    assert light() == 0.0
+    hash = live_hash()
+
+    # The crash replays steps 100 to 130 from the snapshot the restart wrote,
+    # under the new (empty) rules: still no sunrise, the same state. Had it
+    # replayed from the step-0 snapshot, Daylight would have raised the sun.
+    crash_region()
+
+    assert {:ok, %{step: 130}} = Avwe.snapshot(@world)
+    assert light() == 0.0
+    assert live_hash() == hash
+    assert {:ok, rebuilt} = Store.rebuild(store)
+    assert rebuilt.systems == []
+    assert Region.state_hash(rebuilt) == hash
+    :ok = Store.close(store)
+  end
+
   test "the saved seed is kept over the one the world is restarted with", %{tmp_dir: tmp_dir} do
     :ok = start(tmp_dir)
     Avwe.step(@world, 5)
@@ -280,6 +456,126 @@ defmodule Avwe.E2E.PersistenceTest do
     log = capture_log(fn -> :ok = start(tmp_dir, seed: 12_345) end)
 
     assert log =~ "ignoring :seed 12345; the world's seed is"
+    assert log =~ "; delete #{store_dir(tmp_dir)} to start over"
+    assert live_hash() == hash
+  end
+
+  test "the saved climate, hearths and miracles are kept over the ones the world is restarted with",
+       %{tmp_dir: tmp_dir} do
+    :ok = start(tmp_dir)
+    Avwe.step(@world, 5)
+    hash = live_hash()
+    :ok = Avwe.stop_world(@world)
+
+    [town, lodge] = ember_reach_opts()[:hearths]
+    [source_fails, last_coal] = ember_reach_opts()[:miracles]
+
+    log =
+      capture_log(fn ->
+        :ok =
+          start(tmp_dir,
+            climate: [wind: [from: "north", m_s: 1.0]],
+            hearths: [Keyword.merge(town, fuel_kg: 20.0, power_w: 6_000.0), lodge],
+            miracles: [source_fails, Keyword.put(last_coal, :heat_w, 900.0)]
+          )
+      end)
+
+    # Map keys print in no fixed order, so each line is matched by its parts.
+    delete = "; delete #{store_dir(tmp_dir)} to start over"
+    [climate] = lines(log, "ignoring :climate")
+
+    assert climate =~
+             ~r/ignoring :climate %\{(from: "north", m_s: 1\.0|m_s: 1\.0, from: "north")\}; /
+
+    assert climate =~
+             ~r/the world's wind is %\{(from: "south-west", m_s: 0\.2|m_s: 0\.2, from: "south-west")\}/
+
+    assert String.ends_with?(climate, delete)
+
+    [hearths] = lines(log, "ignoring :hearths")
+
+    [wanted, kept] =
+      hearths |> String.split("; the world's hearths are ") |> Enum.map(&hearth_values/1)
+
+    assert wanted == %{"lodge-hearth" => [12.0, 5000.0], "town-hearth" => [20.0, 6000.0]}
+    assert kept == %{"lodge-hearth" => [12.0, 5000.0], "town-hearth" => [8.0, 5000.0]}
+    assert String.ends_with?(hearths, delete)
+
+    [miracles] = lines(log, "ignoring :miracles")
+    [wanted, kept] = String.split(miracles, "; the world's miracles are ")
+    assert wanted =~ ~r/"the-last-coal" => %\{[^}]*heat_w: 900\.0/
+    assert kept =~ ~r/"the-last-coal" => %\{[^}]*heat_w: 800\.0/
+    assert wanted =~ ~s("the-source-fails" => %{) and wanted =~ "kind: :event"
+    assert kept =~ ~s("the-source-fails" => %{) and kept =~ "set: %{flow_m3_s: 0.0}"
+    assert String.ends_with?(miracles, delete)
+    refute log =~ "applied_at"
+    refute log =~ "ignoring :seed"
+    assert live_hash() == hash
+    assert {:ok, %{env: %{wind: %{from: "south-west", m_s: 0.2}}}} = Avwe.snapshot(@world)
+  end
+
+  test "a world restarted as it was configured gets no warning, even once a hearth has burned", %{
+    tmp_dir: tmp_dir
+  } do
+    :ok = start(tmp_dir)
+    _mira = kindle(3)
+    assert %{@hearth => %{fuel_kg: fuel}} = live_fire_state().hearth
+    assert fuel < 8.0
+    :ok = Avwe.stop_world(@world)
+
+    log = capture_log(fn -> :ok = start(tmp_dir) end)
+
+    refute log =~ "ignoring"
+  end
+
+  test "a snapshot this build cannot read stops the world from starting, naming it", %{
+    tmp_dir: tmp_dir
+  } do
+    :ok = start(tmp_dir)
+    Avwe.step(@world, 5)
+    :ok = Avwe.stop_world(@world)
+
+    {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+    {:ok, region} = Store.first_snapshot(store)
+    :ok = Store.close(store)
+    path = Path.join([store_dir(tmp_dir), "0-0", "snap-0000000000.bin"])
+    File.write!(path, :erlang.term_to_binary({:avwe_snapshot, 2, region}))
+
+    log =
+      capture_log(fn ->
+        assert {:error,
+                {:shutdown,
+                 {:failed_to_start_child, _child,
+                  {:store, {:unknown_snapshot, ^path, {:avwe_snapshot, 2}}}}}} =
+                 Avwe.start_world(@world, ember_reach_opts(data_dir: tmp_dir))
+      end)
+
+    assert log =~
+             "no snapshot this build can read; #{path} is tagged {:avwe_snapshot, 2} " <>
+               "and this build reads {:avwe_snapshot, 1}. " <>
+               "Delete the world folder #{store_dir(tmp_dir)} to start over."
+
+    assert Avwe.World.whereis(@world) == nil
+  end
+
+  test "a newest snapshot of an unknown version is skipped for an older one on restart", %{
+    tmp_dir: tmp_dir
+  } do
+    :ok = start(tmp_dir, snapshot_every: 10)
+    Avwe.step(@world, 25)
+    hash = live_hash()
+    :ok = Avwe.stop_world(@world)
+
+    {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+    {:ok, region} = Store.latest_snapshot(store)
+    :ok = Store.close(store)
+    newest = Path.join([store_dir(tmp_dir), "0-0", "snap-0000000020.bin"])
+    File.write!(newest, :erlang.term_to_binary({:avwe_snapshot, 2, region}))
+
+    log = capture_log(fn -> :ok = start(tmp_dir, snapshot_every: 10) end)
+
+    assert log =~ "Skipping snapshot #{newest}"
+    assert {:ok, %{step: 25}} = Avwe.snapshot(@world)
     assert live_hash() == hash
   end
 

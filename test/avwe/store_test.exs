@@ -34,6 +34,29 @@ defmodule Avwe.StoreTest do
     records
   end
 
+  # Runs `fun` in a process whose heap may not grow past `words`; the VM
+  # kills it if it does, and that comes back as `{:killed, words}`.
+  defp read_within(words, fun) do
+    parent = self()
+
+    {pid, ref} =
+      spawn_monitor(fn ->
+        Process.flag(:max_heap_size, %{size: words, kill: true, error_logger: false})
+        send(parent, {:read, self(), fun.()})
+      end)
+
+    receive do
+      {:read, ^pid, result} -> result
+      {:DOWN, ^ref, :process, ^pid, :killed} -> {:killed, words}
+    after
+      10_000 -> flunk("The read did not finish in time")
+    end
+  end
+
+  defp snapshot_file(dir, step) do
+    Path.join([dir, "0-0", "snap-" <> String.pad_leading("#{step}", 10, "0") <> ".bin"])
+  end
+
   defp intent(body, verb, opts \\ []) do
     Intent.new(
       body,
@@ -95,6 +118,35 @@ defmodule Avwe.StoreTest do
              ] = records!(store)
 
       assert Region.pending(region) |> Enum.map(& &1.seq) == [0, 1]
+    end
+
+    # Twenty thousand advances before the snapshot's step, three after. The
+    # tail is read in a process that may hold a quarter of a million words:
+    # room for a `:disk_log` chunk's worth of records many times over, but
+    # not for the head (some 460 000 words). A read that materialised the
+    # log would be killed; one that drops the head chunk by chunk is not.
+    test "records_after returns only the tail of a long log, without the head in memory", %{
+      store: store
+    } do
+      region = Ember.region()
+      head = 20_000
+
+      records =
+        for step <- 0..(head + 2) do
+          Store.advance_record(%{region | step: step, time: region.time + step * 60}, 1, 60, [])
+        end
+
+      records
+      |> Enum.chunk_every(5_000)
+      |> Enum.each(fn chunk -> :ok = :disk_log.log_terms(store.log, chunk) end)
+
+      assert Store.records_after(store, head) == {:ok, Enum.drop(records, head)}
+
+      assert {:ok, [{:avwe, 2, {:advance, %{step: ^head}}} | _rest]} =
+               Store.records_after(store, head)
+
+      assert read_within(250_000, fn -> Store.records_after(store, head) end) ==
+               {:ok, Enum.drop(records, head)}
     end
 
     test "a second handle on the same store sees the first one's records", %{
@@ -173,6 +225,34 @@ defmodule Avwe.StoreTest do
       live = logged_advance(busy, store, 1)
       assert {:ok, rebuilt} = Store.rebuild(store)
       assert Region.state_hash(rebuilt) == Region.state_hash(live)
+    end
+
+    test "a snapshot is the region wrapped in its version tag", %{store: store, dir: dir} do
+      region = Ember.region() |> Region.advance(3)
+      :ok = Store.snapshot(store, region)
+
+      assert {:avwe_snapshot, 1, %Region{step: 3} = saved} =
+               dir |> snapshot_file(3) |> File.read!() |> :erlang.binary_to_term()
+
+      assert Region.state_hash(saved) == Region.state_hash(region)
+    end
+
+    test "a snapshot with another version's tag is refused, naming the file", %{
+      store: store,
+      dir: dir
+    } do
+      region = Ember.region()
+      newer = snapshot_file(dir, 3)
+      File.write!(newer, :erlang.term_to_binary({:avwe_snapshot, 2, region}))
+
+      assert Store.latest_snapshot(store) ==
+               {:error, {:unknown_snapshot, newer, {:avwe_snapshot, 2}}}
+
+      # The format from before the tag: a bare region.
+      untagged = snapshot_file(dir, 4)
+      File.write!(untagged, :erlang.term_to_binary(region))
+
+      assert Store.latest_snapshot(store) == {:error, {:unknown_snapshot, untagged, :untagged}}
     end
 
     test "a half-written snapshot is removed on open", %{store: store, dir: dir} do
@@ -366,6 +446,42 @@ defmodule Avwe.StoreTest do
       capture_log(fn ->
         assert {:error, {:corrupt_snapshot, path}} = Store.rebuild(store)
         assert String.ends_with?(path, "snap-0000000000.bin")
+      end)
+    end
+
+    test "a latest snapshot of an unknown version is skipped for an older one", %{
+      store: store,
+      dir: dir
+    } do
+      start = Ember.region()
+      :ok = Store.snapshot(store, start)
+      midway = play(store, start)
+      :ok = Store.snapshot(store, midway)
+      live = play(store, midway)
+
+      latest = snapshot_file(dir, 38)
+      File.write!(latest, :erlang.term_to_binary({:avwe_snapshot, 2, midway}))
+
+      log =
+        capture_log(fn ->
+          assert {:ok, rebuilt} = Store.rebuild(store)
+          assert rebuilt.step == 76
+          assert Region.state_hash(rebuilt) == Region.state_hash(live)
+        end)
+
+      assert log =~
+               "Skipping snapshot #{latest}: {:unknown_snapshot, #{inspect(latest)}, {:avwe_snapshot, 2}}"
+    end
+
+    test "it is an error when every snapshot is of an unknown version", %{store: store, dir: dir} do
+      region = Ember.region()
+      :ok = Store.snapshot(store, region)
+      first = snapshot_file(dir, 0)
+      File.write!(first, :erlang.term_to_binary({:avwe_snapshot, 2, region}))
+      File.write!(snapshot_file(dir, 3), :erlang.term_to_binary({:avwe_snapshot, 2, region}))
+
+      capture_log(fn ->
+        assert Store.rebuild(store) == {:error, {:unknown_snapshot, first, {:avwe_snapshot, 2}}}
       end)
     end
   end
