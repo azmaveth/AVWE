@@ -240,9 +240,22 @@ defmodule Avwe.Systems.FireTest do
       assert [%{outcome: :success, target: @coal}] = results(events)
     end
 
-    test "are what the telnet player types" do
-      assert Command.parse("light the fire") == :kindle
-      assert Command.parse("put out the fire") == :douse
+    test "are what the telnet player types, with or without a hearth's name" do
+      for line <- ["kindle", "light", "light the fire", "light fire", "light the hearth"],
+          do: assert(Command.parse(line) == {:kindle, nil})
+
+      for line <- ["douse", "douse the fire", "put out", "put out the fire", "put out fire"],
+          do: assert(Command.parse(line) == {:douse, nil})
+
+      assert Command.parse("light the lodge hearth") == {:kindle, "lodge hearth"}
+      assert Command.parse("kindle the kiln-house hearth") == {:kindle, "kiln-house hearth"}
+      assert Command.parse("douse the coal") == {:douse, "coal"}
+      assert Command.parse("Douse The Last Coal") == {:douse, "last coal"}
+
+      assert Command.parse("put out the fire in the kiln-house hearth") ==
+               {:douse, "kiln-house hearth"}
+
+      assert Command.parse("put the fire out") == {:unknown, "put the fire out"}
     end
   end
 
@@ -258,6 +271,13 @@ defmodule Avwe.Systems.FireTest do
       assert %{ref: @lodge, level: :faint} = Fire.felt(lit, {x + 1, y})
       assert Fire.felt(lit, {x + 2, y}) == nil
       assert Fire.felt(region, {x + 1, y}) == nil
+
+      # Every source within reach, strongest first.
+      assert [%{ref: @lodge, level: :hot}, %{ref: @coal, level: :warm}] =
+               Fire.felt_all(lit, lodge)
+
+      assert [%{ref: @lodge, level: :faint}] = Fire.felt_all(lit, {x + 1, y})
+      assert Fire.felt_all(lit, {x + 2, y}) == []
     end
 
     test "is nothing from a cold hearth", %{region: region} do

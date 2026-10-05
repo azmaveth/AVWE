@@ -7,7 +7,8 @@ defmodule Avwe.Systems.Heat do
   ## Why a per-cell store with no stencil
 
   Each active cell is one lump of material (`Avwe.Terrain.ground/2`) with a
-  heat capacity and an absorptance (§4.2 of the spec), exchanging heat with
+  heat capacity and an absorptance (§4.2 of `docs/heat-fire-spec.md`, the
+  spec), exchanging heat with
   the air (`k_air`), the sky (`k_rad`, a linearised radiation term) and, for
   the bed, the reeds and the silt banks, the reach beside it (`k_riv`, warm
   seepage that falls off with distance from the channel). Lateral conduction
@@ -44,7 +45,14 @@ defmodule Avwe.Systems.Heat do
   of those materials: open cells of one material see the same forcing and so
   evolve identically. A hearth placed on an open cell later activates it on
   demand, starting from its material's background, which is exactly what the
-  dense field would hold there.
+  dense field would hold there. The energy such a cell brings in is booked
+  as `activated_mj` (signed), so `storage_before_mj` is the field as the step
+  found it, `delta_storage_mj` is the whole change in storage, and the
+  deltas of a run sum to the storage the run ends with less what it started
+  with:
+
+      delta_storage_mj == activated_mj + sun + air_in − air_out + ... + miracles
+      storage_after_mj − storage_before_mj == delta_storage_mj
 
   ## Settling at prepare
 
@@ -62,9 +70,15 @@ defmodule Avwe.Systems.Heat do
   ## Steam
 
   A reach's banks steam when the reach flows and its silt cells are, on
-  average, 8 K above the air at the end of the step. Using the end-of-step air
-  is what makes the banks steam in the evening as the air falls. Emits
+  average, `@steam_dc` (12 K) above the air at the end of the step. Using the
+  end-of-step air is what makes the banks steam in the evening as the air
+  falls; at 12 K they begin toward evening (from about 16:40 upstream to
+  17:50 at the river's end, before the 19:00 sunset) rather than in the
+  mid-afternoon sun, and clear between 07:00 and 08:00. Emits
   `:steam_rising` and `:steam_fading` on the flip, positioned at the reach.
+  That flag is the one rule for steam everywhere: `at/2` reports `steam?` for
+  a wet cell from its reach's flag, never from the cell's own temperature, so
+  a look never contradicts the percept that just said the steam was gone.
   """
 
   @behaviour Avwe.System
@@ -85,6 +99,7 @@ defmodule Avwe.Systems.Heat do
 
     @zero_step %{
       dt: 0,
+      activated_mj: 0.0,
       sun_mj: 0.0,
       air_in_mj: 0.0,
       air_out_mj: 0.0,
@@ -140,7 +155,7 @@ defmodule Avwe.Systems.Heat do
   @k_rad 5.0
   @s_peak 800.0
   @f_ground 0.3
-  @steam_dc 8.0
+  @steam_dc 12.0
   @warm_dc 8.0
   @hot_dc 15.0
   @cold_dc -2.0
@@ -209,17 +224,18 @@ defmodule Avwe.Systems.Heat do
         %Region{terrain: %Terrain{} = terrain, fields: %{heat: %Field{} = field}} = region,
         tick
       ) do
-    field = activate_hearths(field, region, terrain)
+    {field, activated_j} = activate_hearths(field, region, terrain)
     t1 = Tick.end_time(tick)
     reaches = reaches(region)
 
-    {field, _last_step} =
+    {field, last_step} =
       step_field(field, forcing(tick.time, t1), sources_j(region, field), reaches, tick.dt)
 
     steaming = steaming(field, reaches, Weather.air_c(t1))
+    events = steam_events(field.steaming, steaming, terrain)
+    field = %{field | steaming: steaming, last_step: book_activation(last_step, activated_j)}
 
-    {put_field(region, %{field | steaming: steaming}),
-     steam_events(field.steaming, steaming, terrain)}
+    {put_field(region, field), events}
   end
 
   def run(region, _tick), do: {region, []}
@@ -271,12 +287,14 @@ defmodule Avwe.Systems.Heat do
   @doc """
   Adds `cell` to the active set, if it isn't there, holding what the dense
   field would hold: open cells of one material evolve alike, so it starts from
-  its material's background energy scaled to its area.
+  its material's background energy scaled to its area. Returns the field and
+  the joules the cell brought in (0.0 when it was already active), which
+  `run/2` books as `activated_mj`.
   """
-  @spec activate(Field.t(), Terrain.t(), Space.cell()) :: Field.t()
+  @spec activate(Field.t(), Terrain.t(), Space.cell()) :: {Field.t(), float()}
   def activate(%Field{} = field, %Terrain{} = terrain, cell) do
     if Map.has_key?(field.index, cell) do
-      field
+      {field, 0.0}
     else
       static = cell_static(terrain, cell)
       energy = static.area_m2 * background_energy_per_m2(field, static.material)
@@ -288,7 +306,7 @@ defmodule Avwe.Systems.Heat do
         |> insert({static, energy})
         |> Enum.unzip()
 
-      rebuild(field, statics, energies)
+      {rebuild(field, statics, energies), energy}
     end
   end
 
@@ -313,22 +331,21 @@ defmodule Avwe.Systems.Heat do
   `fields.heat` and `terrain`: `%{air_c, ground_c, ground, steam?}` with
   `ground` one of `:hot`, `:warm`, `:cold` or `nil`. The air is `env.air_c`
   when the weather system has published one, else the air at the view's time
-  (`Avwe.Systems.Weather.air_c/1`). `nil` when the snapshot has no heat
-  field.
+  (`Avwe.Systems.Weather.air_c/1`). `steam?` is true on a wet cell (the bed,
+  the reeds, the silt) whose nearest reach is steaming (`steaming?/2`): the
+  same flag the `:steam_rising` and `:steam_fading` events follow. `nil` when
+  the snapshot has no heat field.
   """
   @spec at(map(), Space.cell()) :: map() | nil
   def at(%{fields: %{heat: %Field{} = field}, terrain: %Terrain{} = terrain} = view, cell) do
     air = air_c(view)
     ground = ground_c(field, terrain, cell)
-    above = ground - air
 
     %{
       air_c: air,
       ground_c: ground,
-      ground: band(above),
-      steam?:
-        Terrain.ground(terrain, cell) in @wet and flowing_beside?(view, terrain, cell) and
-          above >= @steam_dc
+      ground: band(ground - air),
+      steam?: Terrain.ground(terrain, cell) in @wet and steaming_beside?(field, terrain, cell)
     }
   end
 
@@ -464,6 +481,7 @@ defmodule Avwe.Systems.Heat do
 
     %{
       dt: dt,
+      activated_mj: 0.0,
       sun_mj: mj.(:sun),
       air_in_mj: mj.(:air_in),
       air_out_mj: mj.(:air_out),
@@ -476,6 +494,20 @@ defmodule Avwe.Systems.Heat do
       delta_storage_mj: mj.(:delta),
       storage_before_mj: mj.(:before),
       storage_after_mj: mj.(:after)
+    }
+  end
+
+  # `step_field/5` sees the field with the step's new cells already in it.
+  # Moving their energy out of `storage_before` and into `activated_mj` and
+  # the delta makes the budget start from the field the step found.
+  defp book_activation(last_step, activated_j) do
+    activated_mj = activated_j / 1.0e6
+
+    %{
+      last_step
+      | activated_mj: activated_mj,
+        storage_before_mj: last_step.storage_before_mj - activated_mj,
+        delta_storage_mj: last_step.delta_storage_mj + activated_mj
     }
   end
 
@@ -744,10 +776,15 @@ defmodule Avwe.Systems.Heat do
 
   # Sources and activation in run
 
+  # Activates every hearth's cell, returning the field and the joules the new
+  # cells brought in.
   defp activate_hearths(field, region, terrain) do
     region
     |> Region.with_components([:hearth, :position])
-    |> Enum.reduce(field, &activate(&2, terrain, Region.get(region, &1, :position)))
+    |> Enum.reduce({field, 0.0}, fn id, {acc, joules} ->
+      {acc, added} = activate(acc, terrain, Region.get(region, id, :position))
+      {acc, joules + added}
+    end)
   end
 
   # Joules entering each cell this step from hearths and from standing
@@ -798,10 +835,10 @@ defmodule Avwe.Systems.Heat do
     end
   end
 
-  defp flowing_beside?(view, terrain, cell) do
+  defp steaming_beside?(field, terrain, cell) do
     case Terrain.nearest_channel(terrain, cell) do
       nil -> false
-      {index, _point, _d} -> flowing?(reaches(view), Terrain.reach_of(terrain, index))
+      {index, _point, _d} -> steaming?(field, Terrain.reach_of(terrain, index))
     end
   end
 

@@ -40,8 +40,8 @@ defmodule Avwe.Telnet.Command do
           | {:say, :whisper | :talk | :shout, String.t()}
           | {:wait, map()}
           | :stop
-          | :kindle
-          | :douse
+          | {:kindle, String.t() | nil}
+          | {:douse, String.t() | nil}
           | :time
           | :help
           | :quit
@@ -57,6 +57,17 @@ defmodule Avwe.Telnet.Command do
 
       iex> Avwe.Telnet.Command.parse("wait until dawn")
       {:wait, %{until: :dawn}}
+
+  Kindling and dousing take an optional hearth name: `kindle`, `light the
+  fire` and `put out the fire` mean the nearest hearth (`nil`); `douse the
+  coal`, `light the lodge hearth` and `put out the fire in the kiln-house
+  hearth` name one.
+
+      iex> Avwe.Telnet.Command.parse("light the fire")
+      {:kindle, nil}
+
+      iex> Avwe.Telnet.Command.parse("put out the fire in the kiln-house hearth")
+      {:douse, "kiln-house hearth"}
   """
   @spec parse(String.t()) :: t()
   def parse(line) do
@@ -94,18 +105,15 @@ defmodule Avwe.Telnet.Command do
   defp command("shout", rest, _line), do: speech(:shout, rest)
   defp command("wait", rest, _line), do: wait(String.downcase(rest))
   defp command("stop", _rest, _line), do: :stop
-  defp command("kindle", _rest, _line), do: :kindle
-  defp command("douse", _rest, _line), do: :douse
 
-  defp command("light", rest, line) do
-    if String.downcase(rest) in ["", "fire", "the fire", "hearth", "the hearth"],
-      do: :kindle,
-      else: {:unknown, line}
-  end
+  defp command(word, rest, _line) when word in ["kindle", "light"],
+    do: {:kindle, hearth_name(rest)}
+
+  defp command("douse", rest, _line), do: {:douse, hearth_name(rest)}
 
   defp command("put", rest, line) do
-    if String.downcase(rest) in ["out", "out fire", "out the fire"],
-      do: :douse,
+    if String.downcase(rest) == "out" or String.starts_with?(String.downcase(rest), "out "),
+      do: {:douse, rest |> strip_prefix("out") |> hearth_name()},
       else: {:unknown, line}
   end
 
@@ -169,6 +177,22 @@ defmodule Avwe.Telnet.Command do
   defp wait_duration(_other), do: wait_help()
 
   defp wait_help, do: {:invalid, "Wait how long? Try: wait 30, wait 2 hours, wait until dawn."}
+
+  # The hearth a player named after kindle, light, douse or put out, or nil
+  # for the nearest: "the fire", "the hearth" and "the fire in the ..." are
+  # ways of saying it, not names.
+  defp hearth_name(rest) do
+    name =
+      rest
+      |> String.downcase()
+      |> strip_prefix("the fire in ")
+      |> strip_prefix("the fire at ")
+      |> strip_prefix("the fire")
+      |> strip_prefix("the ")
+      |> String.trim()
+
+    if name in ["", "fire", "hearth"], do: nil, else: name
+  end
 
   defp strip_prefix(text, prefix) do
     if String.starts_with?(String.downcase(text), prefix),

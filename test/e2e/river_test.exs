@@ -69,7 +69,11 @@ defmodule Avwe.E2E.RiverTest do
   describe "the day before the source fails" do
     @describetag start: {812, day: 199, hour: 14}
 
-    test "Mira, on the silt beside the channel, sees the banks steam from mid-afternoon all night",
+    # The banks steam once their silt is, on average, 12 K over the air: with
+    # this air curve the town's reach crosses that at about 17:10, toward
+    # evening ("the silt used to steam at dusk"), and clears at about 07:30
+    # the next morning as the air warms faster than the silt.
+    test "Mira, on the silt beside the channel, sees the banks steam from the evening to the morning",
          %{port: port} do
       mira = join(port, "mira")
 
@@ -78,12 +82,19 @@ defmodule Avwe.E2E.RiverTest do
       Avwe.step(@world, 2)
       expect(mira, "You stop, 90 m east of where you set out.")
 
-      Avwe.step(@world, 4 * 60 - 2)
+      send_line(mira, "look")
+      expect(mira, "The ground is silt, pale and fine.")
+      expect(mira, "The river runs 30 m to the west, warm. Upstream")
+      refute_line(mira, "Steam lifts off the silt.")
+
+      Avwe.step(@world, 3 * 60 - 2)
+      refute_line(mira, "Steam begins to rise")
+      Avwe.step(@world, 60)
       expect(mira, "Steam begins to rise from the banks.")
 
       send_line(mira, "look")
       expect(mira, ~r/^812 AR, day 199, 18:00\./)
-      expect(mira, "The ground is silt, pale and fine.")
+      expect(mira, "The river runs 30 m to the west, warm, with steam lifting off it.")
       expect(mira, "Steam lifts off the silt.")
 
       Avwe.step(@world, 4 * 60)
@@ -92,28 +103,33 @@ defmodule Avwe.E2E.RiverTest do
       expect(mira, "The river runs 30 m to the west, warm, with steam lifting off it.")
       expect(mira, "The air is cool. The ground is hot underfoot. Steam lifts off the silt.")
 
-      # The morning air warms faster than the silt; by ten the banks as a
-      # whole have stopped steaming, though the silt nearest the channel,
-      # where Mira stands, still does.
-      Avwe.step(@world, 12 * 60)
+      # By 07:40 the banks as a whole have stopped steaming, though the silt
+      # nearest the channel, where Mira stands, is still over the margin: one
+      # rule for steam, so the look agrees with the percept and the river.
+      Avwe.step(@world, 9 * 60 + 40)
       expect(mira, "The steam over the banks thins and is gone.")
 
       send_line(mira, "look")
-      expect(mira, "812 AR, day 200, 10:00. It is daylight.")
+      expect(mira, "812 AR, day 200, 07:40. It is daylight.")
       expect(mira, "The river runs 30 m to the west, warm. Upstream")
+      expect(mira, "The ground is warm underfoot.")
+      refute_line(mira, "Steam lifts off the silt.")
     end
 
     test "a watcher sees the banks steam place by place down the river, and clear in the morning",
          %{port: port} do
       watcher = join(port, "watch", "You are watching.")
 
-      Avwe.step(@world, 2 * 60)
+      Avwe.step(@world, 2 * 60 + 30)
+      refute_line(watcher, "Steam begins to rise")
+
+      Avwe.step(@world, 90)
       expect(watcher, "Steam begins to rise from the banks near The Source.")
       expect(watcher, "Steam begins to rise from the banks near The Dry Bend.")
       expect(watcher, "Steam begins to rise from the banks near Ember Reach.")
       expect(watcher, "Steam begins to rise from the banks near Willow Docks.")
 
-      Avwe.step(@world, 19 * 60)
+      Avwe.step(@world, 15 * 60)
       expect(watcher, "The steam over the banks near Ember Reach thins and is gone.")
       expect(watcher, "The steam over the banks near The Source thins and is gone.")
     end

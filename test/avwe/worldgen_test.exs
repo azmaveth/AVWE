@@ -60,6 +60,25 @@ defmodule Avwe.WorldgenTest do
     end
   end
 
+  describe "climate" do
+    test "takes the wind from the config and refuses a direction off the compass" do
+      assert build(climate: [wind: [from: "north-east", m_s: 0]]).env.wind ==
+               %{from: "north-east", m_s: 0.0}
+
+      for from <- ["up", "northeast", "North", nil] do
+        assert_raise ArgumentError, ~r/^wind: from must be one of north, north-east, /, fn ->
+          build(climate: [wind: [from: from, m_s: 2.0]])
+        end
+      end
+    end
+
+    test "refuses a wind blowing backwards" do
+      assert_raise ArgumentError, ~r/^wind: m_s must be at least 0, got -1.0/, fn ->
+        build(climate: [wind: [from: "north", m_s: -1]])
+      end
+    end
+  end
+
   describe "standing miracles" do
     test "are lit hearths that carry no smoke setting" do
       region = build([])

@@ -178,8 +178,16 @@ defmodule Avwe.E2E.SessionTest do
       {:ok, ref} = Session.act(wren, :kindle)
       Avwe.step(@world, 5)
 
-      assert [%Percept{intent: ^ref, outcome: :success, summary: nil}] =
-               wren |> percepts() |> results()
+      wren_percepts = percepts(wren)
+      assert [%Percept{intent: ^ref, outcome: :success, summary: nil}] = results(wren_percepts)
+
+      # At the fire the smoke is at its source: at least on the wind.
+      assert Enum.any?(
+               wren_percepts,
+               &(&1.type == :smoke_smelled and
+                   &1.summary =~
+                     ~r/^(You smell woodsmoke on the wind from the north\.|The smoke is thick here\.)$/)
+             )
 
       assert [%Percept{kind: :sensed, type: :smoke_smelled, modality: :smell, summary: smelled}] =
                Enum.filter(percepts(tamsin), &(&1.type == :smoke_smelled))
@@ -188,11 +196,12 @@ defmodule Avwe.E2E.SessionTest do
       refute Enum.any?(percepts(pell), &(&1.modality == :smell))
 
       # Her look carries the smoke, with the wind it came on; at the fire,
-      # the wind has already carried it off.
+      # the smoke is at its source however fast the wind carries it off.
       {:ok, look} = Session.look(tamsin)
       assert look.smoke == %{level: :faint, from: "north"}
       assert Prose.look(look) =~ "Woodsmoke, faint, from the north."
-      assert {:ok, %{smoke: nil}} = Session.look(wren)
+      assert {:ok, %{smoke: %{level: at_fire, from: "north"}}} = Session.look(wren)
+      assert at_fire in [:clear, :thick]
 
       {:ok, douse} = Session.act(wren, :douse)
       Avwe.step(@world, 20)
@@ -244,8 +253,10 @@ defmodule Avwe.E2E.SessionTest do
                }
              ] = pell |> percepts() |> results()
 
-      assert {:ok, %{hearth: %{id: "pond-hearth", burning: false, fuel_kg: +0.0}}} =
+      assert {:ok, %{hearth: %{id: "pond-hearth", burning: false, fuel_kg: +0.0} = pond}} =
                Session.look(pell)
+
+      assert {:ok, %{hearths: [^pond]}} = Session.look(pell)
     end
   end
 

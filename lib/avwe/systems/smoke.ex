@@ -12,16 +12,26 @@ defmodule Avwe.Systems.Smoke do
   Each step, every puff decays with a 15 minute time constant (dispersion out
   of the layer a nose lives in) and drifts with the region's wind (`env.wind`,
   constant). A puff older than five time constants, lighter than `@g_min` or
-  off the map is dropped and booked as such. Then every hearth that smoked
-  this step (`hearth.last_step.smoke_g`, from `Avwe.Systems.Fire`) adds one
-  puff holding what survives of its smoke, released uniformly over the time it
-  burned and decaying until the end of the step. That survived mass and its
-  decay-weighted mean age have closed forms, so the mass is exact at any step
-  length: a minute's step leaves a fresh puff just downwind, an hour's step
-  leaves one puff at the plume's centre of mass. Only the plume's shape
-  coarsens with long steps. A fresh puff is judged like an old one: too light
-  it is dropped, and blown off the map within the step it is booked as left
-  at once rather than kept for a step.
+  off the map (`terrain.width` by `terrain.height`, 256 square without one)
+  is dropped and booked as such. Then every hearth that smoked this step
+  (`hearth.last_step.smoke_g`, from `Avwe.Systems.Fire`) adds its smoke as
+  parcels strung along the wind: the time it burned is cut into
+  `n = min(4, max(1, ceil(dt / 15)))` equal intervals, and each parcel holds
+  what survives of the smoke released uniformly over its own interval,
+  decaying until the end of the step, at the decay-weighted mean age of that
+  interval. Survived mass and mean age have closed forms, so the mass is
+  exact at any step length and the conservation identity holds parcel by
+  parcel: a minute's step leaves four parcels 15 to 105 m downwind at 2 m/s,
+  an hour's step four parcels spread along the plume. One parcel a minute was
+  60 m downwind by the time anyone sniffed it, so nobody at a hearth smelled
+  smoke and 100 m downwind the smell came and went minute by minute. A fresh
+  parcel is judged like an old one: too light it is dropped, and blown off
+  the map within the step it is booked as left at once rather than kept for
+  a step.
+
+  Bound: puffs alive per hearth ≤ `4 · (ceil(max_age / dt) + 1)`, four times
+  the one-parcel bound, so ≤ 304 at dt = 60 and 8 at dt = 3 600, whatever the
+  history: twenty hearths keep at most 6 080 puffs.
 
   ## Conservation
 
@@ -33,10 +43,15 @@ defmodule Avwe.Systems.Smoke do
   ## Smell
 
   A body's nose sees the smoke as a surface density: each puff is a Gaussian
-  whose width grows at 0.3 m/s from 5 m. The level (`:faint`, `:clear`,
-  `:thick` or `:none`) lives in the body's `:nose` component, and a change
-  emits `:smoke_smelled` (`data: %{level, from}`, the wind's direction) or
-  `:smoke_faded`. Nothing here draws random numbers.
+  whose width grows at 0.3 m/s from 5 m. At the fire itself the wind has
+  carried even the youngest parcel some metres off, so a body within one cell
+  of an ordinary hearth that smoked this step smells at least `:clear`: the
+  smoke is at its source (`level_at/3`, which `Avwe.Perception.look/2` reads
+  too, so the look and the percept agree). Standing miracles do not smoke
+  and give nothing. The level (`:faint`, `:clear`, `:thick` or `:none`) lives
+  in the body's `:nose` component, and a change emits `:smoke_smelled`
+  (`data: %{level, from}`, the wind's direction) or `:smoke_faded`. Nothing
+  here draws random numbers.
   """
 
   @behaviour Avwe.System
@@ -46,18 +61,23 @@ defmodule Avwe.Systems.Smoke do
 
   @tau_s 900.0
   @max_age_s 4_500.0
-  # Below this a puff is dropped. 1 mg keeps a minute's puff from a 5 kW
-  # hearth (0.18 g) alive until it reaches the age limit, so long and short
+  # Below this a puff is dropped. A quarter of a milligram keeps each of the
+  # four parcels of a minute's smoke from a 5 kW hearth (0.047 g each) alive
+  # until it reaches the age limit (0.32 mg at 4 500 s), so long and short
   # steps leave the same plume.
-  @g_min 1.0e-3
+  @g_min 2.5e-4
   @sigma0_m 5.0
   @spread_m_s 0.3
-  @default_width 256
+  @default_size {256, 256}
   @default_wind %{from: "south-west", m_s: 2.0}
   @series_below 1.0e-3
+  @parcel_s 15
+  @max_parcels 4
+  @at_source_cells 1
   @thick 1.0e-3
   @clear 1.0e-4
   @faint 1.0e-5
+  @levels [:none, :faint, :clear, :thick]
   @zero_step %{
     emitted_g: 0.0,
     survived_g: 0.0,
@@ -87,7 +107,7 @@ defmodule Avwe.Systems.Smoke do
   def run(region, tick) do
     field = Map.get(region.fields, :smoke, new())
     wind = Map.get(region.env, :wind, @default_wind)
-    width = map_width(region)
+    size = map_extent(region)
     t1 = Tick.end_time(tick)
 
     acc = %{
@@ -99,8 +119,8 @@ defmodule Avwe.Systems.Smoke do
       before: zero()
     }
 
-    {kept, acc} = age_puffs(field.puffs, acc, wind, width, tick)
-    {fresh, acc} = emit_puffs(region, acc, wind, width, tick)
+    {kept, acc} = age_puffs(field.puffs, acc, wind, size, tick)
+    {fresh, acc} = emit_puffs(region, acc, wind, size, tick)
     puffs = Enum.sort_by(kept ++ fresh, &{&1.born, &1.x, &1.y})
 
     last_step = %{
@@ -115,11 +135,11 @@ defmodule Avwe.Systems.Smoke do
 
     field = %{field | puffs: puffs, last_step: last_step}
     region = %{region | fields: Map.put(region.fields, :smoke, field)}
-    smell(region, field, wind, t1)
+    smell(region, wind, t1)
   end
 
   # Decay, drift and cull the puffs already in the air, in list order.
-  defp age_puffs(puffs, acc, wind, width, tick) do
+  defp age_puffs(puffs, acc, wind, size, tick) do
     t1 = Tick.end_time(tick)
     fade = :math.exp(-tick.dt / @tau_s)
     {dx, dy} = drift_cells(wind, tick.dt)
@@ -136,7 +156,7 @@ defmodule Avwe.Systems.Smoke do
 
         cond do
           t1 - puff.born > @max_age_s or g < @g_min -> {kept, add(acc, :dropped, g)}
-          not on_map?(moved, width) -> {kept, add(acc, :left, g)}
+          not on_map?(moved, size) -> {kept, add(acc, :left, g)}
           true -> {[moved | kept], acc}
         end
       end)
@@ -144,15 +164,12 @@ defmodule Avwe.Systems.Smoke do
     {Enum.reverse(kept), acc}
   end
 
-  # One puff per hearth that smoked this step: the closed-form survived mass
-  # of smoke released uniformly over [t0, t0 + burn_s] and decaying until t1,
-  # placed at its decay-weighted mean age along the wind. Culled on the same
-  # terms as an aged puff: too light is dropped, off the map has left. A
-  # hearth the fire system has not stepped yet (or one built by hand without
-  # a `last_step`) has smoked nothing, as the heat system reads it too.
-  defp emit_puffs(region, acc, wind, width, tick) do
-    t1 = Tick.end_time(tick)
-
+  # The parcels of every hearth that smoked this step, hearths in id order
+  # and each hearth's parcels oldest first. Culled on the same terms as an
+  # aged puff: too light is dropped, off the map has left. A hearth the fire
+  # system has not stepped yet (or one built by hand without a `last_step`)
+  # has smoked nothing, as the heat system reads it too.
+  defp emit_puffs(region, acc, wind, size, tick) do
     region
     |> Region.with_components([:hearth, :position])
     |> Enum.map(fn id ->
@@ -160,59 +177,84 @@ defmodule Avwe.Systems.Smoke do
       {Region.get(region, id, :position), Map.get(hearth, :last_step, Fire.zero_step())}
     end)
     |> Enum.filter(fn {_position, last_step} -> last_step.smoke_g > 0 end)
-    |> Enum.reduce({[], acc}, fn {{hx, hy}, %{smoke_g: m, burn_s: b}}, {fresh, acc} ->
-      survived = survived(m, b, tick.dt)
-      age = mean_age(b, tick.dt)
-      {dx, dy} = drift_cells(wind, age)
-      puff = %{g: survived, born: t1 - age, x: hx + 0.5 + dx, y: hy + 0.5 + dy}
-
+    |> Enum.flat_map(fn {position, last_step} -> parcels(position, last_step, wind, tick) end)
+    |> Enum.reduce({[], acc}, fn {puff, released}, {fresh, acc} ->
       acc =
         acc
-        |> add(:emitted, m)
-        |> add(:survived, survived)
-        |> add(:decayed, m - survived)
+        |> add(:emitted, released)
+        |> add(:survived, puff.g)
+        |> add(:decayed, released - puff.g)
 
       cond do
-        survived < @g_min -> {fresh, add(acc, :dropped, survived)}
-        not on_map?(puff, width) -> {fresh, add(acc, :left, survived)}
+        puff.g < @g_min -> {fresh, add(acc, :dropped, puff.g)}
+        not on_map?(puff, size) -> {fresh, add(acc, :left, puff.g)}
         true -> {[puff | fresh], acc}
       end
     end)
     |> then(fn {fresh, acc} -> {Enum.reverse(fresh), acc} end)
   end
 
-  # m · exp(−dt/τ) · (τ/b)(exp(b/τ) − 1), written so nothing overflows.
-  defp survived(m, b, dt) when b / @tau_s < @series_below do
+  # One hearth's smoke this step as `{puff, released_g}` parcels: the burn
+  # `[t0, t0 + b]` cut into `n` equal intervals, each parcel the closed-form
+  # survived mass of the smoke released uniformly over its interval and
+  # decaying until t1, at its decay-weighted mean age along the wind.
+  defp parcels({hx, hy}, %{smoke_g: m, burn_s: b}, wind, tick) do
+    t1 = Tick.end_time(tick)
+    n = (tick.dt + @parcel_s - 1) |> div(@parcel_s) |> max(1) |> min(@max_parcels)
+    released = m / n
+    span = b / n
+
+    for j <- 0..(n - 1)//1 do
+      lead = tick.dt - j * span
+      age = mean_age(span, lead)
+      {dx, dy} = drift_cells(wind, age)
+
+      puff = %{
+        g: survived(released, span, lead),
+        born: t1 - age,
+        x: hx + 0.5 + dx,
+        y: hy + 0.5 + dy
+      }
+
+      {puff, released}
+    end
+  end
+
+  # m · exp(−lead/τ) · (τ/b)(exp(b/τ) − 1): what survives at `lead` seconds
+  # after the release of `m` grams uniformly over `b` seconds, written so
+  # nothing overflows.
+  defp survived(m, b, lead) when b / @tau_s < @series_below do
     r = b / @tau_s
-    m * :math.exp(-dt / @tau_s) * (1 + r / 2 + r * r / 6)
+    m * :math.exp(-lead / @tau_s) * (1 + r / 2 + r * r / 6)
   end
 
-  defp survived(m, b, dt) do
-    m * (@tau_s / b) * (:math.exp((b - dt) / @tau_s) - :math.exp(-dt / @tau_s))
+  defp survived(m, b, lead) do
+    m * (@tau_s / b) * (:math.exp((b - lead) / @tau_s) - :math.exp(-lead / @tau_s))
   end
 
-  # dt − b + τ − b/(exp(b/τ) − 1): the decay-weighted mean age at t1 of smoke
-  # released uniformly over [t0, t0 + b].
-  defp mean_age(b, dt) when b / @tau_s < @series_below, do: dt - b / 2
+  # lead − b + τ − b/(exp(b/τ) − 1): the decay-weighted mean age, `lead`
+  # seconds after the release began, of smoke released uniformly over `b`.
+  defp mean_age(b, lead) when b / @tau_s < @series_below, do: lead - b / 2
 
-  defp mean_age(b, dt) do
+  defp mean_age(b, lead) do
     r = b / @tau_s
     tail = if r > 50, do: b * :math.exp(-r), else: b / (:math.exp(r) - 1)
-    dt - b + @tau_s - tail
+    lead - b + @tau_s - tail
   end
 
-  defp on_map?(%{x: x, y: y}, width), do: x >= 0 and x < width and y >= 0 and y < width
+  defp on_map?(%{x: x, y: y}, {width, height}),
+    do: x >= 0 and x < width and y >= 0 and y < height
 
-  defp map_width(%Region{terrain: %{width: width}}), do: width
-  defp map_width(_region), do: @default_width
+  defp map_extent(%Region{terrain: %{width: width, height: height}}), do: {width, height}
+  defp map_extent(_region), do: @default_size
 
   # Smell
 
-  defp smell(region, field, wind, t1) do
+  defp smell(region, wind, t1) do
     region
     |> Region.with_components([:body, :position])
     |> Enum.reduce({region, []}, fn body, {acc, events} ->
-      level = field |> density_g_m2(Region.get(acc, body, :position), t1) |> level()
+      level = level_at(acc, Region.get(acc, body, :position), t1)
 
       if level == nose_level(Region.get(acc, body, :nose)) do
         {acc, events}
@@ -273,6 +315,38 @@ defmodule Avwe.Systems.Smoke do
   def level(density) when density >= @clear, do: :clear
   def level(density) when density >= @faint, do: :faint
   def level(_density), do: :none
+
+  @doc """
+  What a nose at `cell` smells at `time` in a region or view carrying
+  `fields.smoke` and the hearths: the level of the smoke density there, and
+  at least `:clear` within one cell of an ordinary hearth that smoked this
+  step, where the smoke is at its source. `:none` without a smoke field.
+  """
+  @spec level_at(map(), Space.cell(), number()) :: level()
+  def level_at(%{fields: %{smoke: field}} = view, cell, time) do
+    from_plume = field |> density_g_m2(cell, time) |> level()
+    if at_source?(view, cell), do: stronger(from_plume, :clear), else: from_plume
+  end
+
+  def level_at(_view, _cell, _time), do: :none
+
+  defp at_source?(%{components: components}, cell) do
+    hearths = Map.get(components, :hearth, %{})
+    positions = Map.get(components, :position, %{})
+
+    Enum.any?(hearths, fn {id, hearth} ->
+      position = positions[id]
+
+      position != nil and match?(%{last_step: %{smoke_g: g}} when g > 0, hearth) and
+        Space.distance(cell, position) <= @at_source_cells
+    end)
+  end
+
+  defp stronger(a, b) do
+    if Enum.find_index(@levels, &(&1 == a)) >= Enum.find_index(@levels, &(&1 == b)),
+      do: a,
+      else: b
+  end
 
   # Neumaier compensated sums: {sum, compensation}.
 

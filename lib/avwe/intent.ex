@@ -10,6 +10,13 @@ defmodule Avwe.Intent do
   Verbs:
 
     * `:go` - walk to a place the body knows. `target` is the place's id.
+    * `:follow` - follow the river channel to its head or its end. `params`:
+      `%{direction: :upstream | :downstream}`. Blocked with `:no_channel`
+      when the body is not near the channel, `:invalid` without a direction.
+    * `:walk` - walk a distance in a compass direction. `params`:
+      `%{direction: "north" | ... | "north-west", distance_m: metres}`
+      (10 to 2 000; 100 when left out). Blocked with `:edge` at the map's
+      edge, `:invalid` otherwise.
     * `:wait` - let time pass. `params`: `%{for: seconds}` or
       `%{until: :dawn | :dusk}`.
     * `:say` - speak. `params`: `%{text: text, volume: :whisper | :talk | :shout}`.

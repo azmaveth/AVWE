@@ -101,7 +101,11 @@ defmodule Avwe.Systems.RiverTest do
 
   describe "conservation" do
     property "storage changes only by inflow minus outflow minus loss, at any step length" do
-      check all steps <- list_of(member_of([60, 600, 3_600]), min_length: 1, max_length: 12),
+      check all steps <-
+                  list_of(member_of([60, 600, 3_600, 21_600, 86_400]),
+                    min_length: 1,
+                    max_length: 12
+                  ),
                 minutes_before <- integer(0..120),
                 max_runs: 25 do
         Enum.reduce(steps, before_failure(minutes_before), fn dt, region ->
@@ -130,14 +134,17 @@ defmodule Avwe.Systems.RiverTest do
       assert dusk - dawn >= 0.5
     end
 
-    test "agrees at minute and hour steps, and a day step holds the steady state" do
+    test "agrees at minute, hour and day steps" do
       region = Ember.region({812, day: 199, hour: 7}, systems: @systems)
       fine = region |> Region.advance(60, dt: 60) |> temps()
       coarse = region |> Region.advance(1, dt: 3_600) |> temps()
+      fine_day = region |> Region.advance(1_440, dt: 60) |> temps()
       day = region |> Region.advance(1, dt: 86_400) |> temps()
 
       for {a, b} <- Enum.zip(fine, coarse), do: assert_in_delta(a, b, 0.05)
-      for {a, b} <- Enum.zip(temps(region), day), do: assert_in_delta(a, b, 0.05)
+      # A day step lands on the day's own 07:00 phase, not a daily-mean state.
+      for {a, b} <- Enum.zip(fine_day, day), do: assert_in_delta(a, b, 0.05)
+      refute Enum.all?(Enum.zip(temps(region), day), fn {a, b} -> abs(a - b) < 0.05 end)
     end
   end
 
@@ -148,6 +155,53 @@ defmodule Avwe.Systems.RiverTest do
     times = for %Event{type: :river_silent, time: t} <- events, do: t
     assert length(times) == 23
     assert times == Enum.sort(times)
+  end
+
+  describe "sub-stepping" do
+    defp silences(events),
+      do:
+        Map.new(for %Event{type: :river_silent, data: %{reach: k}, time: t} <- events, do: {k, t})
+
+    # Both runs cross the failure at minute steps, so an hour step never
+    # straddles it (the miracle would stop the spring for the whole hour).
+    test "hour steps and minute steps silence each reach within five minutes of each other" do
+      at_failure = before_failure(60) |> Region.advance(60, dt: 60) |> elem_drained()
+
+      coarse_hour = Region.advance(at_failure, 1, dt: 3_600)
+      fine_hour = Region.advance(at_failure, 60, dt: 60)
+      assert storage(fine_hour) > 0.1 * storage(at_failure)
+      assert_in_delta storage(coarse_hour), storage(fine_hour), 0.01 * storage(fine_hour)
+
+      {coarse_events, _coarse} =
+        coarse_hour |> Region.advance(1, dt: 3_600) |> Region.drain_events()
+
+      {fine_events, fine} = fine_hour |> Region.advance(60, dt: 60) |> Region.drain_events()
+
+      coarse_silences = silences(coarse_events)
+      fine_silences = silences(fine_events)
+      reaches = Enum.to_list(0..(length(Terrain.reaches(fine.terrain)) - 1))
+
+      assert Map.keys(coarse_silences) |> Enum.sort() == reaches
+      assert Map.keys(fine_silences) |> Enum.sort() == reaches
+
+      for k <- reaches do
+        assert abs(coarse_silences[k] - fine_silences[k]) <= 5 * 60,
+               "reach #{k}: hour steps #{coarse_silences[k]}, minute steps #{fine_silences[k]}"
+      end
+    end
+
+    test "a day step from before the failure leaves the river dry, its water gone out, not lost" do
+      before = before_failure(60)
+      stored = storage(before)
+      stepped = Region.advance(before, 1, dt: 86_400)
+      %{outflow_m3: outflow, lost_m3: lost} = river(stepped).last_step
+
+      assert Enum.all?(states(stepped), & &1.silent)
+      assert outflow > 0.9 * stored
+      assert lost < 0.05 * outflow
+    end
+
+    defp elem_drained(region), do: region |> Region.drain_events() |> elem(1)
   end
 
   defp total_length(region),

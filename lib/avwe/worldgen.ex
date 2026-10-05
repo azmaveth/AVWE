@@ -23,13 +23,16 @@ defmodule Avwe.Worldgen do
       its name and description from the Quire article with its id when there
       is one, else from `:name` and `:description`. It never smokes.
     * `:climate` - `wind: [from: direction, m_s: speed]`, the region's
-      constant wind (`env.wind`). Default: 2 m/s from the south-west.
+      constant wind (`env.wind`). `from` must be one of the eight compass
+      directions (`Avwe.Space.directions/0`) and `m_s` at least zero; a bad
+      value raises `ArgumentError` here, as a bad hearth does, rather than
+      in the smoke system's first step. Default: 2 m/s from the south-west.
 
   Finally each system prepares the region for its starting time
   (`Avwe.Region.prepare/1`).
   """
 
-  alias Avwe.{Calendar, Quire, Region, Terrain}
+  alias Avwe.{Calendar, Quire, Region, Space, Terrain}
   alias Avwe.Systems.{Fire, River}
   alias Avwe.Terrain.Generator
 
@@ -55,9 +58,21 @@ defmodule Avwe.Worldgen do
     wind = climate |> List.wrap() |> Keyword.get(:wind, [])
 
     Region.put_env(region, :wind, %{
-      from: Keyword.get(wind, :from, @default_wind.from),
-      m_s: Keyword.get(wind, :m_s, @default_wind.m_s)
+      from: direction!(Keyword.get(wind, :from, @default_wind.from)),
+      m_s: non_negative!(Keyword.put_new(wind, :m_s, @default_wind.m_s), :m_s, nil, "wind")
     })
+  end
+
+  # The wind's direction, checked where a bad one is easiest to explain: the
+  # smoke system would fail to drift its first puff.
+  defp direction!(from) do
+    if from in Space.directions(),
+      do: from,
+      else:
+        raise(
+          ArgumentError,
+          "wind: from must be one of #{Enum.join(Space.directions(), ", ")}, got #{inspect(from)}"
+        )
   end
 
   defp add_terrain(region, nil), do: region
@@ -124,22 +139,25 @@ defmodule Avwe.Worldgen do
   # A hearth's numbers, checked where a bad one is easiest to explain: the
   # fire system divides by `power_w`, and negative fuel is not a hearth.
   # `what` names the thing being built, so the message blames what the config
-  # calls it.
+  # calls it; `id` is left out for the one wind.
   defp positive!(config, key, id, what \\ "hearth") do
     value = Keyword.fetch!(config, key) * 1.0
 
     if value > 0,
       do: value,
-      else: raise(ArgumentError, "#{what} #{inspect(id)}: #{key} must be above 0, got #{value}")
+      else: raise(ArgumentError, "#{blame(what, id)}: #{key} must be above 0, got #{value}")
   end
 
-  defp non_negative!(config, key, id) do
+  defp non_negative!(config, key, id, what \\ "hearth") do
     value = Keyword.fetch!(config, key) * 1.0
 
     if value >= 0,
       do: value,
-      else: raise(ArgumentError, "hearth #{inspect(id)}: #{key} must be at least 0, got #{value}")
+      else: raise(ArgumentError, "#{blame(what, id)}: #{key} must be at least 0, got #{value}")
   end
+
+  defp blame(what, nil), do: what
+  defp blame(what, id), do: "#{what} #{inspect(id)}"
 
   defp add_miracles(region, miracles, quire_world) do
     Enum.reduce(miracles, region, fn miracle, acc ->

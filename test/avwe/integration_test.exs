@@ -40,15 +40,17 @@ defmodule Avwe.IntegrationTest do
         do: {id, Region.get(region, id, :hearth)}
   end
 
+  # The exchange lines plus the energy of any cell activated this step.
   defp lines_sum(b) do
-    b.sun_mj + b.air_in_mj - b.air_out_mj + b.sky_in_mj - b.sky_out_mj + b.river_in_mj -
-      b.river_out_mj + b.hearths_mj + b.miracles_mj
+    b.activated_mj + b.sun_mj + b.air_in_mj - b.air_out_mj + b.sky_in_mj - b.sky_out_mj +
+      b.river_in_mj - b.river_out_mj + b.hearths_mj + b.miracles_mj
   end
 
   defp assert_heat(before, after_step, dt) do
     b = heat(after_step).last_step
 
     assert b.dt == dt
+    assert is_float(b.activated_mj)
     assert_in_delta b.delta_storage_mj, lines_sum(b), 1.0e-8
     assert_in_delta b.storage_after_mj - b.storage_before_mj, b.delta_storage_mj, 1.0e-8
     assert_in_delta b.storage_before_mj, Heat.stored_mj(heat(before)), 1.0e-8

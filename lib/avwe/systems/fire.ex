@@ -218,7 +218,8 @@ defmodule Avwe.Systems.Fire do
 
   @doc """
   The warmth a body at `cell` feels from the burning hearths around it:
-  `%{ref, name, level, w_m2}` for the strongest, or `nil`.
+  `%{ref, name, level, w_m2}` for the strongest, or `nil`. `felt_all/2` lists
+  every one.
 
   A fire radiates half its power into the hemisphere above it, so the
   irradiance at `d` metres is `0.5·P/(2π·d²)` (at least 1 m): `:hot` from
@@ -227,7 +228,15 @@ defmodule Avwe.Systems.Fire do
   nothing beyond.
   """
   @spec felt(map(), Space.cell()) :: %{ref: String.t(), name: String.t(), level: atom()} | nil
-  def felt(%{components: components} = view, cell) do
+  def felt(view, cell), do: view |> felt_all(cell) |> List.first()
+
+  @doc """
+  Every burning source within reach of `cell` whose warmth a body there
+  feels, as `felt/2` reports them, strongest first (then by id): the fire
+  under its nose and the Last Coal beside it are both there.
+  """
+  @spec felt_all(map(), Space.cell()) :: [map()]
+  def felt_all(%{components: components} = view, cell) do
     view
     |> hearth_near(cell)
     |> Enum.filter(fn {_id, hearth, _distance} -> hearth.burning end)
@@ -237,7 +246,7 @@ defmodule Avwe.Systems.Fire do
       %{ref: id, name: name(components, id), level: level(w_m2), w_m2: w_m2}
     end)
     |> Enum.reject(&(&1.level == nil))
-    |> Enum.max_by(& &1.w_m2, fn -> nil end)
+    |> Enum.sort_by(&{-&1.w_m2, &1.ref})
   end
 
   @doc "True when the hearth is a standing miracle that cannot be doused."

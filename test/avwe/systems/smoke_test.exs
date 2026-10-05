@@ -109,8 +109,9 @@ defmodule Avwe.Systems.SmokeTest do
       {hourly, _events} = run(lit, 1, 3_600)
       {minutely, _events} = run(lit, 60, 60)
 
-      assert [_one_puff] = smoke(hourly).puffs
-      assert length(smoke(minutely).puffs) == 60
+      # Four parcels a step, whatever the step.
+      assert length(smoke(hourly).puffs) == 4
+      assert length(smoke(minutely).puffs) == 240
       assert_in_delta mass(hourly), mass(minutely), 1.0e-9
 
       {hx, hy} = centre(hourly)
@@ -125,10 +126,10 @@ defmodule Avwe.Systems.SmokeTest do
     end
 
     test "a fresh puff blown off the map within the step has left, not stayed", %{region: region} do
-      # An hour at 2 m/s from the north puts the lodge's plume 170 cells
-      # south, past the map's edge: nothing is stored, and what survived the
-      # hour is booked as having left.
-      {stepped, _events} = region |> wind("north", 2.0) |> light(@lodge) |> run(1, 3_600)
+      # An hour at 5 m/s from the north puts even the youngest of the lodge's
+      # four parcels (376 s old, 190 cells south) past the map's edge: nothing
+      # is stored, and what survived the hour is booked as having left.
+      {stepped, _events} = region |> wind("north", 5.0) |> light(@lodge) |> run(1, 3_600)
       b = smoke(stepped).last_step
 
       assert smoke(stepped).puffs == []
@@ -147,7 +148,42 @@ defmodule Avwe.Systems.SmokeTest do
       puffs = smoke(region).puffs
 
       assert puffs == Enum.sort_by(puffs, &{&1.born, &1.x, &1.y})
-      assert length(puffs) <= 76
+      # Four parcels a step for at most 76 steps of age.
+      assert length(puffs) <= 4 * 76
+    end
+
+    test "the map's height bounds the plume, not its width" do
+      # A map twice as tall as it is wide: smoke blown south past the width
+      # but not the height is still on the map.
+      terrain = Avwe.Terrain.new(width: 20, height: 60, seed: 1)
+
+      hearth = %{
+        fuel_kg: 12.0,
+        burning: true,
+        lit_at: 0,
+        out_at: nil,
+        power_w: 5_000.0,
+        low_kg: 1.0,
+        last_step: Fire.zero_step()
+      }
+
+      region =
+        [id: {0, 0}, seed: 1, systems: [Fire, Smoke]]
+        |> Region.new()
+        |> Map.put(:terrain, terrain)
+        |> Region.put_entity("h", %{hearth: hearth, position: {10, 10}})
+        |> wind("north", 2.0)
+        |> Region.prepare()
+
+      {stepped, _events} = run(region, 3, 60)
+      ys = Enum.map(smoke(stepped).puffs, & &1.y)
+      assert Enum.any?(ys, &(&1 >= 20))
+      assert Enum.all?(ys, &(&1 < 60))
+      assert smoke(stepped).last_step.left_g == 0.0
+
+      {blown, _events} = run(stepped, 3, 60)
+      assert blown.fields.smoke.last_step.left_g > 0
+      assert Enum.all?(blown.fields.smoke.puffs, &(&1.y < 60))
     end
   end
 
@@ -176,7 +212,7 @@ defmodule Avwe.Systems.SmokeTest do
       {region, events} = run(region, 115)
       assert smelled(events, "north") == []
       assert Region.get(region, "north", :nose) == nil
-      assert length(smoke(region).puffs) <= 76
+      assert length(smoke(region).puffs) <= 4 * 76
 
       {region, events} = region |> submit(:douse, target: @lodge) |> run(20)
       assert ["south"] = faded(events, "south")
@@ -184,6 +220,41 @@ defmodule Avwe.Systems.SmokeTest do
 
       {region, _events} = run(region, 120)
       assert smoke(region).puffs == []
+    end
+
+    test "at the hearth the smoke is at its source: at least clear, and never from the Last Coal",
+         %{region: region} do
+      {lit, events} = region |> submit(:kindle, target: @lodge) |> run(1)
+
+      assert [%{level: level, from: "north"}] = smelled(events, @mira)
+      assert level in [:clear, :thick]
+      assert Smoke.level_at(lit, Ember.places().lodge, lit.time) == level
+
+      # The rule reads the step's smoke: doused at the start of a step, the
+      # hearth burned nothing in it, and the last minute's smoke is 120 m off.
+      {out, events} = lit |> submit(:douse, target: @lodge) |> run(1)
+      assert faded(events, @mira) == [@mira]
+      assert Smoke.level_at(out, Ember.places().lodge, out.time) == :none
+
+      # The Last Coal burns at the lodge the whole time and gives no smoke.
+      {cold, events} = run(region, 1)
+      assert smelled(events, @mira) == []
+      assert Smoke.level_at(cold, Ember.places().lodge, cold.time) == :none
+    end
+
+    test "100 m downwind the smell holds steady from minute to minute", %{region: region} do
+      {x, y} = Ember.places().lodge
+      region = region |> body("downwind", {x, y + 10}) |> light(@lodge)
+      {region, _events} = run(region, 3)
+
+      levels =
+        Enum.map_reduce(1..10, region, fn _, r ->
+          {r, _events} = run(r, 1)
+          {Region.get(r, "downwind", :nose), r}
+        end)
+        |> elem(0)
+
+      assert Enum.all?(levels, &(&1 != nil and &1.smoke != :none)), inspect(levels)
     end
   end
 

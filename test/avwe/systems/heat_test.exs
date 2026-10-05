@@ -179,9 +179,11 @@ defmodule Avwe.Systems.HeatTest do
     Enum.max(Enum.zip_with(temperatures(field(a)), temperatures(field(b)), &abs(&1 - &2)))
   end
 
+  # The exchange lines plus the energy of the cells activated this step: what
+  # the storage change must equal.
   defp lines_sum(b) do
-    b.sun_mj + b.air_in_mj - b.air_out_mj + b.sky_in_mj - b.sky_out_mj + b.river_in_mj -
-      b.river_out_mj + b.hearths_mj + b.miracles_mj
+    b.activated_mj + b.sun_mj + b.air_in_mj - b.air_out_mj + b.sky_in_mj - b.sky_out_mj +
+      b.river_in_mj - b.river_out_mj + b.hearths_mj + b.miracles_mj
   end
 
   defp events(region, type) do
@@ -208,6 +210,8 @@ defmodule Avwe.Systems.HeatTest do
           b = budget(after_step)
 
           assert b.dt == dt
+          # Every cell is active from the settle: nothing is activated here.
+          assert b.activated_mj == 0.0
           # The spec allows 1e-6 MJ; the compensated sums close to under
           # 1e-8 (the bound is n·eps·max|E| ≈ 2.4e-9), and plain sums do not.
           assert_in_delta b.delta_storage_mj, lines_sum(b), 1.0e-8
@@ -475,20 +479,25 @@ defmodule Avwe.Systems.HeatTest do
       cell = elem(field(evening).static, bank_cell(evening, :town, 3.0)).cell
 
       assert %{steam?: true, air_c: air, ground_c: ground, ground: band} = Heat.at(evening, cell)
-      assert ground - air >= 8
+      assert ground - air >= 12
       assert band in [:warm, :hot]
       assert Heat.steaming?(field(evening), reach_near(evening, :town))
 
       assert %{steam?: false} = Heat.at(region({812, day: 199, hour: 13}), cell)
 
-      # With this air curve the margin is crossed in the late afternoon.
-      rises = region({812, day: 199, hour: 14}) |> Region.advance(4 * 60) |> events(:steam_rising)
+      # At 12 K the margin is crossed toward evening: from 16:40 at the top of
+      # the river to 17:50 at its end, all within two and a half hours before
+      # the 19:00 sunset ("the silt used to steam at dusk"), and never before.
+      sunset = Calendar.at(812, day: 199, hour: 19)
+      rises = region({812, day: 199, hour: 14}) |> Region.advance(5 * 60) |> events(:steam_rising)
       reaches = Terrain.reaches(evening.terrain)
 
       assert rises != []
       assert Enum.all?(rises, &(&1.entity == River.id()))
       assert Enum.sort(Enum.map(rises, & &1.data.reach)) == Enum.to_list(0..(length(reaches) - 1))
       assert Enum.map(rises, & &1.time) == Enum.sort(Enum.map(rises, & &1.time))
+      assert Enum.all?(rises, &(&1.time >= sunset - 5 * @hour / 2 and &1.time <= sunset))
+      assert Enum.all?(Tuple.to_list(field(region({812, day: 199, hour: 19})).steaming))
 
       order = Enum.map(rises, & &1.data.reach)
       {upper, lower} = Enum.split(order, div(length(order), 2))
@@ -503,15 +512,43 @@ defmodule Avwe.Systems.HeatTest do
     end
 
     test "steam is judged against the air at the end of the step" do
-      # One hour step from 15:00: the air falls from 25.0 to 21.6 °C. The banks
-      # clear the 8 K margin against the end-of-step air and not the start's.
-      start = region({812, day: 199, hour: 15})
+      # One hour step from 17:00: the air falls from 19.1 to 17.4 °C. The banks
+      # clear the 12 K margin against the end-of-step air (12.3 K) and not the
+      # start's (10.6 K).
+      start = region({812, day: 199, hour: 17})
       town = reach_near(start, :town)
       refute Heat.steaming?(field(start), town)
 
       stepped = Region.advance(start, 1, dt: @hour)
       assert Heat.steaming?(field(stepped), town)
       assert Enum.any?(events(stepped, :steam_rising), &(&1.data.reach == town))
+    end
+
+    test "steam means one thing: a cell over the margin does not steam once its reach has stopped" do
+      # The morning after, the air warms faster than the banks: the reach's
+      # mean falls under 12 K while the silt nearest the channel is still over
+      # it. The look must agree with the percept that the steam is gone.
+      town = reach_near(region({812, day: 200, hour: 7}), :town)
+
+      cell =
+        elem(
+          field(region({812, day: 200, hour: 7})).static,
+          bank_cell(region({812, day: 200, hour: 7}), :town, 3.0)
+        ).cell
+
+      faded =
+        Enum.reduce_while(1..120, region({812, day: 200, hour: 7}), fn _, r ->
+          r = Region.advance(r, 1)
+          {events, r} = Region.drain_events(r)
+
+          if Enum.any?(events, &(&1.type == :steam_fading and &1.data.reach == town)),
+            do: {:halt, r},
+            else: {:cont, r}
+        end)
+
+      refute Heat.steaming?(field(faded), town)
+      assert %{steam?: false, ground_c: ground, air_c: air} = Heat.at(faded, cell)
+      assert ground - air >= 12
     end
 
     test "the silt cools after the source fails, and the steam fades from upstream down" do
@@ -547,27 +584,22 @@ defmodule Avwe.Systems.HeatTest do
     end
 
     test "the banks do not steam beside a silent reach, however warm they still are" do
-      # 812/200 18:30: the source failed at 15:00 and the town reach has run
-      # silent, but its banks are still well over 8 K above the air.
-      silent = region({812, day: 200, hour: 18, minute: 30})
+      # 812/200 20:00: the source failed at 15:00 and the town reach has run
+      # silent, but its banks are still over 12 K above the air. The evening
+      # before, at the same hour, the same reach ran and steamed.
+      silent = region({812, day: 200, hour: 20})
       town = reach_near(silent, :town)
-      river = Region.get(silent, River.id(), :river)
-      assert elem(river.reaches, town).silent
+      assert elem(Region.get(silent, River.id(), :river).reaches, town).silent
 
       cell = elem(field(silent).static, bank_cell(silent, :town, 3.0)).cell
       assert %{steam?: false, ground_c: ground, air_c: air} = Heat.at(silent, cell)
-      assert ground - air > 8
+      assert ground - air > 12
       refute Heat.steaming?(field(silent), town)
 
-      # The same field, air and cell, with the reaches as they ran the evening
-      # before: only the flow clause stands between the banks and steam.
-      flowing = Region.get(region({812, day: 199, hour: 18, minute: 30}), River.id(), :river)
-      refute elem(flowing.reaches, town).silent
-
-      with_flow =
-        Region.put_component(silent, River.id(), :river, %{river | reaches: flowing.reaches})
-
-      assert %{steam?: true, ground_c: ^ground, air_c: ^air} = Heat.at(with_flow, cell)
+      flowing = region({812, day: 199, hour: 20})
+      refute elem(Region.get(flowing, River.id(), :river).reaches, town).silent
+      assert Heat.steaming?(field(flowing), town)
+      assert %{steam?: true} = Heat.at(flowing, cell)
     end
 
     test "a year later the banks are cold" do
@@ -620,16 +652,17 @@ defmodule Avwe.Systems.HeatTest do
       cell = open_grass(start)
       assert cell != nil
 
-      activated = Heat.activate(field(start), start.terrain, cell)
+      {activated, joules} = Heat.activate(field(start), start.terrain, cell)
       i = Map.fetch!(activated.index, cell)
       grass = elem(activated.energy, activated.index[{:background, :grass}])
 
       assert elem(activated.static, i).material == :grass
       assert elem(activated.energy, i) == 100 * grass
+      assert joules == 100 * grass
       assert Map.keys(activated.index) |> length() == tuple_size(start.fields.heat.static) + 1
       {before, _} = Enum.split(Tuple.to_list(activated.static), i)
       assert Enum.all?(before, fn %{cell: {x, y}} -> {y, x} < {elem(cell, 1), elem(cell, 0)} end)
-      assert Heat.activate(activated, start.terrain, cell) == activated
+      assert Heat.activate(activated, start.terrain, cell) == {activated, 0.0}
 
       # Cold: the cell goes on tracking the background exactly.
       cold = start |> with_hearth("camp", cell, 60, burning: false) |> Region.advance(1)
@@ -646,14 +679,25 @@ defmodule Avwe.Systems.HeatTest do
       assert_in_delta budget(lit).hearths_mj, @f_ground * @hearth_w * 60 / 1.0e6, 1.0e-9
       assert Heat.ground_c(field(lit), lit.terrain, cell) > background_c(field(lit), :grass)
 
-      # Nothing is dropped from the budget: the step's storage_before holds the
-      # field as activated, the old field plus what the new cell brought in.
-      assert_in_delta budget(lit).storage_before_mj,
-                      Heat.stored_mj(field(start)) + 100 * grass / 1.0e6,
-                      1.0e-6
+      # Nothing is dropped from the budget: the step starts from the field it
+      # found, books what the new cell brought in as activated_mj, and the
+      # storage change is the lines plus that.
+      b = budget(lit)
+      assert_in_delta b.activated_mj, 100 * grass / 1.0e6, 1.0e-9
+      assert_in_delta b.storage_before_mj, Heat.stored_mj(field(start)), 1.0e-6
+      assert_in_delta b.storage_after_mj - b.storage_before_mj, b.delta_storage_mj, 1.0e-6
+      assert_in_delta b.delta_storage_mj, lines_sum(b), 1.0e-6
+      assert budget(Region.advance(lit, 1)).activated_mj == 0.0
 
-      assert_in_delta budget(lit).storage_after_mj - budget(lit).storage_before_mj,
-                      budget(lit).delta_storage_mj,
+      # So the deltas of a run sum to what the run stored, activation included.
+      {deltas, finish} =
+        Enum.map_reduce(1..5, start |> with_hearth("camp", cell, 60), fn _, r ->
+          r = Region.advance(r, 1)
+          {budget(r).delta_storage_mj, r}
+        end)
+
+      assert_in_delta Enum.sum(deltas),
+                      Heat.stored_mj(field(finish)) - Heat.stored_mj(field(start)),
                       1.0e-6
     end
 

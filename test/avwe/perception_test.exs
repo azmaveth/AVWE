@@ -2,7 +2,7 @@ defmodule Avwe.PerceptionTest do
   use ExUnit.Case, async: true
 
   alias Avwe.{Calendar, Event, Perception, Prose, Quire, Region, Terrain}
-  alias Avwe.Systems.{Daylight, Smoke}
+  alias Avwe.Systems.{Daylight, Fire, Smoke}
   alias Avwe.Test.{Ember, Fixtures}
 
   @mira "mira-vale"
@@ -179,28 +179,37 @@ defmodule Avwe.PerceptionTest do
     end
 
     test "in 812 the river runs, warm, and steams after dark" do
-      day = Perception.look(ember_view({812, day: 200, hour: 14}), "mira-vale")
-      night = Perception.look(ember_view({812, day: 199, hour: 22}), "mira-vale")
+      day = Perception.look(ember_snapshot({812, day: 200, hour: 14}), "mira-vale")
+      night = Perception.look(ember_snapshot({812, day: 199, hour: 22}), "mira-vale")
 
+      refute day.channel.steaming
       assert Prose.look(day) =~ "The river runs 60 m to the east, warm. Upstream"
+
+      assert night.channel.steaming
 
       assert Prose.look(night) =~
                "The river runs 60 m to the east, warm, with steam lifting off it."
     end
 
-    test "whether the river steams is judged against the air the look carries" do
-      night = Perception.look(ember_view({812, day: 199, hour: 22}), "mira-vale")
-      temp = night.channel.temp_c
-      # Against a fixed 18 °C the water would be far enough above the air to
-      # steam either way; against the air it carries, only on one side of 8 K.
-      assert temp - 18.0 >= 8
+    test "the river steams when its reach's banks do, by day as much as by night" do
+      night = Perception.look(ember_snapshot({812, day: 199, hour: 22}), "mira-vale")
+      assert night.channel.steaming
 
-      steams = Prose.look(put_in(night.channel.air_c, temp - 8.0))
-      assert steams =~ "The river runs 60 m to the east, warm, with steam lifting off it."
-
-      still = Prose.look(put_in(night.channel.air_c, temp - 7.9))
+      still = Prose.look(put_in(night.channel.steaming, false))
       assert still =~ "The river runs 60 m to the east, warm. Upstream"
       refute still =~ "steam"
+
+      # Full daylight: no light clause stands between a steaming reach and
+      # the prose, so the river never steams while the silt is said not to.
+      day = Perception.look(ember_snapshot({812, day: 200, hour: 14}), "mira-vale")
+      assert day.light > 0.3
+      refute day.channel.steaming
+
+      steams = Prose.look(put_in(day.channel.steaming, true))
+      assert steams =~ "The river runs 60 m to the east, warm, with steam lifting off it."
+
+      # A view without fields has no flag, and the river does not steam.
+      refute Perception.look(ember_view({812, day: 199, hour: 22}), "mira-vale").channel.steaming
     end
 
     test "Mira hears the stretch beside her fall silent, not the stretches far away" do
@@ -262,26 +271,30 @@ defmodule Avwe.PerceptionTest do
 
       assert air_c < 15
       assert %{id: @lodge, burning: false, fuel_kg: 12.0, distance_m: 0} = look.hearth
+      assert [%{id: @lodge}, %{id: @coal, burning: true, fuel_kg: +0.0}] = look.hearths
+      assert [%{ref: @coal, level: :warm}] = look.warmth.sources
       assert %{verb: :kindle, targets: [@lodge]} in look.affordances
       refute :douse in verbs(look)
 
       text = Prose.look(look)
       assert text =~ "The air is cool."
-      assert text =~ "The lodge hearth is cold, with wood laid."
+      assert text =~ "The lodge hearth is cold, with wood laid.\nThe Last Coal is burning here."
       assert text =~ "Warmth reaches you from The Last Coal."
     end
 
-    test "with the lodge hearth lit, the fire's heat is on her face and she can douse it" do
+    test "with the lodge hearth lit, both fires are here and both warm her; she can douse one" do
       view = @dawn |> ember_snapshot() |> lit(@lodge) |> at(@mira, Ember.places().lodge)
       look = Perception.look(view, @mira)
 
       assert %{fire: %{ref: @lodge, level: :hot}} = look.warmth
+      assert [%{ref: @lodge, level: :hot}, %{ref: @coal, level: :warm}] = look.warmth.sources
+      assert [%{id: @lodge, burning: true}, %{id: @coal, burning: true}] = look.hearths
       assert %{verb: :douse, targets: [@lodge]} in look.affordances
       refute :kindle in verbs(look)
 
       text = Prose.look(look)
-      assert text =~ "The lodge hearth is burning here."
-      assert text =~ "The fire's heat is on your face."
+      assert text =~ "The lodge hearth is burning here.\nThe Last Coal is burning here."
+      assert text =~ "The fire's heat is on your face. Warmth reaches you from The Last Coal."
     end
 
     test "a faint warmth reaches the next cell" do
@@ -336,6 +349,8 @@ defmodule Avwe.PerceptionTest do
 
       look = Perception.look(at(view, @mira, {x + 3, y}), @mira)
       assert look.hearth == nil
+      assert look.hearths == []
+      refute Prose.look(look) =~ "is burning here."
 
       assert [%{ref: @lodge, sign: :glow, distance_m: 30}, %{ref: @coal, sign: :glow}] =
                look.fires
@@ -388,6 +403,7 @@ defmodule Avwe.PerceptionTest do
       assert look.warmth == nil
       assert look.smoke == nil
       assert %{id: @town, burning: false} = look.hearth
+      assert [%{id: @town}] = look.hearths
       assert Prose.look(look) =~ "The kiln-house hearth is cold, with wood laid."
     end
 
@@ -402,6 +418,27 @@ defmodule Avwe.PerceptionTest do
       faint = Perception.look(with_smoke(view, town, 0.003), @mira)
       assert faint.smoke == %{level: :faint, from: "south-west"}
       assert Prose.look(faint) =~ "Woodsmoke, faint, from the south-west."
+    end
+
+    test "at a hearth that smoked this step the smoke is at least on the wind" do
+      {x, y} = town = Ember.places().town
+
+      smoked = %{Fire.zero_step() | burn_s: 60.0, burned_kg: 0.01875, smoke_g: 0.1875}
+
+      view = @dawn |> ember_snapshot() |> lit(@town)
+      view = update_in(view, [:components, :hearth, @town], &%{&1 | last_step: smoked})
+
+      # No puff in the air at all: the rule alone says the smoke is here.
+      at_hearth = Perception.look(with_smoke(view, {x, y - 20}, 0.0), @mira)
+      assert at_hearth.smoke == %{level: :clear, from: "south-west"}
+      assert Prose.look(at_hearth) =~ "Woodsmoke on the wind from the south-west."
+
+      # A thick puff on the spot is still thick; two cells off, the rule is silent.
+      thick = Perception.look(with_smoke(view, town, 0.1875), @mira)
+      assert thick.smoke.level == :thick
+
+      assert Perception.look(at(with_smoke(view, {x, y - 20}, 0.0), @mira, {x + 2, y}), @mira).smoke ==
+               nil
     end
 
     test "smoke comes with the region's wind, not the default one" do
@@ -507,20 +544,34 @@ defmodule Avwe.PerceptionTest do
     end
 
     test "burning low and going out are seen, and say who doused it" do
-      lodge = Ember.places().lodge
+      {x, y} = lodge = Ember.places().lodge
       view = at(ember_snapshot(@dawn), @mira, lodge)
       low = fire_event(:fire_low, view, %{position: lodge})
       fuel = fire_event(:fire_out, view, %{position: lodge, reason: :fuel, by: nil})
       doused = fire_event(:fire_out, view, %{position: lodge, reason: :doused, by: @mira})
 
+      # At the hearth it is "the fire"; further off, or watching, it is named.
       assert [
                %{summary: "The fire burns low.", salience: 0.5},
                %{summary: "The fire goes out.", salience: 0.6},
                %{summary: "You douse the lodge hearth."}
              ] = Perception.percepts(view, @mira, [low, fuel, doused])
 
-      assert [_low, _fuel, %{summary: "Mira Vale douses the lodge hearth."}] =
-               Perception.percepts(view, nil, [low, fuel, doused])
+      assert [
+               %{summary: "The fire burns low."},
+               %{summary: "The fire goes out."}
+             ] = Perception.percepts(at(view, @mira, {x + 2, y}), @mira, [low, fuel])
+
+      assert [
+               %{summary: "The lodge hearth burns low."},
+               %{summary: "The fire at the lodge hearth goes out."}
+             ] = Perception.percepts(at(view, @mira, {x + 3, y}), @mira, [low, fuel])
+
+      assert [
+               %{summary: "The lodge hearth burns low."},
+               %{summary: "The fire at the lodge hearth goes out."},
+               %{summary: "Mira Vale douses the lodge hearth."}
+             ] = Perception.percepts(view, nil, [low, fuel, doused])
     end
 
     test "steam is seen on the stretch beside the body, and once per place by a spectator" do

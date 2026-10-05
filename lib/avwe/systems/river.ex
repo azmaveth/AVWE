@@ -16,12 +16,27 @@ defmodule Avwe.Systems.River do
   exact solution for constant inflow, so history mode's hour-long steps stay
   stable. Each reach's outflow is the next reach's inflow.
 
+  ## Sub-steps
+
+  Each reach is solved exactly, but the chain feeds the next reach the step's
+  *mean* outflow, so a step longer than a reach's transit (about 170 s) can
+  move the drain front only one reach per step: at hour steps the river would
+  take a day to run dry instead of two hours, with the water that should have
+  left the map booked as lost and the silences stamped hours late. So a step
+  is cut into sub-steps of at most `@substep_s` (60 s, the live step) inside
+  `run/2` and the settle alike, each sub-step taking the exact mean air of
+  its own interval and stamping its events with its own end time. An hour
+  step then reproduces sixty minute steps exactly; at 300 s sub-steps (nearly
+  two transits) the front still lagged by 5 % of the water. Twenty-three
+  reaches by sixty sub-steps is a quarter of a millisecond an hour, 6 ms a
+  day.
+
   Water mixes with what flows in and cools toward the air, taking the exact
-  mean air over each step from `Avwe.Systems.Weather`. The water's heat stays
-  outside the ground's budget: a reach is a boundary reservoir, like the air,
-  and the ground books what it takes from it (`Avwe.Systems.Heat`). The six
-  hour cooling constant already includes what the banks take. One-way, and
-  declared.
+  mean air over each sub-step from `Avwe.Systems.Weather`. The water's heat
+  stays outside the ground's budget: a reach is a boundary reservoir, like
+  the air, and the ground books what it takes from it (`Avwe.Systems.Heat`).
+  The six hour cooling constant already includes what the banks take.
+  One-way, and declared.
 
   When the spring stops, upstream reaches drain first and the silence moves
   downstream, so the Dry Bend goes quiet before the town.
@@ -29,7 +44,8 @@ defmodule Avwe.Systems.River do
   ## Events
 
     * `:river_silent` / `:river_flowing` when a reach's depth crosses 5 cm,
-      positioned at the middle of the reach.
+      positioned at the middle of the reach and stamped with the end of the
+      sub-step it happened in.
     * `:spring_stopped` / `:spring_started` when the spring's flow stops or
       starts, positioned at the source.
 
@@ -42,7 +58,7 @@ defmodule Avwe.Systems.River do
 
   @behaviour Avwe.System
 
-  alias Avwe.{Event, Region, Terrain, Tick}
+  alias Avwe.{Event, Region, Terrain}
   alias Avwe.Systems.Weather
 
   @river "river"
@@ -51,8 +67,10 @@ defmodule Avwe.Systems.River do
   @loss_m_per_s 1.0e-6
   @silent_depth_m 0.05
   @cooling_s 6 * 3_600
+  @substep_s 60
   @settle_step_s 3_600
   @settle_limit_s 2 * 86_400
+  @zero_step %{inflow_m3: 0.0, outflow_m3: 0.0, lost_m3: 0.0}
 
   @doc "The river entity's id."
   def id, do: @river
@@ -82,8 +100,10 @@ defmodule Avwe.Systems.River do
 
       river ->
         spring = Region.get(region, river.source, :spring)
-        air_c = Weather.mean_air_c(tick.time, Tick.end_time(tick))
-        {river, events} = flow(river, terrain, spring.flow_m3_s, spring.temp_c, air_c, tick.dt)
+
+        {river, events} =
+          flow(river, terrain, spring.flow_m3_s, spring.temp_c, tick.time, tick.dt)
+
         spring_events = spring_events(river.inflow, spring.flow_m3_s, river.source, terrain)
 
         {Region.put_component(region, @river, :river, %{river | inflow: spring.flow_m3_s}),
@@ -153,15 +173,35 @@ defmodule Avwe.Systems.River do
 
   defp drain(river, terrain, temp, from, steps, dt) do
     Enum.reduce(0..(steps - 1)//1, river, fn i, acc ->
-      t0 = from + i * dt
-      {acc, _events} = flow(acc, terrain, 0.0, temp, Weather.mean_air_c(t0, t0 + dt), dt)
+      {acc, _events} = flow(acc, terrain, 0.0, temp, from + i * dt, dt)
       acc
     end)
   end
 
-  defp flow(river, terrain, inflow, inflow_temp, air_c, dt) do
+  # One step of `dt` from `t0`, as sub-steps of at most `@substep_s` each
+  # under the mean air of its own interval. `last_step` sums the sub-steps;
+  # the events carry the end of the sub-step they happened in.
+  defp flow(river, terrain, inflow, inflow_temp, t0, dt) do
     reaches = Terrain.reaches(terrain)
 
+    {river, last_step, events} =
+      Enum.reduce(substeps(t0, dt), {river, @zero_step, []}, fn {s0, s1}, {acc, totals, events} ->
+        air_c = Weather.mean_air_c(s0, s1)
+        {acc, step, new_events} = flow_once(acc, reaches, inflow, inflow_temp, air_c, s1, s1 - s0)
+        {acc, Map.merge(totals, step, fn _key, a, b -> a + b end), events ++ new_events}
+      end)
+
+    {%{river | last_step: last_step}, events}
+  end
+
+  # The sub-steps of a step: `n` intervals of near-equal integer length that
+  # cover `[t0, t0 + dt]`, each at most `@substep_s` long.
+  defp substeps(t0, dt) do
+    n = div(dt + @substep_s - 1, @substep_s)
+    for i <- 0..(n - 1)//1, do: {t0 + div(i * dt, n), t0 + div((i + 1) * dt, n)}
+  end
+
+  defp flow_once(river, reaches, inflow, inflow_temp, air_c, time, dt) do
     {states, {outflow, _temp, lost, events}} =
       river.reaches
       |> Tuple.to_list()
@@ -172,14 +212,14 @@ defmodule Avwe.Systems.River do
 
         events =
           if state.silent != reach_silent?(river, k),
-            do: [silence_event(state, reach, k) | events],
+            do: [silence_event(state, reach, k, time) | events],
             else: events
 
         {state, {out, temp_out, lost + reach_lost, events}}
       end)
 
-    last_step = %{inflow_m3: inflow * dt, outflow_m3: outflow * dt, lost_m3: lost}
-    {%{river | reaches: List.to_tuple(states), last_step: last_step}, Enum.reverse(events)}
+    step = %{inflow_m3: inflow * dt, outflow_m3: outflow * dt, lost_m3: lost}
+    {%{river | reaches: List.to_tuple(states)}, step, Enum.reverse(events)}
   end
 
   # One reach for one step: the exact solution of dV/dt = I - L - V/τ for
@@ -229,9 +269,9 @@ defmodule Avwe.Systems.River do
 
   defp reach_silent?(river, k), do: elem(river.reaches, k).silent
 
-  defp silence_event(state, reach, k) do
+  defp silence_event(state, reach, k, time) do
     type = if state.silent, do: :river_silent, else: :river_flowing
-    Event.new(type, entity: @river, data: %{reach: k, position: reach.mid})
+    Event.new(type, entity: @river, time: time, data: %{reach: k, position: reach.mid})
   end
 
   defp spring_events(before, now, source, terrain) do

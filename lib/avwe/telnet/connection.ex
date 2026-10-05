@@ -21,8 +21,8 @@ defmodule Avwe.Telnet.Connection do
     follow upstream   follow the river channel (or: follow downstream)
     say <text>        speak (also: whisper, shout)
     wait [minutes]    let time pass (also: wait 2 hours, wait until dawn, wait until dusk)
-    kindle            light the hearth here (also: light the fire)
-    douse             put the fire out (also: put out the fire)
+    kindle [hearth]   light the hearth here (also: light the fire, light the lodge hearth)
+    douse [hearth]    put the fire out (also: put out the fire, douse the coal)
     stop              stop what you're doing
     time              the time in the world
     quit              leave\
@@ -195,8 +195,22 @@ defmodule Avwe.Telnet.Connection do
 
   defp run(state, {:wait, params}), do: act(state, :wait, params: params)
   defp run(state, :stop), do: act(state, :stop, [])
-  defp run(state, :kindle), do: act(state, :kindle, [])
-  defp run(state, :douse), do: act(state, :douse, [])
+  defp run(state, {verb, nil}) when verb in [:kindle, :douse], do: act(state, verb, [])
+
+  # A named hearth is one of those within reach: the world answers for the
+  # nearest when none is named, never when a name matches nothing.
+  defp run(state, {verb, query}) when verb in [:kindle, :douse] do
+    {:ok, look} = Session.look(state.session)
+    hearths = Enum.map(look[:hearths] || [], &{&1.id, &1.name})
+
+    case Command.resolve(query, hearths) do
+      {:ok, hearth} -> act(state, verb, target: hearth)
+      {:ambiguous, names} -> write(state, "Which do you mean: #{Enum.join(names, ", ")}?")
+      :none -> write(state, "There is no hearth called \"#{query}\" here.")
+    end
+
+    state
+  end
 
   defp run(state, :time) do
     write(state, Avwe.now(state.world))

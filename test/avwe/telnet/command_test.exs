@@ -49,18 +49,29 @@ defmodule Avwe.Telnet.CommandTest do
       assert Command.parse("go west rise") == {:go, "west rise"}
     end
 
-    test "lighting and dousing the fire" do
-      assert Command.parse("kindle") == :kindle
-      assert Command.parse("light") == :kindle
-      assert Command.parse("light the fire") == :kindle
-      assert Command.parse("Light fire") == :kindle
-      assert Command.parse("light the hearth") == :kindle
-      assert Command.parse("douse") == :douse
-      assert Command.parse("douse the fire") == :douse
-      assert Command.parse("put out the fire") == :douse
-      assert Command.parse("put out") == :douse
-      assert Command.parse("light a candle") == {:unknown, "light a candle"}
+    test "lighting and dousing the fire, bare or by a hearth's name" do
+      assert Command.parse("kindle") == {:kindle, nil}
+      assert Command.parse("light") == {:kindle, nil}
+      assert Command.parse("light the fire") == {:kindle, nil}
+      assert Command.parse("Light fire") == {:kindle, nil}
+      assert Command.parse("light the hearth") == {:kindle, nil}
+      assert Command.parse("douse") == {:douse, nil}
+      assert Command.parse("douse the fire") == {:douse, nil}
+      assert Command.parse("put out the fire") == {:douse, nil}
+      assert Command.parse("put out") == {:douse, nil}
+
+      assert Command.parse("light the lodge hearth") == {:kindle, "lodge hearth"}
+      assert Command.parse("kindle Lodge Hearth") == {:kindle, "lodge hearth"}
+      assert Command.parse("douse the coal") == {:douse, "coal"}
+
+      assert Command.parse("put out the fire in the kiln-house hearth") ==
+               {:douse, "kiln-house hearth"}
+
+      assert Command.parse("put out the fire at the lodge hearth") == {:douse, "lodge hearth"}
+      # A name that matches no hearth is the connection's to refuse.
+      assert Command.parse("light a candle") == {:kindle, "a candle"}
       assert Command.parse("put on a hat") == {:unknown, "put on a hat"}
+      assert Command.parse("put the fire out") == {:unknown, "put the fire out"}
     end
 
     test "anything else is unknown" do

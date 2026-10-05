@@ -19,15 +19,21 @@ defmodule Avwe.Perception do
   silent or start running, and sees its banks begin to steam.
 
   Heat and fire: a body feels the air and the ground underfoot
-  (`Avwe.Systems.Heat.at/2`), the warmth of a fire within 20 m
-  (`Avwe.Systems.Fire.felt/2`), and can light or douse a hearth within 20 m.
-  A fire is its own light: its smoke by day or its glow by night shows at
-  least 200 m off, and so do its lighting, burning low and going out. `fires`
-  lists only the fires beyond the spot a body is at (more than 20 m off): a
-  burning hearth within 20 m is what is here, and shows in `hearth`, not in
-  `fires`. Only the body's own nose smells smoke (`Avwe.Systems.Smoke`); the
+  (`Avwe.Systems.Heat.at/2`), the warmth of every fire within 20 m
+  (`Avwe.Systems.Fire.felt_all/2`: `warmth.fire` is the strongest,
+  `warmth.sources` all of them), and can light or douse a hearth within 20 m.
+  `hearths` lists every hearth within 20 m, nearest first; `hearth` is the
+  nearest, kept for callers that want one. A fire is its own light: its smoke
+  by day or its glow by night shows at least 200 m off, and so do its
+  lighting, burning low and going out; those name the hearth unless the body
+  is at it. `fires` lists only the fires beyond the spot a body is at (more
+  than 20 m off): a burning hearth within 20 m is what is here, and shows in
+  `hearths`, not in `fires`. Only the body's own nose smells smoke
+  (`Avwe.Systems.Smoke.level_at/3`, the rule the smell percepts follow); the
   snapshot's `fields` carry the heat and smoke, and without them `warmth`
-  and `smoke` are `nil`.
+  and `smoke` are `nil`. Steam has one rule, the reach's flag
+  (`Avwe.Systems.Heat.steaming?/2`): `warmth.steam?` on a wet cell and
+  `channel.steaming` for the river's prose both read it.
   """
 
   alias Avwe.{Event, Percept, Prose, Space, Terrain}
@@ -79,6 +85,7 @@ defmodule Avwe.Perception do
     here = place_at(view, position)
     action = component(view, :action)[body]
     channel = channel_near(view, position)
+    hearths = hearths_here(view, position)
 
     %{
       spectator: false,
@@ -95,7 +102,8 @@ defmodule Avwe.Perception do
       channel: channel,
       warmth: warmth(view, position),
       smoke: smoke(view, position),
-      hearth: hearth_here(view, position),
+      hearth: List.first(hearths),
+      hearths: hearths,
       fires: fires_in_sight(view, position),
       bodies: bodies_in_sight(view, body, position),
       places: known_places(view, body, position, here),
@@ -310,6 +318,7 @@ defmodule Avwe.Perception do
   end
 
   # A fire is its own light: it is seen at least 200 m off whatever the hour.
+  # Burning low and going out name the hearth unless the body is at it.
   defp see_fire(view, body, %Event{entity: hearth, data: data} = event) do
     observer = body && position(view, body)
     distance = observer && Space.distance(observer, data.position)
@@ -330,7 +339,13 @@ defmodule Avwe.Perception do
                 direction: Space.direction(observer, data.position)
               },
           salience: @fire_salience[event.type],
-          summary: Prose.fire(event.type, who(view, body, Map.get(data, :by)), name(view, hearth))
+          summary:
+            Prose.fire(
+              event.type,
+              who(view, body, Map.get(data, :by)),
+              name(view, hearth),
+              distance != nil and distance <= @at_place_cells
+            )
         }
       ]
     else
@@ -400,7 +415,8 @@ defmodule Avwe.Perception do
     case Terrain.nearest_channel(terrain, position) do
       {index, point, distance} when distance <= near ->
         last = tuple_size(terrain.channel) - 1
-        state = river_reach(view, Terrain.reach_of(terrain, index))
+        reach = Terrain.reach_of(terrain, index)
+        state = river_reach(view, reach)
 
         %{
           distance_m: Space.meters(distance),
@@ -411,7 +427,8 @@ defmodule Avwe.Perception do
           at_end: index >= last - 3,
           flowing: state != nil and not state.silent,
           temp_c: state && state.temp_c,
-          air_c: Map.get(view.env, :air_c)
+          air_c: Map.get(view.env, :air_c),
+          steaming: reach_steaming?(view, reach)
         }
 
       _far ->
@@ -421,24 +438,28 @@ defmodule Avwe.Perception do
 
   defp channel_near(_view, _position), do: nil
 
+  defp reach_steaming?(%{fields: %{heat: %Heat.Field{} = field}}, reach),
+    do: Heat.steaming?(field, reach)
+
+  defp reach_steaming?(_view, _reach), do: false
+
   # Heat, fire and smoke
 
   defp warmth(view, position) do
     case Heat.at(view, position) do
-      nil -> nil
-      felt -> Map.put(felt, :fire, fire_felt(view, position))
+      nil ->
+        nil
+
+      felt ->
+        sources =
+          view |> Fire.felt_all(position) |> Enum.map(&Map.take(&1, [:ref, :name, :level]))
+
+        Map.merge(felt, %{fire: List.first(sources), sources: sources})
     end
   end
 
-  defp fire_felt(view, position) do
-    case Fire.felt(view, position) do
-      nil -> nil
-      felt -> Map.take(felt, [:ref, :name, :level])
-    end
-  end
-
-  defp smoke(%{fields: %{smoke: field}} = view, position) do
-    case field |> Smoke.density_g_m2(position, view.time) |> Smoke.level() do
+  defp smoke(%{fields: %{smoke: _field}} = view, position) do
+    case Smoke.level_at(view, position, view.time) do
       :none -> nil
       level -> %{level: level, from: wind(view).from}
     end
@@ -448,19 +469,16 @@ defmodule Avwe.Perception do
 
   defp wind(view), do: Map.get(view.env, :wind, Smoke.default_wind())
 
-  defp hearth_here(view, position) do
-    case Fire.hearth_near(view, position) do
-      [{id, hearth, distance} | _rest] ->
-        %{
-          id: id,
-          name: name(view, id),
-          burning: hearth.burning,
-          fuel_kg: hearth.fuel_kg,
-          distance_m: Space.meters(distance)
-        }
-
-      [] ->
-        nil
+  # Every hearth within reach, nearest first (then by id).
+  defp hearths_here(view, position) do
+    for {id, hearth, distance} <- Fire.hearth_near(view, position) do
+      %{
+        id: id,
+        name: name(view, id),
+        burning: hearth.burning,
+        fuel_kg: hearth.fuel_kg,
+        distance_m: Space.meters(distance)
+      }
     end
   end
 

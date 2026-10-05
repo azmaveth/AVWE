@@ -9,7 +9,6 @@ defmodule Avwe.Prose do
   @speech_verbs %{whisper: "whispers", talk: "says", shout: "shouts"}
   @own_speech_verbs %{whisper: "whisper", talk: "say", shout: "shout"}
   @warm_c 30
-  @steam_above_air_c 8
   @cool_air_c 15
   @warm_air_c 22
 
@@ -146,16 +145,23 @@ defmodule Avwe.Prose do
   @doc """
   A fire was lit, burned low or went out. `who` is `:you` when the body did
   it, someone's name when they did, or `nil` when nobody did (the fuel ran
-  out).
+  out). A fire burning low or out on its own is "the fire" to a body at the
+  hearth (`here?`) and named to anyone further off or watching.
   """
-  @spec fire(:fire_lit | :fire_low | :fire_out, :you | String.t() | nil, String.t()) ::
-          String.t()
-  def fire(:fire_lit, :you, name), do: "You light #{name}."
-  def fire(:fire_lit, who, name), do: "#{who} lights #{name}."
-  def fire(:fire_low, _who, _name), do: "The fire burns low."
-  def fire(:fire_out, nil, _name), do: "The fire goes out."
-  def fire(:fire_out, :you, name), do: "You douse #{name}."
-  def fire(:fire_out, who, name), do: "#{who} douses #{name}."
+  @spec fire(
+          :fire_lit | :fire_low | :fire_out,
+          :you | String.t() | nil,
+          String.t(),
+          boolean()
+        ) :: String.t()
+  def fire(:fire_lit, :you, name, _here?), do: "You light #{name}."
+  def fire(:fire_lit, who, name, _here?), do: "#{who} lights #{name}."
+  def fire(:fire_low, _who, _name, true), do: "The fire burns low."
+  def fire(:fire_low, _who, name, false), do: "#{capitalize(name)} burns low."
+  def fire(:fire_out, nil, _name, true), do: "The fire goes out."
+  def fire(:fire_out, nil, name, false), do: "The fire at #{name} goes out."
+  def fire(:fire_out, :you, name, _here?), do: "You douse #{name}."
+  def fire(:fire_out, who, name, _here?), do: "#{who} douses #{name}."
 
   @doc "The river's banks nearby began or stopped steaming. `near` names a place, for spectators."
   @spec steam(:steam_rising | :steam_fading, String.t() | nil) :: String.t()
@@ -194,9 +200,9 @@ defmodule Avwe.Prose do
       you_are(look),
       look.here && look.here.description,
       ground(look[:ground], look[:channel]),
-      channel(look[:channel], look.light),
+      channel(look[:channel]),
       air_and_ground(look[:warmth], look[:ground]),
-      hearth(look[:hearth]),
+      hearths(look[:hearths] || []),
       fire_felt(look[:warmth]),
       fires(look[:fires]),
       smoke(look[:smoke]),
@@ -231,12 +237,12 @@ defmodule Avwe.Prose do
   defp ground(:stone, _channel), do: "Pale stone breaks through the thin soil."
   defp ground(:grass, _channel), do: "Dry grass covers the ground."
 
-  defp channel(nil, _light), do: nil
+  defp channel(nil), do: nil
 
-  defp channel(%{at_head: true, flowing: false}, _light),
+  defp channel(%{at_head: true, flowing: false}),
     do: "This is where the old channel begins. Downstream it runs away from here."
 
-  defp channel(channel, light) do
+  defp channel(channel) do
     where =
       if channel.distance_m <= 20,
         do: "runs here",
@@ -244,24 +250,22 @@ defmodule Avwe.Prose do
 
     what =
       if channel.flowing,
-        do: "The river #{where}#{channel_warmth(channel, light)}.",
+        do: "The river #{where}#{channel_warmth(channel)}.",
         else: "The old channel #{where}."
 
     "#{what} Upstream is to the #{channel.upstream}, downstream to the #{channel.downstream}."
   end
 
-  # Warm water steams when the air over it is cool enough and the light low
-  # enough to show it.
-  defp channel_warmth(%{temp_c: temp} = channel, light)
-       when is_number(temp) and temp >= @warm_c do
-    air = Map.get(channel, :air_c)
-
-    if is_number(air) and light < 0.3 and temp - air >= @steam_above_air_c,
+  # Warm water steams when its reach's banks do (`channel.steaming`, the one
+  # rule for steam): by day as much as by night, so the river never steams
+  # while the silt beside it is said not to, or the other way round.
+  defp channel_warmth(%{temp_c: temp} = channel) when is_number(temp) and temp >= @warm_c do
+    if Map.get(channel, :steaming, false),
       do: ", warm, with steam lifting off it",
       else: ", warm"
   end
 
-  defp channel_warmth(_channel, _light), do: ""
+  defp channel_warmth(_channel), do: ""
 
   defp air_and_ground(nil, _ground), do: nil
 
@@ -285,7 +289,10 @@ defmodule Avwe.Prose do
   defp steam_off(:reeds), do: "Steam lifts off the reeds."
   defp steam_off(_bed), do: "Steam lifts off the water."
 
-  defp hearth(nil), do: nil
+  # One line per hearth within reach, nearest first.
+  defp hearths([]), do: nil
+  defp hearths(hearths), do: Enum.map_join(hearths, "\n", &hearth/1)
+
   defp hearth(%{burning: true, name: name}), do: "#{capitalize(name)} is burning here."
 
   defp hearth(%{fuel_kg: fuel, name: name}) when fuel > 0,
@@ -293,13 +300,14 @@ defmodule Avwe.Prose do
 
   defp hearth(%{name: name}), do: "#{capitalize(name)} is cold and empty."
 
-  defp fire_felt(%{fire: %{level: :hot}}), do: "The fire's heat is on your face."
-  defp fire_felt(%{fire: %{level: :warm, name: name}}), do: "Warmth reaches you from #{name}."
-
-  defp fire_felt(%{fire: %{level: :faint, name: name}}),
-    do: "You feel a faint warmth from #{name}."
-
+  # Every fire whose warmth reaches the body, strongest first, in one line.
+  defp fire_felt(%{sources: [_ | _] = sources}), do: Enum.map_join(sources, " ", &felt/1)
+  defp fire_felt(%{fire: %{} = fire}), do: felt(fire)
   defp fire_felt(_warmth), do: nil
+
+  defp felt(%{level: :hot}), do: "The fire's heat is on your face."
+  defp felt(%{level: :warm, name: name}), do: "Warmth reaches you from #{name}."
+  defp felt(%{level: :faint, name: name}), do: "You feel a faint warmth from #{name}."
 
   defp fires(fires) when fires in [nil, []], do: nil
   defp fires(fires), do: Enum.map_join(fires, "\n", &fire_sign/1)
