@@ -137,10 +137,15 @@ defmodule Avwe.Region do
   Lets each system set up state that depends on the starting time (see
   `c:Avwe.System.prepare/1`). Call once, after building the region and before
   the first step.
+
+  Pass `only: systems` to prepare just those (a region resumed from disk
+  prepares only the systems added since it was saved).
   """
-  @spec prepare(t()) :: t()
-  def prepare(%__MODULE__{systems: systems} = region) do
-    Enum.reduce(systems, region, fn system, acc ->
+  @spec prepare(t(), keyword()) :: t()
+  def prepare(%__MODULE__{systems: systems} = region, opts \\ []) do
+    chosen = Keyword.get(opts, :only, systems)
+
+    Enum.reduce(Enum.filter(systems, &(&1 in chosen)), region, fn system, acc ->
       Code.ensure_loaded!(system)
       if function_exported?(system, :prepare, 1), do: system.prepare(acc), else: acc
     end)

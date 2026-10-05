@@ -25,3 +25,6 @@ avwe-*.tar
 
 # Worlds' logs and snapshots (config :avwe, :data_dir).
 /worlds/
+
+# Worktrees the Claude app makes for parallel agents
+/.claude/worktrees/

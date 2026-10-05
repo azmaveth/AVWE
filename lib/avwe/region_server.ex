@@ -154,7 +154,7 @@ defmodule Avwe.RegionServer do
   defp open_store(nil, region, _keep), do: {:ok, nil, region}
 
   defp open_store(dir, region, keep) do
-    with {:ok, store} <- Store.open(dir, region.id),
+    with {:ok, store} <- Store.open(dir, region.id, owner: true),
          {:ok, region} <- resume(store, region, keep) do
       {:ok, store, region}
     end
@@ -203,7 +203,8 @@ defmodule Avwe.RegionServer do
       )
     end
 
-    %{saved | systems: given.systems}
+    added = given.systems -- saved.systems
+    Region.prepare(%{saved | systems: given.systems}, only: added)
   end
 
   defp journal(%{store: nil}, _step, _intent), do: :ok

@@ -182,8 +182,12 @@ defmodule Avwe.StoreTest do
 
       log =
         capture_log(fn ->
-          {:ok, other} = Store.open(dir, @region)
-          :ok = Store.close(other)
+          {:ok, reader} = Store.open(dir, @region)
+          :ok = Store.close(reader)
+          assert File.exists?(tmp), "a reader must leave a .tmp alone"
+
+          {:ok, owner} = Store.open(dir, @region, owner: true)
+          :ok = Store.close(owner)
         end)
 
       refute File.exists?(tmp)

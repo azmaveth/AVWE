@@ -102,16 +102,21 @@ defmodule Avwe.Store do
 
   @doc """
   Opens the store for one region under `dir`, creating its folder and log if
-  they don't exist, and removing any snapshot left half-written by a crash.
-  The calling process owns the log until it closes the store or exits.
+  they don't exist. The calling process owns the log until it closes the
+  store or exits.
+
+  Only the region that writes the store should open it with `owner: true`:
+  that removes any snapshot left half-written by a crash. A reader must not,
+  because the `.tmp` it finds may be a snapshot the running region is in the
+  middle of writing.
   """
-  @spec open(Path.t(), term()) :: {:ok, t()} | {:error, term()}
-  def open(dir, region_id) do
+  @spec open(Path.t(), term(), keyword()) :: {:ok, t()} | {:error, term()}
+  def open(dir, region_id, opts \\ []) do
     dir = Path.expand(dir)
     path = Path.join(dir, region_dirname(region_id))
 
     with :ok <- mkdir(path),
-         :ok <- remove_partial_snapshots(path),
+         :ok <- if(opts[:owner], do: remove_partial_snapshots(path), else: :ok),
          {:ok, log} <- open_log({:avwe_store, dir, region_id}, Path.join(path, @log_name)) do
       {:ok, %__MODULE__{dir: dir, region_id: region_id, path: path, log: log}}
     end

@@ -264,12 +264,10 @@ defmodule Avwe.E2E.PersistenceTest do
     assert light() == 0.0
     :ok = Avwe.stop_world(@world)
 
-    # Put back, it picks up the sky where the world is: the snapshot at step
-    # 100 was saved without it, and the log since then replays without it.
+    # Put back, it picks up the sky where the world is (06:05): a system added
+    # at restart is prepared for the saved time, so the light is right at once.
     :ok = start(tmp_dir, snapshot_every: 100)
     assert {:ok, %{step: 125}} = Avwe.snapshot(@world)
-    assert light() == 0.0
-    Avwe.step(@world, 1)
     assert light() > 0.0
   end
 
