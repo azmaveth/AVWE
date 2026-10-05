@@ -17,8 +17,9 @@ defmodule Avwe.World do
   Options: `:id` (the world's id), `:regions` (a list of `Avwe.Region` structs),
   `:clock` (`:manual` or `{:live, interval_ms}`), `:info` (a map with the
   world's `:name` and `:tagline`, shown to people choosing a world), `:store`
-  (a dir for the regions' logs and snapshots, or `nil` for no persistence)
-  and `:snapshot_every` (steps between snapshots). See `Avwe.RegionServer`.
+  (a dir for the regions' logs and snapshots, or `nil` for no persistence),
+  `:snapshot_every` (steps between snapshots) and `:snapshot_keep` (how many
+  of the newest snapshots to keep). See `Avwe.RegionServer`.
   """
   def start_link(opts) do
     id = Keyword.fetch!(opts, :id)
@@ -57,7 +58,7 @@ defmodule Avwe.World do
     id = Keyword.fetch!(opts, :id)
     regions = Keyword.fetch!(opts, :regions)
 
-    persistence = Keyword.take(opts, [:store, :snapshot_every])
+    persistence = Keyword.take(opts, [:store, :snapshot_every, :snapshot_keep])
 
     region_children =
       Enum.map(regions, &{RegionServer, [world: id, region: &1] ++ persistence})

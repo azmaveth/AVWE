@@ -1,6 +1,8 @@
 defmodule Avwe.StoreTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Avwe.{Intent, Region, Store}
   alias Avwe.Test.Ember
 
@@ -12,11 +14,24 @@ defmodule Avwe.StoreTest do
     %{store: store, dir: dir}
   end
 
-  # Advances `region` the way `Avwe.RegionServer` does: log first, then step.
-  defp logged_advance(store, region, steps) do
+  # Submits `intent` the way `Avwe.RegionServer` does: queue it, then journal
+  # it with the seq the region gave it.
+  defp logged_submit(region, store, intent) do
+    region = Region.submit(region, intent)
+    :ok = Store.append(store, Store.submit_record(region.step, List.last(Region.pending(region))))
+    region
+  end
+
+  # Advances `region` the way `Avwe.RegionServer` does: step, then log.
+  defp logged_advance(region, store, steps) do
     {events, after_advance} = region |> Region.advance(steps) |> Region.drain_events()
-    :ok = Store.append(store, Store.record(region, steps, events))
+    :ok = Store.append(store, Store.advance_record(region, steps, region.dt, events))
     after_advance
+  end
+
+  defp records!(store) do
+    {:ok, records} = Store.records(store)
+    records
   end
 
   defp intent(body, verb, opts \\ []) do
@@ -32,69 +47,72 @@ defmodule Avwe.StoreTest do
   # the source, with quiet stretches between.
   defp play(store, region) do
     region
-    |> Region.submit(intent("mira-vale", :go, target: "the-dry-bend"))
-    |> Region.submit(intent("mira-vale", :say, params: %{text: "Off to the bend."}))
-    |> Region.submit(intent("mira-vale", :stop))
-    |> then(&logged_advance(store, &1, 3))
-    |> Region.submit(intent("mira-vale", :go, target: "the-dry-bend"))
-    |> then(&logged_advance(store, &1, 20))
-    |> Region.submit(intent("mira-vale", :follow, params: %{direction: :upstream}))
-    |> then(&logged_advance(store, &1, 10))
-    |> Region.submit(intent("mira-vale", :wait, params: %{for: 120}))
-    |> then(&logged_advance(store, &1, 5))
+    |> logged_submit(store, intent("mira-vale", :go, target: "the-dry-bend"))
+    |> logged_submit(store, intent("mira-vale", :say, params: %{text: "Off to the bend."}))
+    |> logged_submit(store, intent("mira-vale", :stop))
+    |> logged_advance(store, 3)
+    |> logged_submit(store, intent("mira-vale", :go, target: "the-dry-bend"))
+    |> logged_advance(store, 20)
+    |> logged_submit(store, intent("mira-vale", :follow, params: %{direction: :upstream}))
+    |> logged_advance(store, 10)
+    |> logged_submit(store, intent("mira-vale", :wait, params: %{for: 120}))
+    |> logged_advance(store, 5)
   end
 
   describe "the log" do
     test "opening creates the region's folder and an empty log", %{store: store, dir: dir} do
       assert File.dir?(Path.join(dir, "0-0"))
       assert File.regular?(Path.join([dir, "0-0", "log"]))
-      assert Store.records(store) == []
+      assert Store.records(store) == {:ok, []}
       assert Store.latest_snapshot(store) == :none
       assert Store.rebuild(store) == :none
     end
 
     test "appended records come back in order", %{store: store} do
       region = Ember.region()
-      first = Store.record(region, 2, [])
-      second = Store.record(Region.advance(region, 2), 1, [])
-      third = Store.record(Region.advance(region, 3), 4, [])
+      first = Store.advance_record(region, 2, 60, [])
+      second = Store.advance_record(Region.advance(region, 2), 1, 60, [])
+      third = Store.advance_record(Region.advance(region, 3), 4, 60, [])
 
       for record <- [first, second, third], do: :ok = Store.append(store, record)
 
-      assert Store.records(store) == [first, second, third]
-      assert Store.records_after(store, 2) == [second, third]
-      assert Store.records_after(store, 3) == [third]
-      assert {:avwe, 1, %{step: 0, time: time, dt: 60, steps: 2, intents: []}} = first
+      assert Store.records(store) == {:ok, [first, second, third]}
+      assert Store.records_after(store, 2) == {:ok, [second, third]}
+      assert Store.records_after(store, 3) == {:ok, [third]}
+      assert {:avwe, 2, {:advance, %{step: 0, time: time, dt: 60, steps: 2, events: []}}} = first
       assert time == region.time
     end
 
-    test "the record carries the pending intents in submission order", %{store: store} do
+    test "an intent is journaled with the seq the region gave it", %{store: store} do
       region =
         Ember.region()
-        |> Region.submit(intent("mira-vale", :say, params: %{text: "one"}))
-        |> Region.submit(intent("mira-vale", :say, params: %{text: "two"}))
+        |> logged_submit(store, intent("mira-vale", :say, params: %{text: "one"}))
+        |> logged_submit(store, intent("mira-vale", :say, params: %{text: "two"}))
 
-      :ok = Store.append(store, Store.record(region, 1, []))
+      assert [
+               {:avwe, 2, {:submit, 0, %Intent{seq: 0, params: %{text: "one"}}}},
+               {:avwe, 2, {:submit, 0, %Intent{seq: 1, params: %{text: "two"}}}}
+             ] = records!(store)
 
-      assert [{:avwe, 1, %{intents: [%Intent{seq: 0}, %Intent{seq: 1}]}}] = Store.records(store)
+      assert Region.pending(region) |> Enum.map(& &1.seq) == [0, 1]
     end
 
     test "a second handle on the same store sees the first one's records", %{
       store: store,
       dir: dir
     } do
-      :ok = Store.append(store, Store.record(Ember.region(), 1, []))
+      :ok = Store.append(store, Store.advance_record(Ember.region(), 1, 60, []))
 
       task =
         Task.async(fn ->
           {:ok, other} = Store.open(dir, @region)
-          records = Store.records(other)
+          records = records!(other)
           :ok = Store.close(other)
           records
         end)
 
-      assert [{:avwe, 1, %{step: 0}}] = Task.await(task)
-      assert [{:avwe, 1, %{step: 0}}] = Store.records(store)
+      assert [{:avwe, 2, {:advance, %{step: 0}}}] = Task.await(task)
+      assert [{:avwe, 2, {:advance, %{step: 0}}}] = records!(store)
     end
   end
 
@@ -113,6 +131,7 @@ defmodule Avwe.StoreTest do
       assert File.exists?(Path.join([dir, "0-0", "snap-0000000000.bin"]))
       assert File.exists?(Path.join([dir, "0-0", "snap-0000000007.bin"]))
       refute File.exists?(Path.join([dir, "0-0", "snap-0000000004.bin"]))
+      assert Path.wildcard(Path.join([dir, "0-0", "*.tmp"])) == []
     end
 
     test "the default keeps five besides the first", %{store: store} do
@@ -142,18 +161,34 @@ defmodule Avwe.StoreTest do
 
       busy =
         quiet
-        |> Region.submit(intent("mira-vale", :say, params: %{text: "one"}))
-        |> Region.submit(intent("mira-vale", :say, params: %{text: "two"}))
+        |> logged_submit(store, intent("mira-vale", :say, params: %{text: "one"}))
+        |> logged_submit(store, intent("mira-vale", :say, params: %{text: "two"}))
 
       :ok = Store.snapshot(store, busy)
       assert {:ok, saved} = Store.latest_snapshot(store)
       assert saved.inbox == []
       assert Region.state_hash(saved) == Region.state_hash(quiet)
 
-      # The advance that applies them re-submits them with the same seqs.
-      live = logged_advance(store, busy, 1)
+      # Their submit records re-submit them with the same seqs.
+      live = logged_advance(busy, store, 1)
       assert {:ok, rebuilt} = Store.rebuild(store)
       assert Region.state_hash(rebuilt) == Region.state_hash(live)
+    end
+
+    test "a half-written snapshot is removed on open", %{store: store, dir: dir} do
+      :ok = Store.snapshot(store, Ember.region())
+      tmp = Path.join([dir, "0-0", "snap-0000000005.bin.tmp"])
+      File.write!(tmp, "half")
+
+      log =
+        capture_log(fn ->
+          {:ok, other} = Store.open(dir, @region)
+          :ok = Store.close(other)
+        end)
+
+      refute File.exists?(tmp)
+      assert log =~ "half-written snapshot"
+      assert Store.snapshots(store) == [0]
     end
   end
 
@@ -192,15 +227,48 @@ defmodule Avwe.StoreTest do
       # Go, then stop: she stops short. The other way round she'd be walking.
       live =
         start
-        |> Region.submit(intent("mira-vale", :go, target: "the-dry-bend"))
-        |> Region.submit(intent("mira-vale", :stop))
-        |> then(&logged_advance(store, &1, 1))
+        |> logged_submit(store, intent("mira-vale", :go, target: "the-dry-bend"))
+        |> logged_submit(store, intent("mira-vale", :stop))
+        |> logged_advance(store, 1)
 
       assert Region.get(live, "mira-vale", :action) == nil
 
       assert {:ok, rebuilt} = Store.rebuild_from_start(store)
       assert Region.get(rebuilt, "mira-vale", :action) == nil
       assert Region.state_hash(rebuilt) == Region.state_hash(live)
+    end
+
+    test "an intent journaled but not yet applied is pending again after a rebuild", %{
+      store: store
+    } do
+      start = Ember.region()
+      :ok = Store.snapshot(store, start)
+
+      live =
+        start
+        |> logged_advance(store, 2)
+        |> logged_submit(store, intent("mira-vale", :say, params: %{text: "Not yet."}))
+
+      assert {:ok, rebuilt} = Store.rebuild(store)
+      assert rebuilt.step == 2
+      assert [%Intent{seq: 0, params: %{text: "Not yet."}}] = Region.pending(rebuilt)
+      assert Region.state_hash(rebuilt) == Region.state_hash(live)
+    end
+
+    test "an advance is replayed with the dt it was logged with", %{store: store} do
+      start = Ember.region()
+      :ok = Store.snapshot(store, start)
+
+      :ok =
+        Store.append(
+          store,
+          {:avwe, 2, {:advance, %{step: 0, time: start.time, dt: 3_600, steps: 2, events: []}}}
+        )
+
+      assert {:ok, rebuilt} = Store.rebuild(store)
+      assert rebuilt.step == 2
+      assert rebuilt.time == start.time + 2 * 3_600
+      assert Region.state_hash(rebuilt) == Region.state_hash(Region.advance(start, 2, dt: 3_600))
     end
 
     test "rebuilding with no records gives the snapshot", %{store: store} do
@@ -214,9 +282,34 @@ defmodule Avwe.StoreTest do
     test "a gap between the snapshot and the log is an error", %{store: store} do
       region = Ember.region()
       :ok = Store.snapshot(store, region)
-      :ok = Store.append(store, Store.record(Region.advance(region, 5), 1, []))
+      :ok = Store.append(store, Store.advance_record(Region.advance(region, 5), 1, 60, []))
 
       assert Store.rebuild(store) == {:error, {:log_gap, 0, 5}}
+    end
+
+    test "an intent journaled at the wrong step is a gap too", %{store: store} do
+      region = Ember.region()
+      :ok = Store.snapshot(store, region)
+      :ok = Store.append(store, Store.submit_record(3, intent("mira-vale", :stop)))
+
+      assert Store.rebuild(store) == {:error, {:log_gap, 0, 3}}
+    end
+
+    test "an intent whose logged seq the region wouldn't give it is an error", %{store: store} do
+      region = Ember.region()
+      :ok = Store.snapshot(store, region)
+      :ok = Store.append(store, Store.submit_record(0, %{intent("mira-vale", :stop) | seq: 4}))
+
+      assert Store.rebuild(store) == {:error, {:seq_mismatch, 0, 4, 0}}
+    end
+
+    test "a version-1 record is rejected", %{store: store} do
+      region = Ember.region()
+      :ok = Store.snapshot(store, region)
+      old = {:avwe, 1, %{step: 0, time: region.time, dt: 60, steps: 1, intents: [], events: []}}
+      :ok = :disk_log.log(store.log, old)
+
+      assert Store.rebuild(store) == {:error, {:unknown_record, old}}
     end
   end
 
@@ -237,14 +330,39 @@ defmodule Avwe.StoreTest do
       assert {:error, {:open_log, _file, {:not_a_log_file, _}}} = Store.open(corrupt, @region)
     end
 
-    test "a corrupt snapshot", %{store: store, dir: dir} do
+    test "a corrupt latest snapshot is skipped for an older one", %{store: store, dir: dir} do
+      start = Ember.region()
+      :ok = Store.snapshot(store, start)
+      midway = play(store, start)
+      :ok = Store.snapshot(store, midway)
+      live = play(store, midway)
+
+      latest = Path.join([dir, "0-0", "snap-0000000038.bin"])
+      File.write!(latest, binary_part(File.read!(latest), 0, 100))
+
+      assert {:error, {:corrupt_snapshot, ^latest}} = Store.latest_snapshot(store)
+
+      log =
+        capture_log(fn ->
+          assert {:ok, rebuilt} = Store.rebuild(store)
+          assert rebuilt.step == 76
+          assert Region.state_hash(rebuilt) == Region.state_hash(live)
+        end)
+
+      assert log =~ "Skipping snapshot #{latest}"
+      assert {:ok, from_start} = Store.rebuild_from_start(store)
+      assert Region.state_hash(from_start) == Region.state_hash(live)
+    end
+
+    test "it is an error only when no snapshot decodes", %{store: store, dir: dir} do
       :ok = Store.snapshot(store, Ember.region())
+      File.write!(Path.join([dir, "0-0", "snap-0000000000.bin"]), "garbage")
       File.write!(Path.join([dir, "0-0", "snap-0000000003.bin"]), "garbage")
 
-      assert {:error, {:corrupt_snapshot, path}} = Store.latest_snapshot(store)
-      assert String.ends_with?(path, "snap-0000000003.bin")
-      assert {:error, {:corrupt_snapshot, _path}} = Store.rebuild(store)
-      assert {:ok, %Region{step: 0}} = Store.rebuild_from_start(store)
+      capture_log(fn ->
+        assert {:error, {:corrupt_snapshot, path}} = Store.rebuild(store)
+        assert String.ends_with?(path, "snap-0000000000.bin")
+      end)
     end
   end
 end

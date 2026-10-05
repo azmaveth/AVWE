@@ -9,10 +9,18 @@ defmodule Avwe.RegionServer do
   inbox until the next step.
 
   With a `:store` dir the region persists itself through `Avwe.Store`: every
-  advance is appended to the log before it is published, and a snapshot is
-  written every `:snapshot_every` steps. A region that starts with saved state
-  resumes from it and ignores the region it was given; that is how a world
+  intent is journaled as it is accepted, every advance is appended to the log
+  before it is published, and a snapshot is written whenever an advance
+  crosses a multiple of `:snapshot_every` steps (a multi-step advance that
+  crosses one snapshots at the end of that advance). `:snapshot_keep` is how
+  many of the newest snapshots to keep besides the first.
+
+  A region that starts with saved state resumes from it; that is how a world
   restarts, and how the supervisor brings a crashed region back where it was.
+  The saved state wins for state (seed, time, terrain, components, fields,
+  env), but the systems come from the region the server was given: they are
+  code, not state, and the rules may change while the world runs. The region
+  it was given is otherwise ignored, with a warning if its seed differs.
   """
 
   use GenServer
@@ -22,6 +30,7 @@ defmodule Avwe.RegionServer do
   alias Avwe.{Region, Store}
 
   @default_snapshot_every 1_000
+  @default_snapshot_keep 5
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
@@ -83,8 +92,9 @@ defmodule Avwe.RegionServer do
     # So terminate/2 runs on supervisor shutdown and closes the store.
     Process.flag(:trap_exit, true)
     world = Keyword.fetch!(opts, :world)
+    keep = Keyword.get(opts, :snapshot_keep, @default_snapshot_keep)
 
-    case open_store(Keyword.get(opts, :store), Keyword.fetch!(opts, :region)) do
+    case open_store(Keyword.get(opts, :store), Keyword.fetch!(opts, :region), keep) do
       {:ok, store, region} ->
         table = :ets.new(__MODULE__, [:set, :protected, read_concurrency: true])
         {:ok, _owner} = Registry.register(Avwe.Registry, {:region, world, region.id}, table)
@@ -97,7 +107,8 @@ defmodule Avwe.RegionServer do
            region: region,
            table: table,
            store: store,
-           snapshot_every: Keyword.get(opts, :snapshot_every, @default_snapshot_every)
+           snapshot_every: Keyword.get(opts, :snapshot_every, @default_snapshot_every),
+           snapshot_keep: keep
          }}
 
       {:error, reason} ->
@@ -107,14 +118,17 @@ defmodule Avwe.RegionServer do
 
   @impl true
   def handle_call({:submit, intent}, _from, state) do
-    {:reply, :ok, %{state | region: Region.submit(state.region, intent)}}
+    region = Region.submit(state.region, intent)
+    :ok = journal(state, region.step, region |> Region.pending() |> List.last())
+    {:reply, :ok, %{state | region: region}}
   end
 
   def handle_call({:advance, steps}, _from, state) do
     before = state.region
-    {events, region} = before |> Region.advance(steps) |> Region.drain_events()
+    dt = before.dt
+    {events, region} = before |> Region.advance(steps, dt: dt) |> Region.drain_events()
 
-    :ok = persist(state, before, steps, events, region)
+    :ok = persist(state, before, steps, dt, events, region)
     publish(state.table, region)
     broadcast(state.world, events, Region.view(region))
 
@@ -137,38 +151,72 @@ defmodule Avwe.RegionServer do
   # Without a store the region starts as given. With one, saved state wins
   # over the given region, and a fresh store gets the given region as its
   # step-0 snapshot so the whole history can be replayed from it.
-  defp open_store(nil, region), do: {:ok, nil, region}
+  defp open_store(nil, region, _keep), do: {:ok, nil, region}
 
-  defp open_store(dir, region) do
+  defp open_store(dir, region, keep) do
     with {:ok, store} <- Store.open(dir, region.id),
-         {:ok, region} <- resume(store, region) do
+         {:ok, region} <- resume(store, region, keep) do
       {:ok, store, region}
     end
   end
 
-  defp resume(store, region) do
+  defp resume(store, region, keep) do
     case Store.rebuild(store) do
       {:ok, saved} ->
         Logger.info(
           "Resumed region #{inspect(saved.id)} at step #{saved.step} from #{store.path}"
         )
 
-        {:ok, saved}
+        {:ok, reconfigure(saved, region)}
 
       :none ->
-        with :ok <- Store.snapshot(store, region), do: {:ok, region}
+        start_fresh(store, region, keep)
 
       {:error, _reason} = error ->
         error
     end
   end
 
-  defp persist(%{store: nil}, _before, _steps, _events, _region), do: :ok
+  # A log with no snapshot to replay it onto can't be resumed and must not be
+  # started over: the world fails to start instead.
+  defp start_fresh(store, region, keep) do
+    case Store.records(store) do
+      {:ok, []} -> with :ok <- Store.snapshot(store, region, keep: keep), do: {:ok, region}
+      {:ok, _records} -> {:error, :log_without_snapshot}
+      {:error, _reason} = error -> error
+    end
+  end
 
-  defp persist(%{store: store, snapshot_every: every}, before, steps, events, region) do
-    with :ok <- Store.append(store, Store.record(before, steps, events)) do
-      if snapshot_due?(before.step, region.step, every),
-        do: Store.snapshot(store, region),
+  # Configuration beats the snapshot for code; the snapshot wins for state.
+  defp reconfigure(saved, given) do
+    if given.seed != saved.seed do
+      Logger.warning(
+        "Region #{inspect(saved.id)}: ignoring :seed #{inspect(given.seed)}; " <>
+          "the world's seed is #{inspect(saved.seed)}"
+      )
+    end
+
+    if given.systems != saved.systems do
+      Logger.info(
+        "Region #{inspect(saved.id)}: systems changed from #{inspect(saved.systems)} " <>
+          "to #{inspect(given.systems)}"
+      )
+    end
+
+    %{saved | systems: given.systems}
+  end
+
+  defp journal(%{store: nil}, _step, _intent), do: :ok
+
+  defp journal(%{store: store}, step, intent),
+    do: Store.append(store, Store.submit_record(step, intent))
+
+  defp persist(%{store: nil}, _before, _steps, _dt, _events, _region), do: :ok
+
+  defp persist(%{store: store} = state, before, steps, dt, events, region) do
+    with :ok <- Store.append(store, Store.advance_record(before, steps, dt, events)) do
+      if snapshot_due?(before.step, region.step, state.snapshot_every),
+        do: Store.snapshot(store, region, keep: state.snapshot_keep),
         else: :ok
     end
   end

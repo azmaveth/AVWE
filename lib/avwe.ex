@@ -47,8 +47,17 @@ defmodule Avwe do
     * `:data_dir` - where worlds keep their logs and snapshots; this world's
       go under `<data_dir>/<id>`. Default: `config :avwe, :data_dir`. `nil`
       means no persistence. A world whose state is already there resumes
-      from it and ignores `:start`.
-    * `:snapshot_every` - steps between snapshots. Default: 1000.
+      from it: `:start`, `:seed`, `:terrain` and `:miracles` are ignored (with
+      a warning if the seed differs), but `:systems` is applied, since the
+      rules are code, not state. Replaying a log is only valid under the
+      systems it was recorded with; after changing them, the log from that
+      point on belongs to the new rules.
+    * `:snapshot_every` - steps between snapshots. A snapshot is written at
+      the end of any advance that crosses a multiple of this; a multi-step
+      advance that crosses one snapshots at the end of that advance, not at
+      the multiple. Default: 1000.
+    * `:snapshot_keep` - how many of the newest snapshots to keep besides the
+      first one, which is always kept. Default: 5.
   """
   @spec start_world(atom(), keyword()) :: DynamicSupervisor.on_start_child() | {:error, term()}
   def start_world(id, opts \\ []) do
@@ -74,7 +83,8 @@ defmodule Avwe do
          clock: Keyword.get(opts, :clock, :manual),
          info: %{name: quire_world.name, tagline: quire_world.tagline},
          store: store_dir(id, Keyword.get(opts, :data_dir, Application.get_env(:avwe, :data_dir))),
-         snapshot_every: Keyword.get(opts, :snapshot_every, 1_000)}
+         snapshot_every: Keyword.get(opts, :snapshot_every, 1_000),
+         snapshot_keep: Keyword.get(opts, :snapshot_keep, 5)}
       )
     end
   end
