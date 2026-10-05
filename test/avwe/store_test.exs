@@ -227,6 +227,35 @@ defmodule Avwe.StoreTest do
       assert Region.state_hash(rebuilt) == Region.state_hash(live)
     end
 
+    test "autopilot's intents are kept by their ref, whoever queued them", %{store: store} do
+      # The system's own intent (never journaled) stays; a journaled one
+      # claiming to be autopilot's does not, and neither does a human's.
+      quiet = Ember.region()
+
+      busy =
+        quiet
+        |> Region.submit(
+          intent("mira-vale", :wait, ref: "auto-mira-vale-0", controller: :autopilot)
+        )
+        |> logged_submit(
+          store,
+          intent("mira-vale", :say, params: %{text: "one"}, controller: :autopilot)
+        )
+        |> logged_submit(
+          store,
+          intent("mira-vale", :say, params: %{text: "two"}, controller: :human)
+        )
+
+      :ok = Store.snapshot(store, busy)
+      assert {:ok, saved} = Store.latest_snapshot(store)
+      assert [%{ref: "auto-mira-vale-0", seq: 0}] = saved.inbox
+      assert saved.next_seq == 1
+
+      live = logged_advance(busy, store, 1)
+      assert {:ok, rebuilt} = Store.rebuild(store)
+      assert Region.state_hash(rebuilt) == Region.state_hash(live)
+    end
+
     test "a snapshot is the region wrapped in its version tag", %{store: store, dir: dir} do
       region = Ember.region() |> Region.advance(3)
       :ok = Store.snapshot(store, region)

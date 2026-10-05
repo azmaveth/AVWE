@@ -172,12 +172,14 @@ defmodule Avwe do
 
     * `:body` - the body to control. Leave it out to watch as a spectator.
     * `:sink` - the process that receives percepts. Default: the caller.
-    * `:controller` - `:human` (default), `:mcp` or `:arbor`.
+    * `:controller` - `:human` (default), `:mcp` or `:arbor`; anything else
+      fails with `:invalid_controller`.
     * `:idle_after` - real milliseconds without an `Avwe.Session.act/3`
       after which the session yields the body to autopilot until its next
       act. Default: ten minutes.
 
-  Fails with `:no_such_world`, `:no_such_body` or `:body_taken`.
+  Fails with `:no_such_world`, `:no_such_body`, `:body_taken` or
+  `:invalid_controller`.
   """
   @spec connect(atom(), keyword()) :: {:ok, pid()} | {:error, term()}
   def connect(world, opts \\ []) do

@@ -24,8 +24,11 @@ defmodule Avwe.Tick do
   @spec end_time(t()) :: Avwe.Calendar.time()
   def end_time(%__MODULE__{time: time, dt: dt}), do: time + dt
 
-  @doc "The random state for `system` in this step. See `Avwe.Rng`."
-  @spec rng(t(), module()) :: :rand.state()
+  @doc """
+  The random state for `system` in this step. See `Avwe.Rng`. A system that
+  needs a stream of its own per entity passes `{module, id}`.
+  """
+  @spec rng(t(), module() | {module(), term()}) :: :rand.state()
   def rng(%__MODULE__{} = tick, system), do: Rng.state(tick.seed, tick.region, tick.time, system)
 
   @doc """

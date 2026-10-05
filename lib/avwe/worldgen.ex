@@ -30,12 +30,14 @@ defmodule Avwe.Worldgen do
     * `:characters` - what the bodies do on their own (`Avwe.Autopilot`).
       Every seeded body gets an `:autopilot` and a `:control` component, so
       it rests at night and keeps warm. A body named here, by its id, also
-      gets a `:routine` (entries `[at: "HH:MM", do: {verb, opts}, note:
-      string]`, sorted by time; `{:rest}` means wait until dawn) and
-      `:norms` (atoms such as `:invited_fire`). A bad time, an unknown body
-      or a `do` that is not a verb raises `ArgumentError` here, like a bad
-      hearth. This is the shape a routine compiled from the body's Quire
-      article would take (`docs/DESIGN.md`, 10.3).
+      gets a `:routine` (entries `[at: "HH:MM", do: plan, note: string]`,
+      sorted by time) and `:norms` (atoms such as `:invited_fire`). A plan
+      is a list of steps the body runs in sequence, each an intent `{verb,
+      opts}` or `{verb}`; a single step stands for a plan of one, and
+      `{:rest}` means wait until dawn. A bad time, an unknown body, an
+      empty plan or a step that is not a verb raises `ArgumentError` here,
+      like a bad hearth. This is the shape a routine compiled from the
+      body's Quire article would take (`docs/DESIGN.md`, 10.3).
 
   Finally each system prepares the region for its starting time
   (`Avwe.Region.prepare/1`).
@@ -98,7 +100,7 @@ defmodule Avwe.Worldgen do
     |> Enum.map(fn entry ->
       %{
         at: time_of_day!(id, Keyword.fetch!(entry, :at)),
-        do: todo!(id, Keyword.fetch!(entry, :do)),
+        do: plan!(id, Keyword.fetch!(entry, :do)),
         note: Keyword.get(entry, :note)
       }
     end)
@@ -119,14 +121,26 @@ defmodule Avwe.Worldgen do
     end
   end
 
-  defp todo!(_id, {verb} = todo) when is_atom(verb), do: todo
-  defp todo!(_id, {verb, opts} = todo) when is_atom(verb) and is_list(opts), do: todo
+  # A plan's steps, each checked where a bad one is easiest to explain: the
+  # autopilot would submit it and get `:unknown_verb` back.
+  defp plan!(id, step) when is_tuple(step), do: plan!(id, [step])
+  defp plan!(id, [_step | _rest] = steps), do: Enum.map(steps, &step!(id, &1))
 
-  defp todo!(id, todo),
+  defp plan!(id, plan),
     do:
       raise(
         ArgumentError,
-        "character #{inspect(id)}: do must be {verb, opts}, got #{inspect(todo)}"
+        "character #{inspect(id)}: do must be a step or a list of steps, got #{inspect(plan)}"
+      )
+
+  defp step!(_id, {verb} = step) when is_atom(verb), do: step
+  defp step!(_id, {verb, opts} = step) when is_atom(verb) and is_list(opts), do: step
+
+  defp step!(id, step),
+    do:
+      raise(
+        ArgumentError,
+        "character #{inspect(id)}: a step must be {verb, opts}, got #{inspect(step)}"
       )
 
   defp norms!(id, norms) do

@@ -4,7 +4,9 @@ defmodule Avwe.Telnet do
   `Avwe.Telnet.Connection` for each player.
 
   Enable it with `config :avwe, :telnet, port: 4040`, or start it yourself
-  with `port: 0` to get a free port (see `port/1`).
+  with `port: 0` to get a free port (see `port/1`). `idle_after`, real
+  milliseconds, is passed to each player's session (`Avwe.connect/2`): how
+  long a player may stop typing before the body goes back to its routine.
   """
 
   use GenServer
@@ -29,8 +31,8 @@ defmodule Avwe.Telnet do
       {:ok, listen} ->
         {:ok, port} = :inet.port(listen)
         {:ok, connections} = DynamicSupervisor.start_link(strategy: :one_for_one)
-        server = self()
-        spawn_link(fn -> accept(listen, connections, server) end)
+        session_opts = Keyword.take(opts, [:idle_after])
+        spawn_link(fn -> accept(listen, connections, session_opts) end)
         Logger.info("Telnet listening on port #{port}")
         {:ok, %{listen: listen, port: port, connections: connections}}
 
@@ -42,13 +44,15 @@ defmodule Avwe.Telnet do
   @impl true
   def handle_call(:port, _from, state), do: {:reply, state.port, state}
 
-  defp accept(listen, connections, server) do
+  defp accept(listen, connections, session_opts) do
     case :gen_tcp.accept(listen) do
       {:ok, socket} ->
-        {:ok, pid} = DynamicSupervisor.start_child(connections, {Connection, socket})
+        {:ok, pid} =
+          DynamicSupervisor.start_child(connections, {Connection, {socket, session_opts}})
+
         :ok = :gen_tcp.controlling_process(socket, pid)
         send(pid, :socket_ready)
-        accept(listen, connections, server)
+        accept(listen, connections, session_opts)
 
       {:error, :closed} ->
         :ok

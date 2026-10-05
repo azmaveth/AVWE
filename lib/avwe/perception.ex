@@ -34,6 +34,12 @@ defmodule Avwe.Perception do
   and `smoke` are `nil`. Steam has one rule, the reach's flag
   (`Avwe.Systems.Heat.steaming?/2`): `warmth.steam?` on a wet cell and
   `channel.steaming` for the river's prose both read it.
+
+  A body's own actions carry who asked for them (`Avwe.Percept`'s
+  `issuer`): its controller, or its routine when autopilot had it. The
+  hand-over between the two (`:control_released`, `:control_taken`) is a
+  percept of the body's own and nobody else's; `:decided` stays the game
+  master's.
   """
 
   alias Avwe.{Event, Percept, Prose, Space, Terrain}
@@ -50,6 +56,7 @@ defmodule Avwe.Perception do
   @spring_events [:spring_stopped, :spring_started]
   @fire_events [:fire_lit, :fire_out, :fire_low]
   @smell_events [:smoke_smelled, :smoke_faded]
+  @control_events [:control_taken, :control_released]
   @river_cells 12
   @river_salience 0.8
   @steam_salience 0.6
@@ -145,6 +152,10 @@ defmodule Avwe.Perception do
   defp perceive(view, body, %Event{type: :discovered, entity: body} = event) when body != nil,
     do: [discovered(view, body, event)]
 
+  defp perceive(_view, body, %Event{type: type, entity: body} = event)
+       when type in @control_events and body != nil,
+       do: [hand_over(body, event)]
+
   defp perceive(_view, _body, _event), do: []
 
   defp own(view, body, %Event{type: :action_started, data: data} = event) do
@@ -154,6 +165,7 @@ defmodule Avwe.Perception do
       time: event.time,
       body: body,
       intent: data.ref,
+      issuer: Percept.issuer(data.ref),
       progress: 0.0,
       salience: 0.3,
       summary: Prose.started(data.verb, name(view, data.target), data.params)
@@ -167,6 +179,7 @@ defmodule Avwe.Perception do
       time: event.time,
       body: body,
       intent: data.ref,
+      issuer: Percept.issuer(data.ref),
       progress: data.progress,
       salience: 0.3,
       summary: Prose.progress(data.verb, name(view, data.target), data.params, data.progress)
@@ -180,11 +193,25 @@ defmodule Avwe.Perception do
       time: event.time,
       body: body,
       intent: data.ref,
+      issuer: Percept.issuer(data.ref),
       outcome: data.outcome,
       reason: data.reason,
       salience: 1.0,
       summary:
         Prose.result(data.verb, data.outcome, data.reason, name(view, data.target), data.params)
+    }
+  end
+
+  # Only the body itself notices the hand-over between its controller and
+  # its routine; `Avwe.Session` passes on the ones its idle rule makes.
+  defp hand_over(body, event) do
+    %Percept{
+      kind: :sensed,
+      type: event.type,
+      time: event.time,
+      body: body,
+      salience: 0.3,
+      summary: Prose.control(event.type)
     }
   end
 

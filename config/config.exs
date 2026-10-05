@@ -70,20 +70,40 @@ config :avwe, :worlds,
     ],
     # What the bodies do on their own (Avwe.Autopilot). "She walks the banks
     # before dawn ... she stops at the lodge on the way home and warms her
-    # hands"; her kiln-house keeps the Hearth Compact.
+    # hands"; her kiln-house keeps the Hearth Compact. Each entry is a plan,
+    # run step by step. None leads to the source: that is for someone to
+    # find (docs/DESIGN.md, 10.2).
     characters: [
       "mira-vale": [
         norms: [:invited_fire],
         routine: [
-          [at: "04:30", do: {:go, target: "the-dry-bend"}, note: "walks the banks before dawn"],
-          [at: "06:30", do: {:follow, params: %{direction: :upstream}}, note: "the survey"],
-          [at: "11:00", do: {:go, target: "ember-reach"}],
+          [
+            at: "04:30",
+            do: [
+              {:go, target: "the-dry-bend"},
+              {:wait, params: %{for: 40 * 60}},
+              {:go, target: "ember-reach"}
+            ],
+            note: "walks the banks before dawn"
+          ],
+          [
+            at: "08:00",
+            do: [
+              {:go, target: "the-dry-bend"},
+              {:wait, params: %{for: 3 * 3600}},
+              {:go, target: "ember-reach"}
+            ],
+            note: "the survey"
+          ],
           [
             at: "18:00",
-            do: {:go, target: "ashwarden-lodge"},
-            note: "warms her hands at the lodge"
+            do: [
+              {:go, target: "ashwarden-lodge"},
+              {:wait, params: %{for: 90 * 60}},
+              {:go, target: "ember-reach"}
+            ],
+            note: "warms her hands at the lodge on the way home"
           ],
-          [at: "19:30", do: {:go, target: "ember-reach"}],
           [at: "22:00", do: {:rest}]
         ]
       ]

@@ -92,18 +92,24 @@ defmodule Avwe.WorldgenTest do
       assert Region.get(region, "mira-vale", :norms) == [:invited_fire]
 
       assert [
-               %{at: 16_200, do: {:go, target: "the-dry-bend"}, note: _walk},
-               %{at: 23_400, do: {:follow, params: %{direction: :upstream}}},
-               %{at: 39_600, note: nil},
-               %{at: 64_800},
-               %{at: 70_200},
-               %{at: 79_200, do: {:rest}}
+               %{
+                 at: 16_200,
+                 do: [{:go, target: "the-dry-bend"}, {:wait, params: %{for: 2400}}, {:go, _}],
+                 note: _walk
+               },
+               %{at: 28_800, do: [_, {:wait, params: %{for: 10_800}}, _], note: "the survey"},
+               %{at: 64_800, do: [{:go, target: "ashwarden-lodge"}, _, _]},
+               %{at: 79_200, do: [{:rest}], note: nil}
              ] = Region.get(region, "mira-vale", :routine)
     end
 
     test "sort the routine by time, and leave unnamed bodies without one" do
       region = with_mira(routine: [[at: "22:00", do: {:rest}], @walk])
-      assert [%{at: 16_200}, %{at: 79_200}] = Region.get(region, "mira-vale", :routine)
+
+      # A single step is a plan of one.
+      assert [%{at: 16_200, do: [{:go, target: "the-dry-bend"}]}, %{at: 79_200, do: [{:rest}]}] =
+               Region.get(region, "mira-vale", :routine)
+
       assert Region.get(region, "mira-vale", :norms) == nil
 
       assert Region.get(build(characters: []), "mira-vale", :routine) == nil
@@ -124,10 +130,24 @@ defmodule Avwe.WorldgenTest do
       end
 
       assert_raise ArgumentError,
-                   ~r/^character "mira-vale": do must be {verb, opts}, got "go"/,
+                   ~r/^character "mira-vale": do must be a step or a list of steps, got "go"/,
                    fn ->
                      with_mira(routine: [Keyword.put(@walk, :do, "go")])
                    end
+
+      assert_raise ArgumentError,
+                   ~r/^character "mira-vale": do must be a step or a list of steps, got \[\]/,
+                   fn ->
+                     with_mira(routine: [Keyword.put(@walk, :do, [])])
+                   end
+
+      for step <- ["go", {"go", []}, {:go, %{}}] do
+        assert_raise ArgumentError,
+                     ~r/^character "mira-vale": a step must be {verb, opts}, got /,
+                     fn ->
+                       with_mira(routine: [Keyword.put(@walk, :do, [{:go, target: "x"}, step])])
+                     end
+      end
 
       assert_raise ArgumentError,
                    ~r/^character "mira-vale": norms must be atoms, got \["fire"\]/,

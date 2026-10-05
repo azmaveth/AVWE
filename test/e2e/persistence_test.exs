@@ -677,38 +677,51 @@ defmodule Avwe.E2E.PersistenceTest do
     end
 
     test "a restart mid-journey resumes the journey", %{tmp_dir: tmp_dir} do
-      # She sets off at 04:30 (step 30, a snapshot step): the intent she
-      # decided on in step 29 is pending in that snapshot, and must be.
-      :ok = start(tmp_dir, snapshot_every: 5)
+      # She sets off around 04:30: the intent she decides on in one step is
+      # pending in the next step's snapshot, and must be. The world stops
+      # with the decision made and the journey not yet begun.
+      :ok = start(tmp_dir, snapshot_every: 1)
+      {:ok, _owner} = Avwe.subscribe(@world)
 
-      eventually(
-        fn ->
-          Avwe.step(@world, 1)
-          match?(%{verb: :go, target: "the-dry-bend"}, mira_action())
-        end,
-        10_000
-      )
+      ref =
+        eventually(
+          fn ->
+            Avwe.step(@world, 1)
 
-      Avwe.step(@world, 2)
+            receive do
+              {:avwe_events, @world, events, _view} ->
+                Enum.find_value(events, fn
+                  %{type: :decided, data: %{why: :routine, entry: 0, intent_ref: ref}} -> ref
+                  _other -> nil
+                end)
+            after
+              100 -> nil
+            end
+          end,
+          10_000
+        )
+
+      "auto-mira-vale-" <> decided_at = ref
+      step = String.to_integer(decided_at) + 1
+      assert {:ok, %{step: ^step}} = Avwe.snapshot(@world)
+      refute match?(%{verb: :go}, mira_action())
       hash = live_hash()
-      assert {:ok, %{step: step}} = Avwe.snapshot(@world)
-      assert step > 30
       :ok = Avwe.stop_world(@world)
 
       {:ok, store} = Store.open(store_dir(tmp_dir), @region)
-      assert 30 in Store.snapshots(store)
+      assert step in Store.snapshots(store)
       {:ok, records} = Store.records(store)
       refute Enum.any?(records, &match?({:avwe, 2, {:submit, _step, _intent}}, &1))
 
-      assert {:ok,
-              %Region{step: 30, inbox: [%{ref: "auto-mira-vale-29", controller: :autopilot}]}} =
+      assert {:ok, %Region{step: ^step, inbox: [%{ref: ^ref, controller: :autopilot}]}} =
                Store.latest_snapshot(store)
 
       :ok = Store.close(store)
 
       :ok = start(tmp_dir, snapshot_every: 5)
       assert live_hash() == hash
-      assert %{verb: :go, target: "the-dry-bend", ref: "auto-mira-vale-29"} = mira_action()
+      Avwe.step(@world, 1)
+      assert %{verb: :go, target: "the-dry-bend", ref: ^ref} = mira_action()
 
       {:ok, watcher} = Avwe.connect(@world)
       assert {:ok, %{bodies: [%{going_to: "The Dry Bend"}]}} = Session.look(watcher)

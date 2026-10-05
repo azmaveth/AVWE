@@ -16,6 +16,14 @@ defmodule Avwe.Percept do
 
   `type` is the world event the percept came from. `source` describes where a
   sensed percept came from: `%{ref, distance_m, direction}`.
+
+  `issuer` says, on a `:progress` or `:result` percept, who asked for the
+  action: `:controller` for the body's controller, `:autopilot` for the
+  body's own routine (its refs start with `auto-`), so a controller that
+  yielded the body can tell its own doings from what the routine did with
+  it. A body's own session also senses the hand-over itself:
+  `:control_released` when it yielded and `:control_taken` when it took
+  the body back.
   """
 
   @enforce_keys [:kind, :type, :time]
@@ -28,6 +36,7 @@ defmodule Avwe.Percept do
     :modality,
     :source,
     :intent,
+    :issuer,
     :outcome,
     :reason,
     :progress,
@@ -37,6 +46,7 @@ defmodule Avwe.Percept do
   ]
 
   @type kind :: :sensed | :progress | :result
+  @type issuer :: :controller | :autopilot
 
   @type t :: %__MODULE__{
           id: String.t() | nil,
@@ -47,6 +57,7 @@ defmodule Avwe.Percept do
           modality: :sight | :hearing | :smell | nil,
           source: map() | nil,
           intent: String.t() | nil,
+          issuer: issuer() | nil,
           outcome: :success | :failure | :blocked | :interrupted | nil,
           reason: atom() | nil,
           progress: float() | nil,
@@ -54,4 +65,9 @@ defmodule Avwe.Percept do
           confidence: float(),
           salience: float()
         }
+
+  @doc "Who issued the intent with this ref: autopilot's refs start with `auto-`."
+  @spec issuer(String.t()) :: issuer()
+  def issuer("auto-" <> _rest), do: :autopilot
+  def issuer(_ref), do: :controller
 end

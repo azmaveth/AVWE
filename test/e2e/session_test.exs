@@ -102,6 +102,21 @@ defmodule Avwe.E2E.SessionTest do
       {:ok, watcher} = Avwe.connect(@world)
       assert Session.act(watcher, :say, params: %{text: "hello"}) == {:error, :spectator}
     end
+
+    test "control and release are the session's own, and autopilot's refs are its own" do
+      wren = join("wren")
+      assert Session.act(wren, :control) == {:error, :reserved}
+      assert Session.act(wren, :release) == {:error, :reserved}
+
+      assert Session.act(wren, :wait, params: %{for: 60}, ref: "auto-wren-1") ==
+               {:error, :reserved}
+
+      Avwe.step(@world, 1)
+      assert percepts(wren) == []
+
+      assert %{controller: :arbor, taken: true} =
+               Enum.find(elem(Avwe.bodies(@world), 1), &(&1.id == "wren"))
+    end
   end
 
   describe "perceiving" do
@@ -285,6 +300,17 @@ defmodule Avwe.E2E.SessionTest do
     test "connecting fails clearly" do
       assert Avwe.connect(:no_such_world, body: "wren") == {:error, :no_such_world}
       assert Avwe.connect(@world, body: "nobody") == {:error, :no_such_body}
+    end
+
+    test "only a human, an MCP client or an Arbor agent can hold a body" do
+      for controller <- [:autopilot, :claude, "human", nil] do
+        assert Avwe.connect(@world, body: "wren", controller: controller) ==
+                 {:error, :invalid_controller}
+
+        assert Avwe.connect(@world, controller: controller) == {:error, :invalid_controller}
+      end
+
+      assert {:ok, _session} = Avwe.connect(@world, body: "wren", controller: :mcp)
     end
   end
 end

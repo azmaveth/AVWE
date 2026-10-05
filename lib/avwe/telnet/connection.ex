@@ -5,13 +5,18 @@ defmodule Avwe.Telnet.Connection do
   Greets them, has them choose a world if more than one is running, then a
   body (or to watch). After that it turns their commands into intents and
   their percepts into lines of text. Everything goes through an
-  `Avwe.Session`, like any other controller.
+  `Avwe.Session`, like any other controller. A player who stops typing
+  yields the body to its routine (the session's idle rule, `:idle_after` in
+  the options): the lines for what the routine does with the body are
+  prefixed with `- `, so a reading player can tell them from their own.
   """
 
   use GenServer, restart: :temporary
 
   alias Avwe.{Prose, Session}
   alias Avwe.Telnet.Command
+
+  @routine_prefix "- "
 
   @help """
   Commands:
@@ -28,11 +33,11 @@ defmodule Avwe.Telnet.Connection do
     quit              leave\
   """
 
-  def start_link(socket), do: GenServer.start_link(__MODULE__, socket)
+  def start_link({socket, opts}), do: GenServer.start_link(__MODULE__, {socket, opts})
 
   @impl true
-  def init(socket) do
-    {:ok, %{socket: socket, phase: :starting, world: nil, session: nil}}
+  def init({socket, opts}) do
+    {:ok, %{socket: socket, phase: :starting, world: nil, session: nil, session_opts: opts}}
   end
 
   @impl true
@@ -45,7 +50,9 @@ defmodule Avwe.Telnet.Connection do
   end
 
   def handle_info({:avwe_percepts, _session, percepts}, state) do
-    for %{summary: summary} when is_binary(summary) <- percepts, do: write(state, summary)
+    for %{summary: summary} = percept when is_binary(summary) <- percepts,
+        do: write(state, line(percept))
+
     {:noreply, state}
   end
 
@@ -152,7 +159,9 @@ defmodule Avwe.Telnet.Connection do
   end
 
   defp join(state, body, welcome) do
-    case Avwe.connect(state.world, body: body && body.id, controller: :human) do
+    opts = [body: body && body.id, controller: :human] ++ state.session_opts
+
+    case Avwe.connect(state.world, opts) do
       {:ok, session} ->
         write(state, welcome)
         state = %{state | session: session, phase: :playing}
@@ -258,6 +267,9 @@ defmodule Avwe.Telnet.Connection do
   defp here(_look), do: []
 
   # I/O
+
+  defp line(%{issuer: :autopilot, summary: summary}), do: @routine_prefix <> summary
+  defp line(%{summary: summary}), do: summary
 
   defp write(state, text) do
     lines = text |> String.split("\n") |> Enum.map(&[&1, "\r\n"])

@@ -20,13 +20,20 @@ defmodule Avwe.Session do
   it submits `:release` (`terminate/2`). Both go through
   `Avwe.RegionServer.submit/3` like any other input, and are journaled. The
   results of those two intents are the session's own and never reach the
-  controller as percepts.
+  controller as percepts; `act/3` refuses the two verbs, and the `auto-`
+  refs that mark autopilot's intents, with `{:error, :reserved}`.
 
   **Idle.** When no `act/3` has arrived for `:idle_after` real milliseconds
   (default ten minutes), the session submits `:release` and marks itself
   yielded, so the body goes back to its routine while the player reads. The
   next `act/3` submits `:control` first and then the act, in that order.
-  Idleness is real time and lives here, never in the pure core.
+  Idleness is real time and lives here, never in the pure core. The
+  controller sees the hand-over: a `:control_released` percept when the
+  session yields ("You let your routine carry you.") and a `:control_taken`
+  one when it takes the body back ("You take yourself in hand."); the take
+  on connecting and the release on closing say nothing. While yielded, the
+  routine's own actions reach the controller as percepts whose `issuer` is
+  `:autopilot`.
 
   Start sessions with `Avwe.connect/2`.
   """
@@ -37,6 +44,10 @@ defmodule Avwe.Session do
 
   @region {0, 0}
   @idle_after 10 * 60 * 1_000
+  @controllers [:human, :mcp, :arbor]
+  @reserved_verbs [:control, :release]
+  @reserved_ref "auto-"
+  @announced %{control_released: :yield, control_taken: :retake}
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
@@ -48,9 +59,12 @@ defmodule Avwe.Session do
   Asks the body to do something. Returns the intent's ref; its result arrives
   later as a percept with `intent: ref`.
 
-  Options: `:target`, `:params`, and `:ref` to choose the ref yourself.
+  Options: `:target`, `:params`, and `:ref` to choose the ref yourself. The
+  verbs `:control` and `:release` are the session's own, and refs starting
+  with `auto-` are autopilot's: both are refused with `{:error, :reserved}`.
   """
-  @spec act(pid(), Intent.verb(), keyword()) :: {:ok, String.t()} | {:error, :spectator}
+  @spec act(pid(), Intent.verb(), keyword()) ::
+          {:ok, String.t()} | {:error, :spectator | :reserved}
   def act(session, verb, opts \\ []), do: GenServer.call(session, {:act, verb, opts})
 
   @doc "The id of the session's body, or `nil` for a spectator."
@@ -67,7 +81,8 @@ defmodule Avwe.Session do
     body = opts[:body]
     controller = Keyword.get(opts, :controller, :human)
 
-    with {:ok, view} <- snapshot(world),
+    with :ok <- check_controller(controller),
+         {:ok, view} <- snapshot(world),
          :ok <- check_body(view, body),
          :ok <- claim(world, body, controller) do
       sink = Keyword.fetch!(opts, :sink)
@@ -85,10 +100,10 @@ defmodule Avwe.Session do
         idle_after: Keyword.get(opts, :idle_after, @idle_after),
         idle_tag: nil,
         yielded: false,
-        lease_refs: MapSet.new()
+        lease_refs: %{}
       }
 
-      {:ok, state |> take_control() |> arm_idle()}
+      {:ok, state |> take_control(:take) |> arm_idle()}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -110,31 +125,38 @@ defmodule Avwe.Session do
     {:reply, {:error, :spectator}, state}
   end
 
+  def handle_call({:act, verb, _opts}, _from, state) when verb in @reserved_verbs do
+    {:reply, {:error, :reserved}, state}
+  end
+
   def handle_call({:act, verb, opts}, _from, state) do
-    state = if state.yielded, do: take_control(%{state | yielded: false}), else: state
     ref = Keyword.get_lazy(opts, :ref, fn -> "i-#{state.next_ref}" end)
 
-    intent =
-      Intent.new(state.body, verb,
-        ref: ref,
-        target: opts[:target],
-        params: Keyword.get(opts, :params, %{}),
-        controller: state.controller
-      )
+    if is_binary(ref) and String.starts_with?(ref, @reserved_ref) do
+      {:reply, {:error, :reserved}, state}
+    else
+      state = if state.yielded, do: take_control(%{state | yielded: false}, :retake), else: state
 
-    :ok = RegionServer.submit(state.world, @region, intent)
-    {:reply, {:ok, ref}, arm_idle(%{state | next_ref: state.next_ref + 1})}
+      intent =
+        Intent.new(state.body, verb,
+          ref: ref,
+          target: opts[:target],
+          params: Keyword.get(opts, :params, %{}),
+          controller: state.controller
+        )
+
+      :ok = RegionServer.submit(state.world, @region, intent)
+      {:reply, {:ok, ref}, arm_idle(%{state | next_ref: state.next_ref + 1})}
+    end
   end
 
   @impl true
   def handle_info({:avwe_events, world, events, view}, %{world: world} = state) do
     percepts = Perception.percepts(Map.put(view, :terrain, state.terrain), state.body, events)
-    {own, percepts} = Enum.split_with(percepts, &MapSet.member?(state.lease_refs, &1.intent))
-
-    state = %{
-      state
-      | lease_refs: Enum.reduce(own, state.lease_refs, &MapSet.delete(&2, &1.intent))
-    }
+    {own, percepts} = Enum.split_with(percepts, &Map.has_key?(state.lease_refs, &1.intent))
+    settled = Enum.map(own, &Map.fetch!(state.lease_refs, &1.intent))
+    percepts = Enum.filter(percepts, &announced?(&1, settled))
+    state = %{state | lease_refs: Map.drop(state.lease_refs, Enum.map(own, & &1.intent))}
 
     case percepts do
       [] ->
@@ -164,7 +186,7 @@ defmodule Avwe.Session do
 
   @impl true
   def terminate(_reason, %{body: body, yielded: false} = state) when body != nil do
-    release(state)
+    release(state, :close)
     :ok
   end
 
@@ -172,18 +194,20 @@ defmodule Avwe.Session do
 
   # Control
 
-  defp take_control(%{body: nil} = state), do: state
-  defp take_control(state), do: lease(state, :control)
+  defp take_control(%{body: nil} = state, _why), do: state
+  defp take_control(state, why), do: lease(state, :control, why)
 
   defp yield(%{body: nil} = state), do: state
-  defp yield(state), do: %{release(state) | yielded: true, idle_tag: nil}
+  defp yield(state), do: %{release(state, :yield) | yielded: true, idle_tag: nil}
 
-  defp release(state), do: lease(state, :release)
+  defp release(state, why), do: lease(state, :release, why)
 
-  # Submits one of the session's own lease intents, remembering its ref so
-  # the result is kept from the controller. A world that is already gone is
-  # no error here: there is nothing left to release.
-  defp lease(state, verb) do
+  # Submits one of the session's own lease intents, remembering its ref and
+  # why it was sent (`:take`, `:yield`, `:retake` or `:close`), so the result
+  # is kept from the controller and the hand-over it marks can be told from
+  # the take on connecting. A world that is already gone is no error here:
+  # there is nothing left to release.
+  defp lease(state, verb, why) do
     ref = "#{verb}-#{System.unique_integer([:positive])}"
     intent = Intent.new(state.body, verb, ref: ref, controller: state.controller)
 
@@ -193,8 +217,17 @@ defmodule Avwe.Session do
       :exit, _gone -> {:error, :not_found}
     end
 
-    %{state | lease_refs: MapSet.put(state.lease_refs, ref)}
+    %{state | lease_refs: Map.put(state.lease_refs, ref, why)}
   end
+
+  # The hand-over percepts come from the body's own `:control_*` events,
+  # which the session's lease intents raise: only the yield's release and
+  # the retake's control are announced, and both are settled in the same
+  # batch of events as the percept they explain.
+  defp announced?(%{type: type} = _percept, settled) when is_map_key(@announced, type),
+    do: @announced[type] in settled
+
+  defp announced?(_percept, _settled), do: true
 
   defp arm_idle(%{body: nil} = state), do: state
 
@@ -210,6 +243,9 @@ defmodule Avwe.Session do
       {:error, :not_found} -> {:error, :no_such_world}
     end
   end
+
+  defp check_controller(controller) when controller in @controllers, do: :ok
+  defp check_controller(_controller), do: {:error, :invalid_controller}
 
   defp check_body(_view, nil), do: :ok
 

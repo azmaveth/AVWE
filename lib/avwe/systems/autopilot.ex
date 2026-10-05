@@ -12,32 +12,59 @@ defmodule Avwe.Systems.Autopilot do
   only from `Avwe.Tick.rng/2` (the routine jitter).
 
   A body with a controller is left entirely alone: no intents, and no
-  cancelling of what it is doing. When control is released, autopilot
-  resumes at the next step.
+  cancelling of what it is doing. Its plan, if a routine entry's was under
+  way, is dropped: when control is released autopilot resumes at the next
+  step with whatever is due then, and the entry runs again the next day.
 
   Each choice is recorded in the body's `:autopilot` component
-  (`%{current: utility, why: atom, since: time, done: %{entry => day}}`) and
-  announced with a `:decided` event (`entity: body, data: %{why, intent_ref,
-  utility}`, plus `entry` and `note` for a routine entry) that bodies never
-  perceive: it is for the game master, like `:miracle`.
+  (`%{current: utility, why: atom, since: time, done: %{entry => day},
+  plan: plan | nil}`) and announced with a `:decided` event (`entity: body,
+  data: %{why, intent_ref, utility}`, plus `entry`, `note` and `step` for a
+  routine entry's step) that bodies never perceive: it is for the game
+  master, like `:miracle`. A plan that ends early is announced the same way
+  with `why: :plan_abandoned`, the `entry`, the `step_ref` that ended it
+  and its `outcome` and `reason`; it submits nothing, so it names no
+  `intent_ref`.
+
+  `prepare/1` marks the routine entries whose time is before the region's
+  starting time as done for that day: a world begun at noon did not miss
+  the morning. The entries' own times count here, not the day's jitter, so
+  an entry at the starting hour is still to come.
   """
 
   @behaviour Avwe.System
 
-  alias Avwe.{Autopilot, Event, Intent, Region, Tick}
+  alias Avwe.{Autopilot, Calendar, Event, Intent, Region, Tick}
+
+  @impl Avwe.System
+  def prepare(region) do
+    tod = Calendar.time_of_day(region.time)
+    today = Integer.floor_div(region.time, Calendar.day())
+
+    region
+    |> Region.with_components([:body, :autopilot, :routine])
+    |> Enum.reduce(region, fn body, acc ->
+      record = Region.get(acc, body, :autopilot)
+
+      past =
+        for {entry, index} <- Enum.with_index(Region.get(acc, body, :routine)),
+            entry.at < tod,
+            into: %{},
+            do: {index, today}
+
+      Region.put_component(acc, body, :autopilot, %{record | done: Map.merge(past, record.done)})
+    end)
+  end
 
   @impl Avwe.System
   def run(region, tick) do
     bodies = Region.with_components(region, [:body, :autopilot, :position])
     jitter = Autopilot.jitter(tick, bodies)
 
-    bodies
-    |> Enum.filter(&free?(region, &1))
-    |> Enum.reduce({region, []}, fn body, {acc, events} ->
-      case Autopilot.decide(acc, tick, body, jitter[body]) do
-        :stay -> {acc, events}
-        {:act, choice} -> act(acc, tick, body, choice, events)
-      end
+    Enum.reduce(bodies, {region, []}, fn body, {acc, events} ->
+      if free?(acc, body),
+        do: drive(acc, tick, body, jitter[body], events),
+        else: {drop_plan(acc, body), events}
     end)
   end
 
@@ -48,23 +75,54 @@ defmodule Avwe.Systems.Autopilot do
     end
   end
 
+  defp drive(region, tick, body, jitter_s, events) do
+    case Autopilot.decide(region, tick, body, jitter_s) do
+      :stay ->
+        {region, events}
+
+      {:act, choice} ->
+        act(region, tick, body, choice, events)
+
+      {:plan_done, then} ->
+        region |> drop_plan(body) |> carry_on(tick, body, then, events)
+
+      {:plan_abandoned, {outcome, reason}, then} ->
+        {region, abandoned} = abandon(region, body, outcome, reason)
+        carry_on(region, tick, body, then, events ++ [abandoned])
+    end
+  end
+
+  defp carry_on(region, _tick, _body, :stay, events), do: {region, events}
+
+  defp carry_on(region, tick, body, {:act, choice}, events),
+    do: act(region, tick, body, choice, events)
+
   defp act(region, tick, body, choice, events) do
     ref = "auto-#{body}-#{tick.step}"
     {verb, opts} = choice.intent
     intent = Intent.new(body, verb, [ref: ref, controller: :autopilot] ++ opts)
     record = Region.get(region, body, :autopilot)
 
-    decided = %{
-      record
-      | current: choice.utility,
+    # A routine step starts or carries on its plan; any other choice (the
+    # kindle that cuts in) leaves the plan under way as it is.
+    plan =
+      case Map.get(choice, :plan) do
+        nil -> Map.get(record, :plan)
+        plan -> %{plan | ref: ref}
+      end
+
+    decided =
+      Map.merge(record, %{
+        current: choice.utility,
         why: choice.why,
         since: Tick.end_time(tick),
-        done: Map.merge(record.done, Map.get(choice, :done, %{}))
-    }
+        done: Map.merge(record.done, Map.get(choice, :done, %{})),
+        plan: plan
+      })
 
     data =
       choice
-      |> Map.take([:entry, :note])
+      |> Map.take([:entry, :note, :step])
       |> Map.merge(%{why: choice.why, intent_ref: ref, utility: choice.utility})
 
     region =
@@ -73,5 +131,29 @@ defmodule Avwe.Systems.Autopilot do
       |> Region.put_component(body, :autopilot, decided)
 
     {region, events ++ [Event.new(:decided, entity: body, data: data)]}
+  end
+
+  defp abandon(region, body, outcome, reason) do
+    plan = region |> Region.get(body, :autopilot) |> Map.get(:plan)
+
+    data = %{
+      why: :plan_abandoned,
+      entry: plan.entry,
+      step_ref: plan.ref,
+      outcome: outcome,
+      reason: reason
+    }
+
+    {drop_plan(region, body), Event.new(:decided, entity: body, data: data)}
+  end
+
+  defp drop_plan(region, body) do
+    case Region.get(region, body, :autopilot) do
+      %{plan: plan} = record when plan != nil ->
+        Region.put_component(region, body, :autopilot, %{record | plan: nil})
+
+      _no_plan ->
+        region
+    end
   end
 end

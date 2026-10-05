@@ -2,8 +2,9 @@ defmodule Avwe.E2E.AutopilotTest do
   @moduledoc """
   End to end through sessions and telnet: the Ember Reach with Mira on her
   own, watched; a player taking her over mid-journey and leaving again; a
-  session that goes idle; and the canon check on the Hearth Compact, the
-  evening before the river fails against the same evening a year later.
+  session and a telnet player that go idle and see the hand-over; and the
+  canon check on the Hearth Compact, the evening before the river fails
+  against the same evening a year later.
   """
 
   use ExUnit.Case, async: false
@@ -11,7 +12,7 @@ defmodule Avwe.E2E.AutopilotTest do
   import Avwe.Test.Fixtures
   import Avwe.Test.TelnetClient
 
-  alias Avwe.Session
+  alias Avwe.{Percept, Session}
 
   @world :ember_autopilot
   @moduletag start: {813, day: 220, hour: 4}
@@ -80,8 +81,8 @@ defmodule Avwe.E2E.AutopilotTest do
     Avwe.step(@world, 12)
     expect(mira, "You arrive at Ashwarden Lodge.")
 
-    # Past 06:30 her survey does not start: she is being played.
-    Avwe.step(@world, steps_until(7))
+    # Past 08:00 her survey does not start: she is being played.
+    Avwe.step(@world, steps_until(8, 30))
     refute_line(mira, "You set off")
     send_line(mira, "look")
     expect(mira, "You are Mira Vale, at Ashwarden Lodge.")
@@ -93,8 +94,11 @@ defmodule Avwe.E2E.AutopilotTest do
     Avwe.step(@world, 2)
     assert %{controller: :autopilot} = mira()
 
-    # The 11:00 entry takes her home, and the watcher sees her go.
-    Avwe.step(@world, steps_until(11, 10))
+    # The survey she missed starts now that she is her own again, and the
+    # watcher sees her go and, three hours at the bend later, come home.
+    expect(watcher, "Mira Vale leaves, heading toward The Dry Bend.")
+    Avwe.step(@world, steps_until(12, 30))
+    expect(watcher, "Mira Vale arrives at The Dry Bend.")
     expect(watcher, "Mira Vale leaves, heading toward Ember Reach.")
     expect(watcher, "Mira Vale arrives at Ember Reach.")
   end
@@ -104,12 +108,29 @@ defmodule Avwe.E2E.AutopilotTest do
     {:ok, session} = Avwe.connect(@world, body: "mira-vale", idle_after: 500)
     Avwe.step(@world, 1)
     assert %{controller: :human, taken: true} = mira()
+    refute Enum.any?(percepts(session), &(&1.type in [:control_taken, :control_released]))
 
     Process.sleep(600)
     Avwe.step(@world, 1)
     assert %{controller: :autopilot, taken: true} = mira()
     Avwe.step(@world, 1)
     assert [_decision | _rest] = decisions()
+
+    # She senses the hand-over, then what her routine does with her.
+    assert [
+             %Percept{
+               kind: :sensed,
+               type: :control_released,
+               salience: 0.3,
+               summary: "You let your routine carry you."
+             },
+             %Percept{
+               kind: :progress,
+               type: :action_started,
+               intent: "auto-mira-vale-" <> _step,
+               issuer: :autopilot
+             }
+           ] = percepts(session)
 
     # Her act retakes control first, and replaces what autopilot had her
     # doing: she sees that end, and her own intent's result, nothing else.
@@ -118,12 +139,58 @@ defmodule Avwe.E2E.AutopilotTest do
     assert %{controller: :human, taken: true} = mira()
 
     assert [
-             %{intent: "auto-mira-vale-" <> _step, outcome: :interrupted, reason: :replaced},
-             %{intent: ^ref, outcome: :success}
-           ] = session |> percepts() |> Enum.filter(&(&1.kind == :result))
+             %Percept{
+               kind: :sensed,
+               type: :control_taken,
+               salience: 0.3,
+               summary: "You take yourself in hand."
+             },
+             %Percept{
+               kind: :result,
+               intent: "auto-mira-vale-" <> _step,
+               issuer: :autopilot,
+               outcome: :interrupted,
+               reason: :replaced
+             },
+             %Percept{kind: :progress, intent: ^ref, issuer: :controller},
+             %Percept{kind: :result, intent: ^ref, issuer: :controller, outcome: :success}
+           ] = percepts(session)
 
     Avwe.step(@world, 30)
     assert decisions() == []
+  end
+
+  test "a telnet player who stops typing sees the routine take over, marked" do
+    port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0, idle_after: 300}))
+    watcher = join(port, "watch", "You are watching.")
+    mira = join(port, "mira")
+    Avwe.step(@world, 1)
+    assert %{controller: :human} = mira()
+
+    Process.sleep(400)
+    Avwe.step(@world, 1)
+    expect(mira, "You let your routine carry you.")
+    assert %{controller: :autopilot} = mira()
+
+    # The routine's lines for her carry the mark; the watcher's do not.
+    step_until_walking()
+    expect(mira, "- You set off toward The Dry Bend.")
+    Avwe.step(@world, 12)
+    expect(mira, "- You arrive at The Dry Bend.")
+    expect(mira, "- You settle in to wait.")
+    expect(watcher, "Mira Vale arrives at The Dry Bend.")
+    refute_line(watcher, ~r/routine|in hand|^- /)
+
+    send_line(mira, "wait 1")
+    sync(mira)
+    Avwe.step(@world, 1)
+    expect(mira, "You take yourself in hand.")
+    expect(mira, "- You stop waiting.")
+    expect(mira, "You settle in to wait.")
+    assert %{controller: :human} = mira()
+    Avwe.step(@world, 1)
+    expect(mira, "You finish waiting.")
+    refute_line(watcher, ~r/routine|in hand|^- /)
   end
 
   # The `:decided` events for Mira since the last call, from the world's

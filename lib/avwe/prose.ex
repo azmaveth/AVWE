@@ -124,6 +124,11 @@ defmodule Avwe.Prose do
   def moving(:departed, who, toward, false), do: "#{who} leaves, heading toward #{toward}."
   def moving(:arrived, who, place, _heading?), do: "#{who} arrives at #{place}."
 
+  @doc "The body's controller let its routine take it, or took it back."
+  @spec control(:control_released | :control_taken) :: String.t()
+  def control(:control_released), do: "You let your routine carry you."
+  def control(:control_taken), do: "You take yourself in hand."
+
   @doc "Something happened in the sky."
   @spec sky(:sunrise | :sunset) :: String.t()
   def sky(:sunrise), do: "The sun rises."

@@ -61,8 +61,10 @@ defmodule Avwe.Store do
   wound back by as many, as if they had never been submitted. Their
   `:submit` records re-submit them on replay, which gives them the same
   sequence numbers again. The intents `Avwe.Systems.Autopilot` queued during
-  the last step are kept: they are derived state, never journaled, and the
-  next step's replay must apply them as the live step did.
+  the last step (their refs start with `auto-`) are kept: they are derived
+  state, never journaled, and the next step's replay must apply them as the
+  live step did. The ref is the mark, not the intent's `controller`: what
+  reaches the journal is kept out of the snapshot whoever submitted it.
   `Avwe.RegionServer` only snapshots right after an advance, when nothing
   else is pending anyway.
 
@@ -329,11 +331,14 @@ defmodule Avwe.Store do
   # would lose a decision on replay. They were queued during the advance,
   # before any journaled intent that is still pending, so the pending
   # journaled ones hold the highest seqs and winding back by their count
-  # leaves autopilot's seqs as they were.
+  # leaves autopilot's seqs as they were. Autopilot's refs are its mark
+  # (`Avwe.Session` refuses them to controllers).
   defp unsubmit_pending(%Region{inbox: inbox, next_seq: next_seq} = region) do
-    kept = Enum.filter(inbox, &(&1.controller == :autopilot))
+    kept = Enum.filter(inbox, &derived?/1)
     %{region | inbox: kept, outbox: [], next_seq: next_seq - (length(inbox) - length(kept))}
   end
+
+  defp derived?(%{ref: ref}), do: String.starts_with?(ref, "auto-")
 
   # Written to a .tmp file, fsynced, then renamed into place, so the snapshot
   # is either whole or not there at all.

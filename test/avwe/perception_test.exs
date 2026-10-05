@@ -145,6 +145,7 @@ defmodule Avwe.PerceptionTest do
                %{
                  kind: :result,
                  intent: "i-1",
+                 issuer: :controller,
                  outcome: :success,
                  summary: "You arrive at Mill Pond."
                }
@@ -153,6 +154,49 @@ defmodule Avwe.PerceptionTest do
 
       assert Perception.percepts(view, "tamsin", [result]) == []
       assert Perception.percepts(view, nil, [result]) == []
+    end
+
+    test "the routine's actions say so", %{world: world} do
+      view = view(world, 12)
+
+      started = %Event{
+        type: :action_started,
+        time: view.time,
+        entity: "wren",
+        data: %{ref: "auto-wren-7", verb: :wait, target: nil, params: %{for: 600}}
+      }
+
+      assert [%{kind: :progress, intent: "auto-wren-7", issuer: :autopilot}] =
+               Perception.percepts(view, "wren", [started])
+    end
+
+    test "only the body senses the hand-over between its controller and its routine", %{
+      world: world
+    } do
+      view = view(world, 12)
+
+      released = %Event{
+        type: :control_released,
+        time: view.time,
+        entity: "wren",
+        data: %{controller: :human}
+      }
+
+      taken = %{released | type: :control_taken}
+
+      assert [
+               %{
+                 kind: :sensed,
+                 type: :control_released,
+                 body: "wren",
+                 salience: 0.3,
+                 summary: "You let your routine carry you."
+               },
+               %{kind: :sensed, type: :control_taken, summary: "You take yourself in hand."}
+             ] = Perception.percepts(view, "wren", [released, taken])
+
+      assert Perception.percepts(view, "tamsin", [released, taken]) == []
+      assert Perception.percepts(view, nil, [released, taken]) == []
     end
   end
 
