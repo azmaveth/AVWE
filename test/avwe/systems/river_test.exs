@@ -119,6 +119,28 @@ defmodule Avwe.Systems.RiverTest do
     end
   end
 
+  describe "the water's temperature" do
+    defp temps(region), do: region |> states() |> Enum.map(& &1.temp_c)
+
+    test "is cooler at dawn than at dusk" do
+      region = Ember.region({812, day: 198, hour: 4}, systems: @systems)
+      dawn = region |> Region.advance(25 * 60) |> temps() |> List.last()
+      dusk = region |> Region.advance(37 * 60) |> temps() |> List.last()
+
+      assert dusk - dawn >= 0.5
+    end
+
+    test "agrees at minute and hour steps, and a day step holds the steady state" do
+      region = Ember.region({812, day: 199, hour: 7}, systems: @systems)
+      fine = region |> Region.advance(60, dt: 60) |> temps()
+      coarse = region |> Region.advance(1, dt: 3_600) |> temps()
+      day = region |> Region.advance(1, dt: 86_400) |> temps()
+
+      for {a, b} <- Enum.zip(fine, coarse), do: assert_in_delta(a, b, 0.05)
+      for {a, b} <- Enum.zip(temps(region), day), do: assert_in_delta(a, b, 0.05)
+    end
+  end
+
   test "hour-long steps (history mode) still drain the river from the top down" do
     {events, _region} =
       before_failure() |> Region.advance(4, dt: 3_600) |> Region.drain_events()

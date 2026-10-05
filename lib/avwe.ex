@@ -23,7 +23,9 @@ defmodule Avwe do
   @default_systems [
     Avwe.Systems.Daylight,
     Avwe.Systems.Miracles,
+    Avwe.Systems.Weather,
     Avwe.Systems.River,
+    Avwe.Systems.Heat,
     Avwe.Systems.Movement,
     Avwe.Systems.Waiting,
     Avwe.Systems.Discovery
@@ -42,12 +44,13 @@ defmodule Avwe do
     * `:seed` - world seed. Default: derived from `id`.
     * `:clock` - `:manual` (default) or `{:live, interval_ms}`.
     * `:systems` - systems to run, in order. Default: `#{inspect(@default_systems)}`.
-    * `:terrain` and `:miracles` - AVWE's own settings for the world. See
-      `Avwe.Worldgen`.
+    * `:terrain`, `:miracles` and `:climate` - AVWE's own settings for the
+      world. See `Avwe.Worldgen`.
     * `:data_dir` - where worlds keep their logs and snapshots; this world's
       go under `<data_dir>/<id>`. Default: `config :avwe, :data_dir`. `nil`
       means no persistence. A world whose state is already there resumes
-      from it: `:start`, `:seed`, `:terrain` and `:miracles` are ignored (with
+      from it: `:start`, `:seed`, `:terrain`, `:miracles` and `:climate` are
+      ignored (with
       a warning if the seed differs), but `:systems` is applied, since the
       rules are code, not state. Replaying a log is only valid under the
       systems it was recorded with; after changing them, the log from that
@@ -72,7 +75,8 @@ defmodule Avwe do
           time: start_time(Keyword.get(opts, :start, 0)),
           systems: Keyword.get(opts, :systems, @default_systems),
           terrain: Keyword.get(opts, :terrain),
-          miracles: Keyword.get(opts, :miracles, [])
+          miracles: Keyword.get(opts, :miracles, []),
+          climate: Keyword.get(opts, :climate)
         )
 
       DynamicSupervisor.start_child(

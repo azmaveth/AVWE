@@ -13,6 +13,8 @@ defmodule Avwe.Worldgen do
     * `:miracles` - miracle events, each a keyword list with `:id`, `:at`
       (a world time, or `{year, opts}`), `:target`, `:component`, `:set`,
       `:cause` and `:note`.
+    * `:climate` - `wind: [from: direction, m_s: speed]`, the region's
+      constant wind (`env.wind`). Default: 2 m/s from the south-west.
 
   Finally each system prepares the region for its starting time
   (`Avwe.Region.prepare/1`).
@@ -23,10 +25,11 @@ defmodule Avwe.Worldgen do
   alias Avwe.Terrain.Generator
 
   @grid 256
+  @default_wind %{from: "south-west", m_s: 2.0}
 
   @doc """
-  Builds the region. Options: those of `Avwe.Region.new/1`, plus `:terrain`
-  and `:miracles` as above.
+  Builds the region. Options: those of `Avwe.Region.new/1`, plus `:terrain`,
+  `:miracles` and `:climate` as above.
   """
   @spec region(Quire.World.t(), keyword()) :: Region.t()
   def region(quire_world, opts) do
@@ -34,7 +37,17 @@ defmodule Avwe.Worldgen do
     |> Quire.Seed.region(Keyword.take(opts, [:id, :seed, :time, :dt, :systems]) ++ [grid: @grid])
     |> add_terrain(Keyword.get(opts, :terrain))
     |> add_miracles(Keyword.get(opts, :miracles, []))
+    |> add_climate(Keyword.get(opts, :climate))
     |> Region.prepare()
+  end
+
+  defp add_climate(region, climate) do
+    wind = climate |> List.wrap() |> Keyword.get(:wind, [])
+
+    Region.put_env(region, :wind, %{
+      from: Keyword.get(wind, :from, @default_wind.from),
+      m_s: Keyword.get(wind, :m_s, @default_wind.m_s)
+    })
   end
 
   defp add_terrain(region, nil), do: region

@@ -29,6 +29,7 @@ config :avwe, :worlds,
       rises: [{"ashwarden-lodge", height_m: 14, radius_cells: 18}],
       clay: [{"ember-reach", radius_cells: 4}]
     ],
+    climate: [wind: [from: "south-west", m_s: 2.0]],
     miracles: [
       [
         id: "the-source-fails",

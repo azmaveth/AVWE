@@ -13,6 +13,8 @@ defmodule Avwe.Systems.Daylight do
 
   @sunrise 6 * 3_600
   @sunset 19 * 3_600
+  @day 24 * 3_600
+  @daylight_s @sunset - @sunrise
 
   @impl Avwe.System
   def prepare(region) do
@@ -37,6 +39,27 @@ defmodule Avwe.Systems.Daylight do
   @spec light(non_neg_integer()) :: float()
   def light(seconds) when seconds <= @sunrise or seconds >= @sunset, do: 0.0
   def light(seconds), do: :math.sin(:math.pi() * (seconds - @sunrise) / (@sunset - @sunrise))
+
+  @doc """
+  The exact mean of `light/1` over the world times `t0 < t1`, from the
+  closed-form integral of the half sine, so a step of any length can take the
+  sun it actually received rather than a sample. About 0.345 over a day.
+  """
+  @spec mean_light(Calendar.time(), Calendar.time()) :: float()
+  def mean_light(t0, t1) when t1 > t0 do
+    days = Integer.floor_div(t1, @day) - Integer.floor_div(t0, @day)
+
+    (days * integral(@day) + integral(Integer.mod(t1, @day)) - integral(Integer.mod(t0, @day))) /
+      (t1 - t0)
+  end
+
+  # The integral of light/1 from midnight to a time of day.
+  defp integral(tod) when tod <= @sunrise, do: 0.0
+  defp integral(tod) when tod >= @sunset, do: 2 * @daylight_s / :math.pi()
+
+  defp integral(tod) do
+    @daylight_s / :math.pi() * (1 - :math.cos(:math.pi() * (tod - @sunrise) / @daylight_s))
+  end
 
   defp events(tick) do
     for {type, at} <- [sunrise: @sunrise, sunset: @sunset],

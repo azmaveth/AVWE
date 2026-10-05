@@ -7,7 +7,9 @@ defmodule Avwe.Test.Ember do
   @systems [
     Avwe.Systems.Daylight,
     Avwe.Systems.Miracles,
+    Avwe.Systems.Weather,
     Avwe.Systems.River,
+    Avwe.Systems.Heat,
     Avwe.Systems.Movement,
     Avwe.Systems.Waiting,
     Avwe.Systems.Discovery
@@ -25,7 +27,8 @@ defmodule Avwe.Test.Ember do
       time: Calendar.at(year, day_opts),
       systems: Keyword.get(overrides, :systems, @systems),
       terrain: opts[:terrain],
-      miracles: opts[:miracles]
+      miracles: opts[:miracles],
+      climate: opts[:climate]
     )
   end
 
