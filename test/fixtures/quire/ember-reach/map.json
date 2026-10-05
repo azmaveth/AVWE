@@ -1,0 +1,33 @@
+{
+  "title": "The Ember Reach",
+  "pins": [
+    {
+      "id": "ember-reach",
+      "x": 47.5,
+      "y": 54.0,
+      "label": "Ember Reach",
+      "articleId": "ember-reach"
+    },
+    {
+      "id": "willow-docks",
+      "x": 54.2,
+      "y": 63.5,
+      "label": "Willow Docks",
+      "articleId": "kiln-houses"
+    },
+    {
+      "id": "ashwarden-lodge",
+      "x": 36.8,
+      "y": 41.2,
+      "label": "Ashwarden Lodge",
+      "articleId": "the-ashwardens"
+    },
+    {
+      "id": "the-dry-bend",
+      "x": 64.0,
+      "y": 30.5,
+      "label": "The Dry Bend",
+      "articleId": "the-river-runs-dry"
+    }
+  ]
+}

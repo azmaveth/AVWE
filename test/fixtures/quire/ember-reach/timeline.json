@@ -1,0 +1,36 @@
+{
+  "events": [
+    {
+      "id": "founding-of-ember-reach",
+      "title": "Founding of Ember Reach",
+      "dateLabel": "780 AR",
+      "sortKey": 780,
+      "summary": "Riverfolk raise the first kiln-houses where the silt still held heat at dusk.",
+      "articleId": "ember-reach"
+    },
+    {
+      "id": "the-hearth-compact-is-sworn",
+      "title": "The Hearth Compact is sworn",
+      "dateLabel": "804 AR",
+      "sortKey": 804,
+      "summary": "The Ashwardens promise to treat fire as a guest, and the Last Coal is set in the lodge.",
+      "articleId": "the-hearth-compact"
+    },
+    {
+      "id": "the-river-runs-dry",
+      "title": "The River Runs Dry",
+      "dateLabel": "812 AR",
+      "sortKey": 812,
+      "summary": "The Ember river falls silent at the Dry Bend. Reeds keep the old channel's shape.",
+      "articleId": "the-river-runs-dry"
+    },
+    {
+      "id": "mira-vale-begins-her-survey",
+      "title": "Mira Vale begins her survey",
+      "dateLabel": "813 AR",
+      "sortKey": 813,
+      "summary": "A cartographer walks the dying banks and starts a map no one asked for.",
+      "articleId": "mira-vale"
+    }
+  ]
+}

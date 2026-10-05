@@ -172,26 +172,36 @@ The model is plain data owned by the region process:
 ```elixir
 %Avwe.Region{
   id: {0, 0},
-  tick: 4312,
-  rng: rand_state,                     # explicit; never the process default
-  entities: :gb_sets.new(),            # ordered, so iteration is deterministic
+  seed: 1_234,
+  step: 0,
+  time: 25_657_704_000,                # 813 AR, day 220, 04:00, in world seconds
+  dt: 60,
+  systems: [Avwe.Systems.Daylight],    # run in this order every step
   components: %{
-    position: %{"e-17" => {121, 88}},
-    body:     %{"e-17" => %Avwe.Body{}},
-    senses:   %{"e-17" => %Avwe.Senses{}}
+    position: %{"mira-vale" => {121, 138}},
+    repr:     %{"mira-vale" => %{name: "Mira Vale", description: "..."}},
+    body:     %{"mira-vale" => %{species: "riverfolk"}}
   },
-  fields: %{temperature: grid, water: grid, fuel: grid, smoke: grid}
+  fields: %{temperature: grid, water: grid, fuel: grid, smoke: grid},
+  env: %{light: 0.42},                 # region-wide values
+  outbox: []                           # events since the last drain
 }
 ```
+
+An entity is just an id that appears in one or more component maps. Queries
+(`Region.with_components/2`) return ids sorted, so nothing depends on map
+iteration order.
 
 Systems implement one behaviour:
 
 ```elixir
 defmodule Avwe.System do
-  @callback every() :: pos_integer()   # run every N ticks
   @callback run(Avwe.Region.t(), Avwe.Tick.t()) :: {Avwe.Region.t(), [Avwe.Event.t()]}
 end
 ```
+
+A system that only acts at certain moments (sunrise, every hour) checks
+`Avwe.Tick.crossed?/3` instead of counting steps, because steps vary in length.
 
 A tick is a reduction over an ordered list of systems: build the tick
 context, run each system in turn over the region, then turn the emitted
@@ -234,8 +244,11 @@ tick each intent was applied on. Replay reads the log instead of the network.
 
 What it takes:
 
-- Seed the RNG per region per tick from `{world_seed, region_id, tick}` and pass
-  its state explicitly. Never call `:rand` without explicit state.
+- Give each system its own random stream for every step, seeded from
+  `{world_seed, region_id, time, system}` (`Avwe.Tick.rng/2`). A system's
+  randomness then never depends on what other systems drew or the order they
+  ran in, so adding a system doesn't change the others. Never call `:rand`
+  without explicit state.
 - Never depend on map iteration order. Maps larger than 32 keys have no
   specified order. Iterate sorted ids.
 - Run fields on one numeric backend per world. Floating-point results can differ
