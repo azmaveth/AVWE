@@ -2,14 +2,15 @@ defmodule Avwe.E2E.SessionTest do
   @moduledoc """
   End to end through `Avwe.Session`, the API every controller (telnet, MCP,
   Arbor) uses. Runs Lantern Hollow at noon with a manual clock, with a fire
-  pit on Hollow Green and a wind from the north.
+  pit on Hollow Green, an empty hearth at the Mill Pond and a wind from the
+  north.
   """
 
   use ExUnit.Case, async: false
 
   import Avwe.Test.Fixtures
 
-  alias Avwe.{Percept, Session}
+  alias Avwe.{Percept, Prose, Session}
 
   @world :hollow_sessions
   @fire_pit [
@@ -19,13 +20,20 @@ defmodule Avwe.E2E.SessionTest do
     fuel_kg: 8.0,
     power_w: 5_000.0
   ]
+  @pond_hearth [
+    id: "pond-hearth",
+    at: "mill-pond",
+    name: "the hearth by the pond",
+    fuel_kg: 0.0,
+    power_w: 5_000.0
+  ]
 
   setup do
     {:ok, _pid} =
       Avwe.start_world(@world,
         quire: lantern_hollow(),
         start: {1, hour: 12},
-        hearths: [@fire_pit],
+        hearths: [@fire_pit, @pond_hearth],
         climate: [wind: [from: "north", m_s: 2.0]]
       )
 
@@ -178,6 +186,66 @@ defmodule Avwe.E2E.SessionTest do
 
       assert smelled =~ ~r/^You smell woodsmoke.* from the north\.$/
       refute Enum.any?(percepts(pell), &(&1.modality == :smell))
+
+      # Her look carries the smoke, with the wind it came on; at the fire,
+      # the wind has already carried it off.
+      {:ok, look} = Session.look(tamsin)
+      assert look.smoke == %{level: :faint, from: "north"}
+      assert Prose.look(look) =~ "Woodsmoke, faint, from the north."
+      assert {:ok, %{smoke: nil}} = Session.look(wren)
+
+      {:ok, douse} = Session.act(wren, :douse)
+      Avwe.step(@world, 20)
+
+      doused = percepts(wren)
+      assert [%Percept{intent: ^douse, outcome: :success}] = results(doused)
+      assert "You douse the fire pit on the green." in Enum.map(doused, & &1.summary)
+
+      assert [
+               %Percept{
+                 type: :smoke_faded,
+                 modality: :smell,
+                 summary: "The smell of smoke fades."
+               }
+             ] =
+               Enum.filter(percepts(tamsin), &(&1.modality == :smell))
+    end
+
+    test "a far hearth, an unknown one and an empty one each refuse with their reason" do
+      wren = join("wren")
+      pell = join("pell")
+
+      {:ok, far} = Session.act(wren, :kindle, target: "pond-hearth")
+      {:ok, unknown} = Session.act(wren, :kindle, target: "no-such-hearth")
+      {:ok, empty} = Session.act(pell, :kindle)
+      Avwe.step(@world, 1)
+
+      assert [
+               %Percept{
+                 intent: ^far,
+                 outcome: :blocked,
+                 reason: :too_far,
+                 summary: "You are not close enough."
+               },
+               %Percept{
+                 intent: ^unknown,
+                 outcome: :blocked,
+                 reason: :no_such_hearth,
+                 summary: "There is no such hearth."
+               }
+             ] = wren |> percepts() |> results()
+
+      assert [
+               %Percept{
+                 intent: ^empty,
+                 outcome: :blocked,
+                 reason: :no_fuel,
+                 summary: "There is nothing to burn."
+               }
+             ] = pell |> percepts() |> results()
+
+      assert {:ok, %{hearth: %{id: "pond-hearth", burning: false, fuel_kg: +0.0}}} =
+               Session.look(pell)
     end
   end
 

@@ -71,10 +71,12 @@ defmodule Avwe.WorldgenTest do
       refute Map.has_key?(miracle, :smoke)
     end
 
-    test "must give heat" do
-      assert_raise ArgumentError, ~r/hearth "the-last-coal": heat_w must be above 0/, fn ->
-        with_coal(heat_w: 0.0)
-      end
+    test "must give heat, and are blamed as what the config calls them" do
+      assert_raise ArgumentError,
+                   ~r/^standing miracle "the-last-coal": heat_w must be above 0/,
+                   fn ->
+                     with_coal(heat_w: 0.0)
+                   end
     end
   end
 end

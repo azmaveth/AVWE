@@ -123,12 +123,14 @@ defmodule Avwe.Worldgen do
 
   # A hearth's numbers, checked where a bad one is easiest to explain: the
   # fire system divides by `power_w`, and negative fuel is not a hearth.
-  defp positive!(config, key, id) do
+  # `what` names the thing being built, so the message blames what the config
+  # calls it.
+  defp positive!(config, key, id, what \\ "hearth") do
     value = Keyword.fetch!(config, key) * 1.0
 
     if value > 0,
       do: value,
-      else: raise(ArgumentError, "hearth #{inspect(id)}: #{key} must be above 0, got #{value}")
+      else: raise(ArgumentError, "#{what} #{inspect(id)}: #{key} must be above 0, got #{value}")
   end
 
   defp non_negative!(config, key, id) do
@@ -166,7 +168,7 @@ defmodule Avwe.Worldgen do
   # A standing miracle is a hearth that burns without fuel, already lit. It
   # never smokes (`Avwe.Systems.Fire`), so nothing here says so.
   defp standing_miracle(region, miracle, quire_world) do
-    heat_w = positive!(miracle, :heat_w, Keyword.fetch!(miracle, :id))
+    heat_w = positive!(miracle, :heat_w, Keyword.fetch!(miracle, :id), "standing miracle")
 
     %{
       position: position_of(region, Keyword.fetch!(miracle, :at)),

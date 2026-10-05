@@ -754,8 +754,12 @@ defmodule Avwe.Systems.HeatTest do
       daily = Weather.daily_mean_air_c()
       era = River.steady_reaches(region.terrain, spring.natural_m3_s, spring.temp_c, daily)
 
+      # Clamped as `Heat.stopped_s/2` clamps it: a spring recorded as stopping
+      # after the region's time has not been stopped at all.
       stopped =
-        if spring.flow_m3_s == 0, do: min(region.time - spring.changed_at, 14 * @day), else: 0
+        if spring.flow_m3_s == 0,
+          do: (region.time - spring.changed_at) |> min(14 * @day) |> max(0),
+          else: 0
 
       stop = region.time - stopped
       watts = standing_w(region)

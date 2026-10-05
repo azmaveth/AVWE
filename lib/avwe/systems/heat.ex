@@ -310,9 +310,11 @@ defmodule Avwe.Systems.Heat do
 
   @doc """
   What a body feels underfoot at `cell`, from a snapshot (or region) carrying
-  `fields.heat`, `terrain` and `env.air_c`: `%{air_c, ground_c, ground, steam?}`
-  with `ground` one of `:hot`, `:warm`, `:cold` or `nil`. `nil` when the
-  snapshot has no heat field.
+  `fields.heat` and `terrain`: `%{air_c, ground_c, ground, steam?}` with
+  `ground` one of `:hot`, `:warm`, `:cold` or `nil`. The air is `env.air_c`
+  when the weather system has published one, else the air at the view's time
+  (`Avwe.Systems.Weather.air_c/1`). `nil` when the snapshot has no heat
+  field.
   """
   @spec at(map(), Space.cell()) :: map() | nil
   def at(%{fields: %{heat: %Field{} = field}, terrain: %Terrain{} = terrain} = view, cell) do

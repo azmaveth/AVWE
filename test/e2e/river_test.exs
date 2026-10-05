@@ -90,7 +90,32 @@ defmodule Avwe.E2E.RiverTest do
       send_line(mira, "look")
       expect(mira, "812 AR, day 199, 22:00. It is dark.")
       expect(mira, "The river runs 30 m to the west, warm, with steam lifting off it.")
-      expect(mira, "Steam lifts off the silt.")
+      expect(mira, "The air is cool. The ground is hot underfoot. Steam lifts off the silt.")
+
+      # The morning air warms faster than the silt; by ten the banks as a
+      # whole have stopped steaming, though the silt nearest the channel,
+      # where Mira stands, still does.
+      Avwe.step(@world, 12 * 60)
+      expect(mira, "The steam over the banks thins and is gone.")
+
+      send_line(mira, "look")
+      expect(mira, "812 AR, day 200, 10:00. It is daylight.")
+      expect(mira, "The river runs 30 m to the west, warm. Upstream")
+    end
+
+    test "a watcher sees the banks steam place by place down the river, and clear in the morning",
+         %{port: port} do
+      watcher = join(port, "watch", "You are watching.")
+
+      Avwe.step(@world, 2 * 60)
+      expect(watcher, "Steam begins to rise from the banks near The Source.")
+      expect(watcher, "Steam begins to rise from the banks near The Dry Bend.")
+      expect(watcher, "Steam begins to rise from the banks near Ember Reach.")
+      expect(watcher, "Steam begins to rise from the banks near Willow Docks.")
+
+      Avwe.step(@world, 19 * 60)
+      expect(watcher, "The steam over the banks near Ember Reach thins and is gone.")
+      expect(watcher, "The steam over the banks near The Source thins and is gone.")
     end
   end
 end

@@ -188,6 +188,21 @@ defmodule Avwe.PerceptionTest do
                "The river runs 60 m to the east, warm, with steam lifting off it."
     end
 
+    test "whether the river steams is judged against the air the look carries" do
+      night = Perception.look(ember_view({812, day: 199, hour: 22}), "mira-vale")
+      temp = night.channel.temp_c
+      # Against a fixed 18 °C the water would be far enough above the air to
+      # steam either way; against the air it carries, only on one side of 8 K.
+      assert temp - 18.0 >= 8
+
+      steams = Prose.look(put_in(night.channel.air_c, temp - 8.0))
+      assert steams =~ "The river runs 60 m to the east, warm, with steam lifting off it."
+
+      still = Prose.look(put_in(night.channel.air_c, temp - 7.9))
+      assert still =~ "The river runs 60 m to the east, warm. Upstream"
+      refute still =~ "steam"
+    end
+
     test "Mira hears the stretch beside her fall silent, not the stretches far away" do
       view = ember_view({813, day: 220, hour: 4})
 
@@ -306,6 +321,53 @@ defmodule Avwe.PerceptionTest do
       assert Prose.look(look) =~ "Smoke rises from the lodge hearth, 150 m to the south."
     end
 
+    test "a burning hearth within 20 m is what is here, not a fire in sight" do
+      {x, y} = lodge = Ember.places().lodge
+      view = @dawn |> ember_snapshot() |> lit(@lodge)
+
+      # On the lodge hearth and the Last Coal, and two cells off (the hearth
+      # is still within reach), neither is in `fires`; three cells off both are.
+      for cell <- [lodge, {x + 2, y}] do
+        look = Perception.look(at(view, @mira, cell), @mira)
+        assert look.fires == []
+        assert %{id: @lodge, burning: true} = look.hearth
+        refute Prose.look(look) =~ "A glow shows"
+      end
+
+      look = Perception.look(at(view, @mira, {x + 3, y}), @mira)
+      assert look.hearth == nil
+
+      assert [%{ref: @lodge, sign: :glow, distance_m: 30}, %{ref: @coal, sign: :glow}] =
+               look.fires
+    end
+
+    test "at dusk a fire shows by its smoke until the light falls below a tenth" do
+      {x, y} = Ember.places().lodge
+
+      # 18:00 is dusk: the light is 0.24. By 18:40 it is 0.08.
+      dusk =
+        {813, day: 220, hour: 18}
+        |> ember_snapshot()
+        |> lit(@lodge)
+        |> at(@mira, {x, y - 15})
+        |> Perception.look(@mira)
+
+      assert dusk.light > 0.1 and dusk.light < 0.3
+      assert [%{ref: @lodge, sign: :smoke}] = dusk.fires
+      assert Prose.look(dusk) =~ "Smoke rises from the lodge hearth, 150 m to the south."
+
+      dark =
+        {813, day: 220, hour: 18, minute: 40}
+        |> ember_snapshot()
+        |> lit(@lodge)
+        |> at(@mira, {x, y - 15})
+        |> Perception.look(@mira)
+
+      assert dark.light > 0 and dark.light < 0.1
+      assert [%{ref: @lodge, sign: :glow}, %{ref: @coal, sign: :glow}] = dark.fires
+      assert Prose.look(dark) =~ "A glow shows at the lodge hearth, 150 m to the south."
+    end
+
     test "kindling is offered only within 20 m of a hearth" do
       {x, y} = Ember.places().town
       view = ember_snapshot(@dawn)
@@ -340,6 +402,62 @@ defmodule Avwe.PerceptionTest do
       faint = Perception.look(with_smoke(view, town, 0.003), @mira)
       assert faint.smoke == %{level: :faint, from: "south-west"}
       assert Prose.look(faint) =~ "Woodsmoke, faint, from the south-west."
+    end
+
+    test "smoke comes with the region's wind, not the default one" do
+      town = Ember.places().town
+      view = put_in(ember_snapshot(@dawn), [:env, :wind], %{from: "north", m_s: 2.0})
+
+      clear = Perception.look(with_smoke(view, town, 0.05), @mira)
+      assert clear.smoke == %{level: :clear, from: "north"}
+      assert Prose.look(clear) =~ "Woodsmoke on the wind from the north."
+
+      faint = Perception.look(with_smoke(view, town, 0.003), @mira)
+      assert faint.smoke == %{level: :faint, from: "north"}
+      assert Prose.look(faint) =~ "Woodsmoke, faint, from the north."
+    end
+
+    test "at two in the afternoon the air is warm and the clay underfoot has warmed" do
+      look = Perception.look(ember_snapshot({813, day: 220, hour: 14}), @mira)
+
+      assert %{air_c: air_c, ground: :warm, steam?: false} = look.warmth
+      assert air_c >= 22
+      assert Prose.look(look) =~ "The air is warm. The ground is warm underfoot."
+    end
+
+    test "at seven the ground lags the warming air and is cold" do
+      look = Perception.look(ember_snapshot({813, day: 220, hour: 7}), @mira)
+
+      assert %{air_c: air_c, ground: :cold} = look.warmth
+      assert air_c >= 15 and air_c < 22
+      assert Prose.look(look) =~ "\nThe ground is cold.\n"
+    end
+
+    test "in the warm river at night the water steams; on the reeds, the reeds" do
+      {x, y} = Ember.places().town
+      view = ember_snapshot({812, day: 199, hour: 22})
+
+      water = Perception.look(at(view, @mira, {x + 7, y}), @mira)
+      assert water.ground == :channel_bed
+      assert %{ground: :hot, steam?: true} = water.warmth
+      text = Prose.look(water)
+      assert text =~ "You are standing in the river."
+      assert text =~ "The air is cool. The ground is hot underfoot. Steam lifts off the water."
+
+      reeds = Perception.look(at(view, @mira, {x + 8, y}), @mira)
+      assert reeds.ground == :reeds
+      assert %{ground: :hot, steam?: true} = reeds.warmth
+      text = Prose.look(reeds)
+      assert text =~ "Reeds crowd the river's edge here."
+      assert text =~ "The air is cool. The ground is hot underfoot. Steam lifts off the reeds."
+
+      # The silt cools with distance from the channel: warm, not hot, 110 m out.
+      silt = Perception.look(at(view, @mira, {x + 11, y}), @mira)
+      assert silt.ground == :silt
+      assert %{ground: :warm, steam?: true} = silt.warmth
+
+      assert Prose.look(silt) =~
+               "The air is cool. The ground is warm underfoot. Steam lifts off the silt."
     end
 
     test "on the silt beside the running river at night, the banks steam" do

@@ -42,6 +42,7 @@ defmodule Avwe.Systems.Smoke do
   @behaviour Avwe.System
 
   alias Avwe.{Event, Region, Space, Tick}
+  alias Avwe.Systems.Fire
 
   @tau_s 900.0
   @max_age_s 4_500.0
@@ -146,13 +147,18 @@ defmodule Avwe.Systems.Smoke do
   # One puff per hearth that smoked this step: the closed-form survived mass
   # of smoke released uniformly over [t0, t0 + burn_s] and decaying until t1,
   # placed at its decay-weighted mean age along the wind. Culled on the same
-  # terms as an aged puff: too light is dropped, off the map has left.
+  # terms as an aged puff: too light is dropped, off the map has left. A
+  # hearth the fire system has not stepped yet (or one built by hand without
+  # a `last_step`) has smoked nothing, as the heat system reads it too.
   defp emit_puffs(region, acc, wind, width, tick) do
     t1 = Tick.end_time(tick)
 
     region
     |> Region.with_components([:hearth, :position])
-    |> Enum.map(&{Region.get(region, &1, :position), Region.get(region, &1, :hearth).last_step})
+    |> Enum.map(fn id ->
+      hearth = Region.get(region, id, :hearth)
+      {Region.get(region, id, :position), Map.get(hearth, :last_step, Fire.zero_step())}
+    end)
     |> Enum.filter(fn {_position, last_step} -> last_step.smoke_g > 0 end)
     |> Enum.reduce({[], acc}, fn {{hx, hy}, %{smoke_g: m, burn_s: b}}, {fresh, acc} ->
       survived = survived(m, b, tick.dt)

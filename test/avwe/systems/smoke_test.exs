@@ -187,6 +187,32 @@ defmodule Avwe.Systems.SmokeTest do
     end
   end
 
+  describe "robustness" do
+    test "a hearth without a last_step has smoked nothing" do
+      # Smoke alone, so nothing gives the hearth a last_step before it runs.
+      start = Ember.region({813, day: 220, hour: 10}, systems: [Smoke])
+
+      bare =
+        Region.put_entity(start, "bare", %{
+          position: Ember.places().town,
+          repr: %{name: "a bare hearth", description: nil},
+          hearth: %{
+            fuel_kg: 12.0,
+            burning: true,
+            lit_at: start.time,
+            out_at: nil,
+            power_w: 5_000.0,
+            low_kg: 1.0
+          }
+        })
+
+      {stepped, events} = run(bare, 1)
+      assert smoke(stepped).puffs == []
+      assert smoke(stepped).last_step == Smoke.new().last_step
+      assert events == []
+    end
+  end
+
   describe "the parts" do
     test "the wind carries smoke away from where it comes from" do
       assert {x, y} = Smoke.drift_cells(%{from: "north", m_s: 2.0}, 60)

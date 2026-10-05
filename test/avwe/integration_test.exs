@@ -115,8 +115,11 @@ defmodule Avwe.IntegrationTest do
           do: Region.submit(start, Intent.new(@mira, :kindle, ref: "kindle")),
           else: start
 
+      # The random steps, then always one more minute: a step the smoke left
+      # by the last one has to decay through, so a smoke that keeps its mass
+      # while booking decay is caught even when the list is a single step.
       finish =
-        Enum.reduce(steps, start, fn dt, before ->
+        Enum.reduce(steps ++ [60], start, fn dt, before ->
           after_step = Region.advance(before, 1, dt: dt)
           assert_heat(before, after_step, dt)
           assert_smoke(before, after_step)

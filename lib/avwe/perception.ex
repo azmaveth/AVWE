@@ -22,10 +22,12 @@ defmodule Avwe.Perception do
   (`Avwe.Systems.Heat.at/2`), the warmth of a fire within 20 m
   (`Avwe.Systems.Fire.felt/2`), and can light or douse a hearth within 20 m.
   A fire is its own light: its smoke by day or its glow by night shows at
-  least 200 m off, and so do its lighting, burning low and going out. Only the
-  body's own nose smells smoke (`Avwe.Systems.Smoke`); the snapshot's
-  `fields` carry the heat and smoke, and without them `warmth` and `smoke`
-  are `nil`.
+  least 200 m off, and so do its lighting, burning low and going out. `fires`
+  lists only the fires beyond the spot a body is at (more than 20 m off): a
+  burning hearth within 20 m is what is here, and shows in `hearth`, not in
+  `fires`. Only the body's own nose smells smoke (`Avwe.Systems.Smoke`); the
+  snapshot's `fields` carry the heat and smoke, and without them `warmth`
+  and `smoke` are `nil`.
   """
 
   alias Avwe.{Event, Percept, Prose, Space, Terrain}
@@ -463,7 +465,8 @@ defmodule Avwe.Perception do
   end
 
   # The fires beyond this spot that a body can make out: by their smoke in
-  # daylight, by their glow at night, at least 200 m off either way. A
+  # daylight, by their glow at night, at least 200 m off either way. A fire
+  # within 20 m is what is here (`hearth_here/2`), not a fire in sight. A
   # standing miracle gives no smoke (`Avwe.Systems.Fire`), so it shows only
   # at night.
   defp fires_in_sight(view, position) do
