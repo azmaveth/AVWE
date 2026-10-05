@@ -5,7 +5,7 @@ defmodule Avwe.Systems.HeatTest do
   alias Avwe.{Calendar, Event, Region, Terrain}
   alias Avwe.Systems.{Daylight, Heat, Miracles, River, Weather}
   alias Avwe.Systems.Heat.Field
-  alias Avwe.Test.Ember
+  alias Avwe.Test.{Ember, Fixtures}
 
   @systems [Daylight, Miracles, Weather, River, Heat]
   @hour Calendar.hour()
@@ -676,8 +676,12 @@ defmodule Avwe.Systems.HeatTest do
 
     test "a standing miracle warms its cell from the start" do
       lodge = Ember.places().lodge
-      plain = region({813, day: 220, hour: 4})
-      warmed = Ember.region({813, day: 220, hour: 4}, systems: @systems) |> with_coal(lodge, 60)
+      # The configured world has the Last Coal; build one without it to compare.
+      without_coal =
+        Enum.reject(Fixtures.ember_reach_opts()[:miracles], &(&1[:kind] == :standing))
+
+      plain = region({813, day: 220, hour: 4}, miracles: without_coal)
+      warmed = region({813, day: 220, hour: 4}, miracles: without_coal) |> with_coal(lodge, 60)
       # The coal must be there before the field settles.
       warmed = Region.prepare(%{warmed | fields: %{}})
 
