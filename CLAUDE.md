@@ -81,9 +81,10 @@ finding of that kind still fails:
 - **Advisories:** update the dependency; if no fixed release exists and the
   affected code is not reachable, add the id to `hex: [ignore_advisories: ...]`
   in `mix.exs` with the reason. Hex warns when an entry stops matching.
-- **Credo:** fix it. It runs `mix credo --strict` with Credo's default checks.
-  Turning one off, in a `.credo.exs` or with a `# credo:disable` comment, needs
-  the reason beside it.
+- **Credo:** fix it. It runs `mix credo --strict` with Credo's default checks
+  plus the opt-in ones in `.credo.exs`, each enabled because it found nothing
+  when it was added. Turning one off, there or with a `# credo:disable`
+  comment, needs the reason beside it.
 
 Tests use worlds in `test/fixtures/quire/`: a copy of the Ember Reach, and
 Lantern Hollow, a tiny world laid out to test hearing and sight ranges (fire
