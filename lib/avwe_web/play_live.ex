@@ -5,10 +5,13 @@ defmodule AvweWeb.PlayLive do
   A page mounts twice, as a plain request and then over its socket. Only the
   second takes the body: it starts an `Avwe.Session` with the page's process
   as its sink, so the body is released when the page closes, as for any sink,
-  and the percepts and scenes arrive as messages. The first only checks that
-  the body is free, so that a held one is refused before anything is drawn. A
-  race for a free body is settled by the lease, and the loser is sent back to
-  the lobby with the words telnet uses (`Avwe.Prose.body_taken/1`).
+  and the percepts and scenes arrive as messages. The first only shows the page
+  and says it is joining, and decides nothing about the body, because a browser
+  keeps the page it is leaving until the new one begins to arrive, so a body
+  that page holds is still held when the request comes. A race for a free body
+  is settled by the lease, and the loser (after a short wait for a page that is
+  only letting go) is sent back to the lobby with the words telnet uses
+  (`Avwe.Prose.body_taken/1`).
 
   The page has four parts, and each is the same thing the others are:
 
@@ -40,6 +43,8 @@ defmodule AvweWeb.PlayLive do
 
   @max_lines 200
   @refresh_ms 2_000
+  @retry_ms 1_500
+  @retry_every_ms 100
 
   @web_help """
   Lines in grey are what your routine does with you while you stop acting. Any command you type and any button you press keeps you in hand a while longer, and any that acts (go, say, wait, light...) takes you back if the routine had you. Clicking a place on the map goes there.\
@@ -107,6 +112,9 @@ defmodule AvweWeb.PlayLive do
       <.flash_notices flash={@flash} />
       <p :if={@ended} class="notice error" role="alert">
         Your connection to {@world.name} has ended. <.link navigate={~p"/"}>Back to the lobby</.link>
+      </p>
+      <p :if={@session == nil and not @ended} class="notice" role="status">
+        Joining {@world.name}...
       </p>
       <p :if={@yielded} class="notice" role="status">
         Your routine has you; act to take yourself back.
@@ -217,18 +225,14 @@ defmodule AvweWeb.PlayLive do
         legend: []
       )
 
-    cond do
-      connected?(socket) -> take(socket, world, body)
-      body.taken -> leave(socket, taken(body))
-      true -> socket
-    end
+    if connected?(socket), do: take(socket, world, body), else: socket
   end
 
   # `Avwe.connect/2` makes the page's own process the sink by default.
   defp take(socket, world, body) do
     opts = [body: body.id, controller: :human, scenes: true] ++ idle_after()
 
-    with {:ok, session} <- Avwe.connect(world.id, opts),
+    with {:ok, session} <- retrying(fn -> Avwe.connect(world.id, opts) end),
          {:ok, look} <- Session.look(session),
          {:ok, scene} <- Session.scene(session) do
       schedule_refresh()
@@ -259,6 +263,35 @@ defmodule AvweWeb.PlayLive do
       ms -> [idle_after: ms]
     end
   end
+
+  # A page that is reloaded, or that comes back after its connection dropped,
+  # asks for the body its own old page still holds, until that page's process
+  # is gone. So a body that is held is waited for a little at the socket before
+  # anyone is told it is taken (one that somebody else holds costs the wait and
+  # is refused). Only the socket can wait: a browser keeps the old page alive
+  # until the new document begins to arrive, so a plain request that waited for
+  # the old page to let go would wait for something that cannot happen until
+  # it answers. This covers a reload, not a question that is only answered by
+  # knowing who a page is (DESIGN 14, question 12). The tests make it short.
+  defp retrying(fun), do: retrying(fun, now() + retry_ms())
+
+  defp retrying(fun, deadline) do
+    case fun.() do
+      {:error, :body_taken} = held ->
+        if now() < deadline do
+          Process.sleep(@retry_every_ms)
+          retrying(fun, deadline)
+        else
+          held
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
+  defp retry_ms, do: Application.get_env(:avwe, :play_retry_ms, @retry_ms)
 
   defp schedule_refresh do
     case Application.get_env(:avwe, :play_refresh_ms, @refresh_ms) do

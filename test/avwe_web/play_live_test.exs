@@ -125,15 +125,18 @@ defmodule AvweWeb.PlayLiveTest do
       assert has_element?(lobby, "li.taken", "Wren")
     end
 
-    test "refuses it with a redirect to the lobby when it is a plain request", %{conn: conn} do
+    test "answers a plain request for a held body with the page, and leaves the refusal to the socket",
+         %{conn: conn} do
+      # A browser keeps the page it is leaving until the new one begins to
+      # arrive, so a body held by that page is held when the request comes: the
+      # request must not wait for it, nor turn the player away.
       neighbour("wren")
 
       conn = get(conn, ~p"/play/hollow_play/wren")
+      assert html_response(conn, 200) =~ "Joining Lantern Hollow..."
 
-      assert redirected_to(conn) == "/"
-
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
-               "Wren is already being played. Choose someone else."
+      {:ok, _lobby, html} = conn |> live() |> follow_redirect(conn, ~p"/")
+      assert html =~ "Wren is already being played. Choose someone else."
     end
 
     test "settles a race for a free body at the socket, and the one who is late is sent back",
@@ -147,6 +150,43 @@ defmodule AvweWeb.PlayLiveTest do
 
       assert html =~ "Wren is already being played. Choose someone else."
       assert has_element?(lobby, "li.taken", "Wren")
+    end
+
+    test "waits a moment at the socket for a body that its own old page is letting go of",
+         %{conn: conn} do
+      Application.put_env(:avwe, :play_retry_ms, 3_000)
+      on_exit(fn -> Application.put_env(:avwe, :play_retry_ms, 0) end)
+
+      # The page that is being left lets go a little after the new one comes.
+      old = neighbour("wren")
+      closer = Task.async(fn -> Process.sleep(300) && Session.close(old) end)
+
+      {:ok, view, _html} = live(conn, ~p"/play/hollow_play/wren")
+
+      Task.await(closer)
+      assert taken?("wren")
+      assert has_element?(view, "#look p", "You are Wren, at Hollow Green.")
+    end
+
+    test "refuses a body that stays held, once it has waited", %{conn: conn} do
+      Application.put_env(:avwe, :play_retry_ms, 400)
+      on_exit(fn -> Application.put_env(:avwe, :play_retry_ms, 0) end)
+      neighbour("wren")
+
+      {microseconds, result} = :timer.tc(fn -> live(conn, ~p"/play/hollow_play/wren") end)
+
+      assert {:error, {:live_redirect, %{to: "/"}}} = result
+      assert microseconds >= 350_000
+    end
+
+    test "does not wait for a body that is free", %{conn: conn} do
+      Application.put_env(:avwe, :play_retry_ms, 3_000)
+      on_exit(fn -> Application.put_env(:avwe, :play_retry_ms, 0) end)
+
+      {microseconds, {:ok, _view, _html}} =
+        :timer.tc(fn -> live(conn, ~p"/play/hollow_play/wren") end)
+
+      assert microseconds < 1_500_000
     end
 
     test "says so to somebody who asks for a world or a body that is not there", %{conn: conn} do

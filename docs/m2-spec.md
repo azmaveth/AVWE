@@ -304,8 +304,8 @@ tests themselves do not need them.
   that each look arranges the next). No "watch" yet (M2b).
 - **`/play/:world/:body`** (`PlayLive`). Its shell is built, the rest is 3.3.
   A page mounts twice, as a plain request and then over its socket. The
-  plain request only checks that the body is free, and turns a held one away
-  with a redirect to the lobby; the socket's mount starts the session
+  plain request shows the page ("Joining...") and decides nothing about the
+  body (see "Reloading" in 3.3); the socket's mount starts the session
   (`Avwe.connect/2`, controller `:human`) with the LiveView as its sink, so the
   lease is released when the page closes, as for any sink. A race for a free
   body is settled by the lease, and the one who is late is sent to the lobby
@@ -403,8 +403,25 @@ are for the browser job.
 autostarts (`Avwe.warm_ground/1`), so the first page does not draw its first
 scene bare.
 
-**Known limits.** A page that reconnects can be refused the body its old page
-still holds, for up to a minute (DESIGN 14, question 12). There is no keyboard
+**Reloading.** A page that is reloaded asks for the body its own old page is
+only just letting go of. Found by pressing reload in a real browser, which sent
+the new page to the lobby, refused by itself. The first fix waited for the body
+to be let go, at the plain request and at the socket, and made it worse:
+reloading alternated between refused and accepted, each refusal after the whole
+wait. A browser keeps the page it is leaving until the new document begins to
+arrive, so a request that waits for the old page to let go waits for something
+that cannot happen until the request answers. So the plain request answers at
+once and decides nothing about a held body, and it is the socket, which connects
+after the browser has dropped the old page, that waits for a held body, up to a
+second and a half (`:play_retry_ms`), before the player is told it is taken. A
+body somebody else holds costs the wait and is then refused; a free one costs
+nothing. The cost of deciding at the socket is that a body held by somebody
+else shows the page ("Joining...") for the wait before the lobby does.
+
+**Known limits.** A page that comes back after a connection the server has not
+noticed is gone (a laptop that slept) can still be refused for up to a minute,
+until the old page's process times out: that is the question of who a page is
+(DESIGN 14, question 12), which the wait does not answer. There is no keyboard
 play, no remembered map, and no zoom beyond the two views.
 
 ### 3.4 Security
@@ -480,8 +497,9 @@ its real transport.
   `<script>alert(1)</script>` shows as text.
   *Built with the skeleton:* `test/avwe_web/` has the lobby (lists, offers a
   free body, shows a held one, looks again, follows worlds), the play page
-  (takes the body at the socket and not before, refuses a held one at the
-  plain request and at the socket, a missing world or body, shows percepts as
+  (takes the body at the socket and not before, answers a plain request with
+  the page whoever holds the body and refuses at the socket after a short wait,
+  a missing world or body, shows percepts as
   lines and as text, keeps two hundred, frees the body when the page closes or
   is left, says so when the world stops) and the endpoint's security (headers,
   policy, no inline script, cookie, the Host guard). `test/e2e/web_test.exs`

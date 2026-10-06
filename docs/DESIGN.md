@@ -995,7 +995,10 @@ core. A feature isn't done until its end-to-end test exists.
     laptop that slept, a network that changed) joins as a new page, and the
     body is still held by the old one until the server notices the old
     connection is gone, which can take up to a minute. The new page is told
-    the body is being played, and it was the same player. The fix needs a
+    the body is being played, and it was the same player. (A reload is the
+    common case, and is covered: a page waits a second and a half for a held
+    body before it is refused. A connection that dropped without a word is not.)
+    The fix needs a
     controller identity the lease understands (a token in the page's session,
     so that the same player may take the body back from their own old page),
     and that is the start of the accounts the web client does not have
