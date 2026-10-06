@@ -25,9 +25,6 @@ defmodule Avwe.MCP.StepsTest do
     assert {:ok, [{:say, [params: %{text: "Hi", volume: :shout}]}]} =
              Steps.parse(%{"verb" => "say", "params" => %{"text" => "Hi", "volume" => "SHOUT"}})
 
-    assert {:ok, [{:say, [params: %{volume: "bellow"}]}]} =
-             Steps.parse(%{"verb" => "say", "params" => %{"volume" => "bellow"}})
-
     assert {:ok, [{:wait, [params: %{for: 1_200}]}]} =
              Steps.parse(%{"verb" => "wait", "params" => %{"minutes" => 20}})
 
@@ -66,7 +63,9 @@ defmodule Avwe.MCP.StepsTest do
     assert {:error, "Unknown verb \"dance\"." <> _} = Steps.parse(%{"verb" => "dance"})
 
     assert {:error, "go needs a target" <> _} = Steps.parse(%{"verb" => "go"})
-    assert {:error, "wait needs params" <> _} = Steps.parse(%{"verb" => "wait"})
+
+    assert {:error, "wait needs one of: minutes, hours, for (seconds) or until" <> _} =
+             Steps.parse(%{"verb" => "wait"})
 
     assert {:error, "Step 2: Unknown verb" <> _} =
              Steps.parse(%{"steps" => [%{"verb" => "stop"}, %{"verb" => "fly"}]})
@@ -80,5 +79,67 @@ defmodule Avwe.MCP.StepsTest do
 
     assert {:error, "params must be an object."} =
              Steps.parse(%{"verb" => "say", "params" => "hi"})
+  end
+
+  test "what the world would refuse is refused first, in plain words, naming the problem" do
+    refused = fn args ->
+      assert {:error, message} = Steps.parse(args)
+      message
+    end
+
+    assert refused.(%{"verb" => "say"}) == "say needs text: what to say."
+    assert refused.(%{"verb" => "say", "params" => %{"text" => "  "}}) =~ "say needs text"
+
+    assert refused.(%{"verb" => "write", "params" => %{}}) ==
+             "write needs text: the page to write."
+
+    assert refused.(%{"verb" => "say", "params" => %{"text" => 7}}) ==
+             "The text must be a string."
+
+    assert refused.(%{"verb" => "say", "params" => %{"text" => String.duplicate("a", 501)}}) ==
+             "The text is too long: at most 500 characters."
+
+    assert refused.(%{"verb" => "say", "params" => %{"text" => "Hi", "volume" => "bellow"}}) ==
+             ~s(volume must be whisper, talk or shout, not "bellow".)
+
+    assert refused.(%{"verb" => "wait", "params" => %{"until" => "noon"}}) ==
+             ~s(until must be dawn or dusk, not "noon".)
+
+    assert refused.(%{"verb" => "follow", "params" => %{"direction" => "north"}}) ==
+             ~s(direction must be upstream or downstream, not "north".)
+
+    assert refused.(%{"verb" => "follow"}) == "follow needs a direction: upstream or downstream."
+
+    assert refused.(%{"verb" => "wait", "params" => %{"minutes" => 5, "until" => "dusk"}}) ==
+             "wait takes one of minutes, hours, for or until, not minutes and until together."
+
+    assert refused.(%{"verb" => "wait", "params" => %{"for" => 30}}) ==
+             "A wait lasts at least a minute (for: 30)."
+
+    assert refused.(%{"verb" => "wait", "params" => %{"hours" => 200}}) ==
+             "A wait lasts at most a week (hours: 200)."
+
+    assert refused.(%{"verb" => "wait", "params" => %{"minutes" => "ten"}}) ==
+             ~s(minutes must be a number, not "ten".)
+
+    assert refused.(%{"verb" => "read", "params" => %{"last" => 0}}) ==
+             "last must be a whole number of pages from 1 to 50."
+
+    assert refused.(%{"steps" => List.duplicate(%{"verb" => "stop"}, 51)}) =~
+             "A plan has at most 50 steps; this one has 51."
+
+    assert refused.(%{"steps" => [%{"verb" => "stop"}, %{"verb" => "say"}]}) ==
+             "Step 2: say needs text: what to say."
+  end
+
+  test "a wait in hours, or exactly a minute, passes" do
+    assert {:ok, [{:wait, [params: %{for: 5_400}]}]} =
+             Steps.parse(%{"verb" => "wait", "params" => %{"hours" => 1.5}})
+
+    assert {:ok, [{:wait, [params: %{for: 60}]}]} =
+             Steps.parse(%{"verb" => "wait", "params" => %{"minutes" => 1}})
+
+    assert {:ok, steps} = Steps.parse(%{"steps" => List.duplicate(%{"verb" => "stop"}, 50)})
+    assert length(steps) == 50
   end
 end

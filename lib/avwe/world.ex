@@ -16,7 +16,8 @@ defmodule Avwe.World do
   @doc """
   Options: `:id` (the world's id), `:regions` (a list of `Avwe.Region` structs),
   `:clock` (`:manual` or `{:live, interval_ms}`), `:info` (a map with the
-  world's `:name` and `:tagline`, shown to people choosing a world), `:store`
+  world's `:name` and `:tagline`, shown to people choosing a world, and
+  what else `Avwe.start_world/2` tells of it: `:clock` and `:dt`), `:store`
   (a dir for the regions' logs and snapshots, or `nil` for no persistence),
   `:snapshot_every` (steps between snapshots) and `:snapshot_keep` (how many
   of the newest snapshots to keep). See `Avwe.RegionServer`.

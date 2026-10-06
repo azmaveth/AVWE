@@ -16,21 +16,65 @@ defmodule Avwe.Test.MCPClient do
   @timeout 40_000
 
   @doc """
-  Connects to the server on `port`. `protocol_mode` `:legacy_only` (the
-  default) gives the client an MCP session; `:modern_only` speaks MCP
-  2026-07-28, which has none.
+  Connects to the server on `port`, at its endpoint `/mcp`.
+  `protocol_mode` `:legacy_only` (the default) gives the client an MCP
+  session; `:modern_only` speaks MCP 2026-07-28, which has none.
   """
   def connect(port, protocol_mode \\ :legacy_only) do
     {:ok, client} =
       ExMCP.Client.start_link(
         transport: :http,
-        url: "http://127.0.0.1:#{port}",
+        url: "http://127.0.0.1:#{port}/mcp",
         use_sse: false,
         protocol_mode: protocol_mode,
         request_timeout: @timeout
       )
 
     client
+  end
+
+  @doc """
+  One raw HTTP request to the server on `port`, for what ExMCP's client
+  does not show: `%{status, headers, body}`, header names lowercased.
+  Options: `:headers` and `:body` (encoded as JSON).
+  """
+  def http(port, method, path, opts \\ []) do
+    {:ok, _apps} = Application.ensure_all_started(:inets)
+    url = ~c"http://127.0.0.1:#{port}#{path}"
+
+    headers =
+      for {name, value} <- Keyword.get(opts, :headers, []), do: {~c"#{name}", ~c"#{value}"}
+
+    request =
+      case Keyword.fetch(opts, :body) do
+        {:ok, body} -> {url, headers, ~c"application/json", Jason.encode!(body)}
+        :error -> {url, headers}
+      end
+
+    {:ok, {{_version, status, _reason}, response_headers, body}} =
+      :httpc.request(method, request, [timeout: @timeout], body_format: :binary)
+
+    %{
+      status: status,
+      headers: Map.new(response_headers, fn {name, value} -> {"#{name}", "#{value}"} end),
+      body: body
+    }
+  end
+
+  @doc """
+  The JSON-RPC message in a response body, whether plain JSON or a
+  server-sent event stream.
+  """
+  def message(%{headers: headers, body: body}) do
+    if String.contains?(headers["content-type"] || "", "text/event-stream") do
+      body
+      |> String.split("\n")
+      |> Enum.filter(&String.starts_with?(&1, "data:"))
+      |> Enum.map_join("\n", &(&1 |> String.trim_leading("data:") |> String.trim_leading()))
+      |> Jason.decode!()
+    else
+      Jason.decode!(body)
+    end
   end
 
   @doc "Ends the session (an HTTP DELETE) and stops the client."

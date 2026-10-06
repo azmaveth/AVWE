@@ -94,7 +94,9 @@ defmodule Avwe.Perception do
 
   @doc """
   What a body senses right now and what it can do. For a spectator (`nil`),
-  every body and place in the region.
+  every body and place in the region. A body's `action` is what it is
+  doing (`ref`, `verb`, `target` and its `target_name`, `params`, and for
+  a wait `until`, when it ends).
   """
   @spec look(map(), String.t() | nil) :: map()
   def look(view, nil) do
@@ -128,7 +130,7 @@ defmodule Avwe.Perception do
       nearest: if(here, do: nil, else: nearest_place(view, body, position)),
       action:
         action &&
-          Map.take(action, [:ref, :verb, :target, :params])
+          Map.take(action, [:ref, :verb, :target, :params, :until])
           |> Map.put(:target_name, name(view, action.target)),
       ground: view[:terrain] && Terrain.ground(view.terrain, position),
       channel: channel,

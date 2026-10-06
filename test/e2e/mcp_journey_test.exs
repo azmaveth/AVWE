@@ -187,6 +187,101 @@ defmodule Avwe.E2E.MCPJourneyTest do
     eventually(fn -> mind(@world, "mira-vale") == nil end)
   end
 
+  test "a report names places and hearths, and sums up a long plan; a look's measures are rounded",
+       %{port: port} do
+    client = connect(port)
+    refute call(client, "join", %{"body" => "mira-vale"}).error?
+
+    look = call(client, "look").data
+    assert %{"warmth" => %{"air_c" => air, "ground_c" => ground}} = look
+    for degrees <- [air, ground], do: assert(degrees == Float.round(degrees, 1))
+    assert look["light"] == Float.round(look["light"], 2)
+
+    plan = %{
+      "steps" =>
+        [
+          %{"verb" => "go", "target" => "the dry bend"},
+          %{"verb" => "wait", "params" => %{"minutes" => 20}},
+          %{"verb" => "kindle", "target" => "the kiln-house hearth"}
+        ] ++ List.duplicate(%{"verb" => "write", "params" => %{"text" => "Still dry."}}, 5),
+      "max_wait_seconds" => 0
+    }
+
+    planned = call(client, "act", plan)
+    assert planned.data["status"] == "still_going"
+
+    assert planned.text =~
+             "Planned after it: wait 20 minutes, kindle the kiln-house hearth, write a page, " <>
+               "and 4 more."
+
+    step(@world, "mira-vale", 2)
+    going = call(client, "listen")
+    assert going.text =~ ~r/^Still going\. .* Under way: go to The Dry Bend\. Planned after it:/
+    refute going.text =~ "the-dry-bend"
+    assert going.data["action"]["target_name"] == "The Dry Bend"
+
+    stopped = acted(client, "act", %{"verb" => "stop"})
+    assert stopped.data["status"] == "done"
+    close(client)
+  end
+
+  test "the join look is the player's: what the body is doing reads as theirs", %{port: port} do
+    # Her routine walks her to the Dry Bend from 04:30; at 08:30 she is
+    # about her day. Whatever she is doing at the moment she is taken, the
+    # first look tells it as the player's.
+    first = connect(port)
+    refute call(first, "join", %{"body" => "mira-vale"}).error?
+
+    assert call(first, "wait", %{"minutes" => 90, "max_wait_seconds" => 0}).data["status"] ==
+             "still_going"
+
+    step(@world, "mira-vale", 2)
+    refute call(first, "leave").error?
+    close(first)
+    Avwe.step(@world, 1)
+    assert holder() == nil
+
+    second = connect(port)
+    joined = call(second, "join", %{"body" => "mira-vale"})
+    refute joined.error?
+    assert joined.data["look"]["holder"] == "mcp"
+    assert joined.data["look"]["action"]["verb"] == "wait"
+    assert joined.text =~ "You are waiting here a while."
+    refute joined.text =~ "Your routine has you"
+    # "While you were away" is still the routine's time.
+    assert joined.text =~ "While you were away:"
+    close(second)
+  end
+
+  test "read and write name the notebook they use", %{port: port} do
+    client = connect(port)
+    refute call(client, "join", %{"body" => "mira-vale"}).error?
+
+    wrote =
+      acted(client, "act", %{
+        "verb" => "write",
+        "target" => "survey notebook",
+        "params" => %{"text" => "Low water."}
+      })
+
+    assert wrote.data["status"] == "done"
+
+    read =
+      acted(client, "act", %{
+        "verb" => "read",
+        "target" => "survey notebook",
+        "params" => %{"last" => 1}
+      })
+
+    assert read.data["status"] == "done"
+    assert read.text =~ "You read your survey notebook (1 of 1 page):"
+    assert read.text =~ ~r/^  813 AR, day 220, \d\d:\d\d: Low water\.$/m
+
+    nowhere = acted(client, "act", %{"verb" => "read", "target" => "the moon"})
+    assert nowhere.data["status"] == "failed"
+    close(client)
+  end
+
   defp holder do
     {:ok, snapshot} = Avwe.snapshot(@world)
     snapshot.components.control["mira-vale"].holder

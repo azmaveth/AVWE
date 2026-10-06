@@ -99,7 +99,12 @@ defmodule Avwe do
          id: id,
          regions: [region],
          clock: Keyword.get(opts, :clock, :manual),
-         info: %{name: quire_world.name, tagline: quire_world.tagline},
+         info: %{
+           name: quire_world.name,
+           tagline: quire_world.tagline,
+           clock: Keyword.get(opts, :clock, :manual),
+           dt: region.dt
+         },
          store: store_dir(id, Keyword.get(opts, :data_dir, Application.get_env(:avwe, :data_dir))),
          snapshot_every: Keyword.get(opts, :snapshot_every, 1_000),
          snapshot_keep: Keyword.get(opts, :snapshot_keep, 5)}
@@ -141,7 +146,11 @@ defmodule Avwe do
   @spec subscribe(atom()) :: {:ok, pid()} | {:error, term()}
   def subscribe(world), do: Registry.register(Avwe.PubSub, {:events, world}, nil)
 
-  @doc "Every running world as `{id, %{name: name, tagline: tagline}}`."
+  @doc """
+  Every running world as `{id, info}`: its `name` and `tagline`, and how
+  its time passes, its `clock` (`:manual` or `{:live, interval_ms}`) and
+  `dt`, the world seconds of each step.
+  """
   @spec worlds() :: [{atom(), map()}]
   def worlds, do: Avwe.World.list()
 

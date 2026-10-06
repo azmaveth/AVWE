@@ -67,6 +67,32 @@ defmodule Avwe.E2E.NotebookTest do
     expect(next, "You can't write that. A page holds 1 to 1000 characters.")
   end
 
+  test "read takes how many pages, and help tells the notebook commands", %{port: port} do
+    mira = join(port, "mira")
+
+    send_line(mira, "help")
+    expect(mira, "  write <text>      write a page in your notebook")
+    expect(mira, "  read [pages]      read the last pages of your notebook (also: notes)")
+
+    for page <- ["First.", "Second.", "Third."] do
+      send_line(mira, "write #{page}")
+      sync(mira)
+      Avwe.step(@world, 1)
+      expect(mira, "You write in your survey notebook.")
+    end
+
+    send_line(mira, "read 2")
+    sync(mira)
+    Avwe.step(@world, 1)
+    expect(mira, "You read your survey notebook (2 of 3 pages):")
+    lines = expect(mira, ~r/^  813 AR, day 220, 04:03: Third\.$/)
+    assert Enum.any?(lines, &(&1 == "  813 AR, day 220, 04:02: Second."))
+    refute Enum.any?(lines, &(&1 =~ "First."))
+
+    send_line(mira, "read two")
+    expect(mira, "Read how many pages? Try: read, read 5.")
+  end
+
   test "a page reaches the reader as plain text: no escape codes, no tabs", %{port: port} do
     mira = join(port, "mira")
     send_line(mira, "write The bend.\tDry.\e[2J\e[31m Red?\a")
