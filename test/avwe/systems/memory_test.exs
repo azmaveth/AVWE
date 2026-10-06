@@ -110,6 +110,17 @@ defmodule Avwe.Systems.MemoryTest do
 
       assert "You light the kiln-house hearth." in summaries(region, "mira-vale")
     end
+
+    test "what it smelled: Memory runs after Smoke, so the smoke a step raises is remembered" do
+      region =
+        Ember.region({813, day: 220, hour: 12})
+        |> Ember.controlled()
+        |> submit("mira-vale", :kindle, target: "town-hearth")
+        |> run(10)
+
+      assert Enum.any?(entries(region, "mira-vale"), &(&1.type == :smoke_smelled))
+      assert Enum.any?(summaries(region, "mira-vale"), &(&1 =~ ~r/^You smell woodsmoke/))
+    end
   end
 
   describe "replay" do

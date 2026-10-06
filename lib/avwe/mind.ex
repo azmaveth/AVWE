@@ -38,9 +38,14 @@ defmodule Avwe.Mind do
         status: :done | :failed | :interrupted | :still_going | :idle,
         percepts: [%Avwe.Percept{}],   # since the previous call returned, in order
         plan: [{verb, opts}],          # steps not yet submitted
-        action: %{ref, verb, target} | nil,  # the step under way
+        action: %{ref, verb, target} | nil,  # the step under way, or the body's own doing
         dropped: n                     # percepts lost to the buffer bound
       }
+
+  `action` is the plan's step under way or, when there is none, the
+  durative action an earlier step started that the body is still doing (a
+  wait that an instant step, such as speaking, did not end). It is `nil`
+  only when the body is doing nothing the Mind asked for.
 
   The buffer holds at most 500 percepts; when it overflows the oldest are
   dropped and counted in the next reply's `dropped`.
@@ -48,7 +53,14 @@ defmodule Avwe.Mind do
   Between calls the Mind keeps going: as each step succeeds it submits the
   next, so a plan runs while the program thinks, and a failed step drops
   the rest. Only one call waits at a time: a call made while another waits
-  answers the waiting one first, as if its wait had run out.
+  answers the waiting one first, as if its wait had run out. A caller that
+  dies while it waits (a cancelled request) is forgotten, and what it would
+  have been told waits for the next call.
+
+  When the session yields the body to its routine (its idle rule: no call
+  for `:idle_after`), the plan ends there, as `:failed`, and the Mind
+  forgets what it was doing: the routine has the body now, and only the
+  program's next act takes it back.
 
   With no call for `:quit_after` real milliseconds (default 30 minutes) the
   Mind stops and the body is released.
@@ -179,6 +191,7 @@ defmodule Avwe.Mind do
         dropped: 0,
         plan: [],
         current: nil,
+        doing: nil,
         ended: nil,
         waiter: nil,
         quit_after: Keyword.get(opts, :quit_after, @quit_after),
@@ -207,7 +220,15 @@ defmodule Avwe.Mind do
   def handle_call(:percepts, _from, state) do
     state = answer_waiter(state)
     :ok = Session.touch(state.session)
-    status = if state.current, do: :still_going, else: state.ended || :idle
+
+    status =
+      cond do
+        state.current -> :still_going
+        state.ended -> state.ended
+        state.doing -> :still_going
+        true -> :idle
+      end
+
     {:reply, {:ok, report(state, status)}, state |> flush() |> arm_quit()}
   end
 
@@ -220,7 +241,9 @@ defmodule Avwe.Mind do
         {:ok, state} ->
           tag = make_ref()
           Process.send_after(self(), {:max_wait, tag}, max_wait)
-          waiter = %{from: from, interrupt_at: interrupt_at, tag: tag}
+          {caller, _tag} = from
+          monitor = Process.monitor(caller)
+          waiter = %{from: from, interrupt_at: interrupt_at, tag: tag, monitor: monitor}
           {:noreply, arm_quit(%{state | waiter: waiter})}
 
         {:error, reason, state} ->
@@ -246,6 +269,14 @@ defmodule Avwe.Mind do
 
   def handle_info({:quit, _stale_or_waiting}, state), do: {:noreply, state}
 
+  # The waiting caller is gone (its request was cancelled or dropped): what
+  # it would have been told stays buffered for the next call.
+  def handle_info(
+        {:DOWN, monitor, :process, _caller, _reason},
+        %{waiter: %{monitor: monitor}} = state
+      ),
+      do: {:noreply, arm_quit(%{state | waiter: nil})}
+
   def handle_info({:DOWN, _ref, :process, session, _reason}, %{session: session} = state) do
     if state.waiter, do: GenServer.reply(state.waiter.from, {:error, :session_closed})
     {:stop, :normal, %{state | waiter: nil}}
@@ -257,10 +288,13 @@ defmodule Avwe.Mind do
   # interrupt a waiting caller. A caller is answered at the first percept
   # that ends its wait; the rest of the batch waits for the next call.
   defp take(percept, state) do
-    state = buffer(state, percept)
+    state = percept |> buffer(state) |> follow(percept)
     current = state.current
 
     cond do
+      percept.type == :control_released ->
+        yielded(state)
+
       current != nil and percept.kind == :result and percept.intent == current.ref ->
         settle(state, percept.outcome)
 
@@ -290,12 +324,29 @@ defmodule Avwe.Mind do
     percept.kind == :sensed and percept.issuer == nil and percept.salience >= interrupt_at
   end
 
-  defp buffer(%{buffered: @buffer} = state, percept) do
+  # What the body is doing for the Mind: a step's durative action from its
+  # start until its result, which may outlive the plan that asked for it.
+  defp follow(%{current: %{ref: ref} = current} = state, %{type: :action_started, intent: ref}),
+    do: %{state | doing: current}
+
+  defp follow(%{doing: %{ref: ref}} = state, %{kind: :result, intent: ref}),
+    do: %{state | doing: nil}
+
+  defp follow(state, _percept), do: state
+
+  # The session yielded the body to its routine: the plan ends, and the
+  # routine, not the Mind, decides what the body does until the next act.
+  defp yielded(%{current: nil} = state), do: %{state | plan: [], doing: nil}
+  defp yielded(state), do: finish(%{state | doing: nil}, :failed)
+
+  defp buffer(percept, state), do: buffer_percept(state, percept)
+
+  defp buffer_percept(%{buffered: @buffer} = state, percept) do
     {_oldest, queue} = :queue.out(state.buffer)
     %{state | buffer: :queue.in(percept, queue), dropped: state.dropped + 1}
   end
 
-  defp buffer(state, percept),
+  defp buffer_percept(state, percept),
     do: %{state | buffer: :queue.in(percept, state.buffer), buffered: state.buffered + 1}
 
   defp flush(state), do: %{state | buffer: :queue.new(), buffered: 0, dropped: 0, ended: nil}
@@ -318,6 +369,7 @@ defmodule Avwe.Mind do
   end
 
   defp reply(%{waiter: waiter} = state, status) do
+    Process.demonitor(waiter.monitor, [:flush])
     GenServer.reply(waiter.from, {:ok, report(state, status)})
     %{flush(state) | waiter: nil} |> arm_quit()
   end
@@ -330,7 +382,7 @@ defmodule Avwe.Mind do
       status: status,
       percepts: :queue.to_list(state.buffer),
       plan: state.plan,
-      action: state.current,
+      action: state.current || state.doing,
       dropped: state.dropped
     }
   end

@@ -378,9 +378,13 @@ defmodule Avwe.E2E.PersistenceTest do
     :ok = start(tmp_dir)
     {:ok, mira} = Avwe.connect(@world, body: "mira-vale")
     {:ok, ref} = Session.act(mira, :say, params: %{text: "Before the stop."})
+    monitor = Process.monitor(mira)
     :ok = Avwe.stop_world(@world)
+    # Her session ends with its world, lease and all.
+    assert_receive {:DOWN, ^monitor, :process, ^mira, :normal}
 
     :ok = start(tmp_dir)
+    {:ok, mira} = Avwe.connect(@world, body: "mira-vale")
     Avwe.step(@world, 1)
     assert [%{intent: ^ref, outcome: :success}] = results(mira)
 

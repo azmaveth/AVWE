@@ -78,6 +78,13 @@ defmodule Avwe.MindTest do
 
   defp summaries(report), do: Enum.map(report.percepts, & &1.summary)
 
+  defp stopped(mind) do
+    task = Task.async(fn -> Mind.stop(mind) end)
+    eventually(fn -> :sys.get_state(mind).waiter != nil end)
+    step(mind)
+    Task.await(task)
+  end
+
   defp say(text), do: {:say, params: %{text: text}}
 
   describe "act" do
@@ -204,6 +211,64 @@ defmodule Avwe.MindTest do
     end
   end
 
+  describe "the body's own doing" do
+    test "an instant step during a durative one is done, and the action still shows" do
+      wren = mind("wren")
+
+      assert {:ok, %{status: :still_going}} =
+               Mind.act(wren, {:wait, params: %{for: 60 * 60}}, max_wait_ms: 0)
+
+      step(wren)
+
+      task = acting(wren, say("hi"))
+      step(wren)
+
+      assert {:ok, %{status: :done, plan: []} = report} = Task.await(task)
+      assert %{verb: :wait, ref: "i-1"} = report.action
+      assert {:ok, %{action: %{verb: :wait, ref: "i-1"}}} = Mind.look(wren)
+
+      step(wren)
+      assert {:ok, %{status: :still_going, action: %{verb: :wait}}} = Mind.percepts(wren)
+
+      assert {:ok, %{status: :done, action: nil}} = stopped(wren)
+      assert {:ok, %{status: :idle, action: nil}} = Mind.percepts(wren)
+    end
+  end
+
+  describe "a caller that goes away" do
+    test "is forgotten, and what it would have been told waits for the next call" do
+      wren = mind("wren")
+      {:ok, tamsin} = Avwe.connect(@world, body: "tamsin")
+
+      caller =
+        spawn(fn -> Mind.act(wren, {:wait, params: %{for: 60 * 60}}, max_wait_ms: 5_000) end)
+
+      eventually(fn -> :sys.get_state(wren).waiter != nil end)
+      step(wren)
+      Process.exit(caller, :kill)
+      eventually(fn -> :sys.get_state(wren).waiter == nil end)
+
+      {:ok, _ref} = Session.act(tamsin, :say, params: %{text: "Wren, the pond!"})
+      step(wren, 2)
+
+      assert {:ok, %{status: :still_going} = report} = Mind.percepts(wren)
+      assert summaries(report) == ["You settle in to wait.", ~s(Tamsin says, "Wren, the pond!")]
+    end
+
+    test "doesn't keep the Mind from quitting" do
+      wren = mind("wren", quit_after: 100)
+      monitor = Process.monitor(wren)
+
+      caller =
+        spawn(fn -> Mind.act(wren, {:wait, params: %{for: 60 * 60}}, max_wait_ms: 10_000) end)
+
+      eventually(fn -> :sys.get_state(wren).waiter != nil end)
+      Process.exit(caller, :kill)
+
+      assert_receive {:DOWN, ^monitor, :process, ^wren, :normal}, 1_000
+    end
+  end
+
   describe "stop" do
     test "drops the plan, stops the action and waits for the stop's result" do
       wren = mind("wren")
@@ -276,6 +341,38 @@ defmodule Avwe.MindTest do
 
       assert_receive {:DOWN, ^ref, :process, ^wren, :normal}, 1_000
       eventually(fn -> not taken?("wren") end)
+    end
+
+    test "is the routine's when the session yields it, and the plan ends there" do
+      wren = mind("wren", idle_after: 100)
+      plan = [{:go, target: "far-tower"}, {:wait, params: %{for: 60 * 60}}]
+      assert {:ok, %{status: :still_going}} = Mind.act(wren, plan, max_wait_ms: 0)
+      step(wren)
+
+      %{session: session} = :sys.get_state(wren)
+      eventually(fn -> :sys.get_state(session).yielded end)
+      # The journey goes on under the routine and arrives; nothing more is
+      # submitted, so the body stays the routine's.
+      step(wren, 40)
+
+      assert holder("wren") == nil
+      assert %{plan: [], current: nil} = :sys.get_state(wren)
+      assert {:ok, %{status: :failed, plan: [], action: nil} = report} = Mind.percepts(wren)
+      assert "You let your routine carry you." in summaries(report)
+      assert "You arrive at Far Tower." in summaries(report)
+      refute "You settle in to wait." in summaries(report)
+    end
+
+    test "is let go when its world stops, and can be taken again when it starts" do
+      wren = mind("wren")
+      monitor = Process.monitor(wren)
+      step(wren)
+
+      :ok = Avwe.stop_world(@world)
+      assert_receive {:DOWN, ^monitor, :process, ^wren, :normal}, 1_000
+
+      {:ok, _pid} = Avwe.start_world(@world, quire: lantern_hollow(), start: {1, hour: 12})
+      assert {:ok, _taken} = Avwe.connect(@world, body: "wren")
     end
 
     test "calls keep it from quitting" do
