@@ -266,7 +266,13 @@ defmodule Avwe.Prose do
     Enum.join(["While you were away:" | lines], "\n")
   end
 
-  defp stamp(time, now) do
+  @doc """
+  A moment as a player reads it beside a line of what happened: `HH:MM`,
+  with the day when it was not the day of `now`, and the whole date when
+  it was not the year.
+  """
+  @spec stamp(integer(), integer()) :: String.t()
+  def stamp(time, now) do
     then = Calendar.describe(time)
     today = Calendar.describe(now)
     clock = "#{pad(then.hour)}:#{pad(then.minute)}"

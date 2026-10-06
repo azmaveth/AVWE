@@ -25,6 +25,7 @@ defmodule Avwe.MixProject do
   defp deps do
     [
       {:yaml_elixir, "~> 2.12"},
+      {:ex_mcp, "~> 1.5"},
       {:stream_data, "~> 1.4", only: [:dev, :test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]

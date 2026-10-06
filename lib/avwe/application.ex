@@ -14,8 +14,9 @@ defmodule Avwe.Application do
         {DynamicSupervisor, name: Avwe.Worlds, strategy: :one_for_one},
         {DynamicSupervisor, name: Avwe.Sessions, strategy: :one_for_one},
         {DynamicSupervisor, name: Avwe.Minds, strategy: :one_for_one},
+        Avwe.MCP.Players,
         {Task, &autostart/0}
-      ] ++ telnet()
+      ] ++ telnet() ++ mcp()
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Avwe.Supervisor)
   end
@@ -30,6 +31,13 @@ defmodule Avwe.Application do
         {:error, reason} ->
           Logger.warning("Couldn't start world #{inspect(id)}: #{inspect(reason)}")
       end
+    end
+  end
+
+  defp mcp do
+    case Application.get_env(:avwe, :mcp) do
+      nil -> []
+      opts -> [{Avwe.MCP, opts}]
     end
   end
 
