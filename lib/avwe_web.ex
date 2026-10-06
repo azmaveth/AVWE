@@ -55,6 +55,8 @@ defmodule AvweWeb do
 
       import AvweWeb.Components
       import Phoenix.HTML
+
+      alias Phoenix.LiveView.JS
     end
   end
 

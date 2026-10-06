@@ -80,6 +80,7 @@ defmodule Avwe.MixProject do
       {:phoenix_html, "~> 4.3"},
       {:phoenix_live_view, "~> 1.2"},
       {:bandit, "~> 1.12"},
+      {:jason, "~> 1.4"},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:lazy_html, ">= 0.1.0", only: :test},
       {:stream_data, "~> 1.4", only: [:dev, :test]},
