@@ -86,25 +86,33 @@ only watching."). The look is read only for `go` and for a named hearth;
 `run/2` is now a switch over the outcome, and its end-to-end tests, which are
 the safety net, were not edited.
 
-### 2.2 Representation layers
+### 2.2 Representation layers (built)
 
 `Avwe.Repr` (pure) answers "what is this kind of thing, at each layer":
 
-    %{name: "silt", description: "...", glyph: %{char: ".", color: "#b89968"}}
+    %{name: "silt", description: "...", glyph: %{char: ".", color: "#b8a070"}}
 
-for the six ground kinds (`:channel_bed :reeds :clay :silt :stone :grass`;
-the channel bed is drawn wet or dry, see 2.4) and for the kinds of thing
-that can be in a scene: a body, a hearth (cold, burning), a place, the
-river's source. A layer a kind lacks is absent, not empty: a sprite layer
-is `sprite: "terrain/silt"`, added to the same maps later, and a client
-uses the richest layer it knows (DESIGN 8.4).
+for the seven ground kinds (`:channel_bed :reeds :clay :silt :stone :grass`,
+and `:water` for a channel cell where the river runs; the bed is dry
+otherwise) and for the kinds of thing a scene can show: `:body`, `:hearth`
+(cold), `:hearth_burning`, `:place`, and the two ways a fire shows from far
+off, `:smoke` and `:glow`. A layer a kind lacks is absent, not empty: a sprite
+layer will be `sprite: "terrain/silt"`, added to the same maps later, and a
+client uses the richest layer it knows (DESIGN 8.4). Each kind has its own
+character as well as its own color, so the map reads without color.
 
-An entity can override its glyph in the world's configuration (`glyph:` and
-`color:` beside `name:` for a character, a place or a hearth). They are
-validated when the world is built, as the rest of the config is: a glyph is
-one grapheme and not a control character, a colour is `#rrggbb`, or the
-build raises `ArgumentError`. Quire is read-only and has no such fields;
-glyphs in articles are a Quire matter and not part of M2.
+A body, being one of many, has its own glyph: the one its world gave it, else
+an `@` in a color taken from its id, so the same body is the same color every
+time and two bodies in sight are usually told apart (`body_glyph/2`).
+
+A character's glyph can be set in the world's configuration (`glyph:` and
+`color:` beside `routine:`; either alone is enough). They are validated when
+the world is built, as the rest of the config is: a glyph is one printable
+character, a color is `#rrggbb`, or the build raises `ArgumentError`. The
+override is stored in the body's `repr`. Only characters can be overridden in
+M2a: places come from Quire pins and carry only a label, and a hearth's glyph
+follows whether it burns. Quire has no glyph fields; glyphs in articles are a
+Quire matter and not part of M2.
 
 ### 2.3 The ground map
 

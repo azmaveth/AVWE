@@ -116,6 +116,36 @@ defmodule Avwe.WorldgenTest do
       assert Region.get(build(characters: []), "mira-vale", :autopilot) == Avwe.Autopilot.fresh()
     end
 
+    test "may give a body its own glyph, and either half of it" do
+      region = with_mira(glyph: "M", color: "#e8c07a")
+
+      assert %{glyph: %{char: "M", color: "#e8c07a"}, name: "Mira Vale"} =
+               Region.get(region, "mira-vale", :repr)
+
+      region = with_mira(color: "#112233")
+      assert Region.get(region, "mira-vale", :repr).glyph == %{char: "@", color: "#112233"}
+
+      region = with_mira(glyph: "V")
+      assert Region.get(region, "mira-vale", :repr).glyph == %{char: "V", color: "#e8d9a0"}
+    end
+
+    test "leave a body's repr as Quire made it when no glyph is given" do
+      region = with_mira(norms: [:invited_fire])
+      refute Map.has_key?(Region.get(region, "mira-vale", :repr), :glyph)
+    end
+
+    test "refuse a glyph that is not one printable character, or a color that is not #rrggbb" do
+      assert_raise ArgumentError, ~r/^character "mira-vale": glyph must be one printable/, fn ->
+        with_mira(glyph: "MV")
+      end
+
+      assert_raise ArgumentError,
+                   ~r/^character "mira-vale": color must be #rrggbb, got "gold"/,
+                   fn ->
+                     with_mira(color: "gold")
+                   end
+    end
+
     test "refuse a time that is not HH:MM" do
       for at <- ["4:30", "04:30:00", "24:00", "04:60", "dawn", 16_200, nil] do
         assert_raise ArgumentError, ~r/^character "mira-vale": at must be "HH:MM", got /, fn ->
