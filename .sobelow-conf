@@ -8,16 +8,16 @@
 [
   exit: :low,
   format: "txt",
-  # No Phoenix endpoint yet: the MCP and telnet servers listen on 127.0.0.1
-  # only. Take this out when the web client (M2) adds a real endpoint.
+  # Config.HTTPS wants `force_ssl` on the endpoint. Nothing here terminates
+  # TLS: the web client, MCP and telnet listen on 127.0.0.1 only, and whatever
+  # makes any of them reachable from elsewhere puts TLS in front (see
+  # docs/m2-spec.md, 3.4). Forcing it would make loopback unusable.
   ignore: ["Config.HTTPS"],
   ignore_files: [],
   include_mix_tasks: false,
   include_scripts: false,
   out: nil,
   private: true,
-  # There is no Phoenix router to find.
-  router: :none,
   skip: true,
   summary: false,
   threshold: :low,

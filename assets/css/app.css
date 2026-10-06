@@ -1,0 +1,146 @@
+/* The web client's one stylesheet. Plain: the map is characters in a
+   monospace face, and the rest is text. */
+
+:root {
+  color-scheme: light dark;
+  --bg: #f7f4ec;
+  --fg: #231f1a;
+  --muted: #6b645a;
+  --line: #d9d2c3;
+  --accent: #8a4b1f;
+  --alert: #a3301f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17140f;
+    --fg: #ece5d6;
+    --muted: #a39a88;
+    --line: #3a3429;
+    --accent: #e0a060;
+    --alert: #ff8f7a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a {
+  color: var(--accent);
+}
+
+.page {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.75rem;
+}
+
+h2 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+h3 {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 1rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.lede,
+.tagline,
+.time,
+.where {
+  margin: 0.25rem 0;
+  color: var(--muted);
+}
+
+.world {
+  margin-top: 2rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+
+.bodies {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.body {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.body .name {
+  font-weight: 600;
+}
+
+.body.taken .name,
+.body .state {
+  color: var(--muted);
+}
+
+.body .description {
+  display: block;
+  color: var(--muted);
+}
+
+.notice {
+  margin: 1rem 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+}
+
+.notice.error {
+  border-color: var(--alert);
+  color: var(--alert);
+}
+
+.play header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.play header a {
+  margin-left: auto;
+}
+
+.arrival {
+  margin: 1rem 0;
+}
+
+.log {
+  margin: 1rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.log li {
+  padding: 0.15rem 0;
+  white-space: pre-line;
+}

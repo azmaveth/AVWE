@@ -30,6 +30,10 @@ defmodule Avwe.MixProject do
   # slower or need the network, so they are separate (see CLAUDE.md).
   defp aliases do
     [
+      setup: ["deps.get", "assets.setup", "assets.build"],
+      "assets.setup": ["esbuild.install --if-missing"],
+      "assets.build": ["esbuild avwe"],
+      "assets.deploy": ["esbuild avwe --minify"],
       lint: [
         "format --check-formatted",
         "deps.unlock --check-unused",
@@ -72,6 +76,12 @@ defmodule Avwe.MixProject do
     [
       {:yaml_elixir, "~> 2.12"},
       {:ex_mcp, "~> 1.5"},
+      {:phoenix, "~> 1.8"},
+      {:phoenix_html, "~> 4.3"},
+      {:phoenix_live_view, "~> 1.2"},
+      {:bandit, "~> 1.12"},
+      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
+      {:lazy_html, ">= 0.1.0", only: :test},
       {:stream_data, "~> 1.4", only: [:dev, :test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

@@ -15,7 +15,9 @@ defmodule Avwe.Application do
         {DynamicSupervisor, name: Avwe.Sessions, strategy: :one_for_one},
         {DynamicSupervisor, name: Avwe.Minds, strategy: :one_for_one},
         Avwe.MCP.Players,
-        {Task, &autostart/0}
+        {Task, &autostart/0},
+        {Phoenix.PubSub, name: AvweWeb.PubSub},
+        AvweWeb.Endpoint
       ] ++ telnet() ++ mcp()
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Avwe.Supervisor)

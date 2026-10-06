@@ -120,4 +120,29 @@ config :avwe, :worlds,
     ]
   ]
 
+# The web client (AvweWeb), on Bandit. Where it listens and its secret are
+# per environment. A page's socket is opened only from the origin the page
+# came from (`:conn`: same scheme, host and port as the request), and
+# AvweWeb.LoopbackHost keeps pages to loopback names.
+config :avwe, AvweWeb.Endpoint,
+  adapter: Bandit.PhoenixAdapter,
+  url: [host: "127.0.0.1"],
+  render_errors: [formats: [html: AvweWeb.ErrorHTML], layout: false],
+  pubsub_server: AvweWeb.PubSub,
+  live_view: [signing_salt: "m5Zk0cWq"],
+  check_origin: :conn
+
+config :phoenix, :json_library, Jason
+
+# One JavaScript file and one stylesheet, bundled from assets/ into
+# priv/static/assets/ (`mix assets.build`; the dev server rebuilds on change).
+config :esbuild,
+  version: "0.28.2",
+  avwe: [
+    args:
+      ~w(js/app.js css/app.css --bundle --target=es2022 --outdir=../priv/static/assets --entry-names=[name]),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => Path.expand("../deps", __DIR__)}
+  ]
+
 import_config "#{config_env()}.exs"
