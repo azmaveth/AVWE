@@ -43,7 +43,7 @@ defmodule Avwe.E2E.MCPScriptTest do
 
   test "plays a body across calls, and --leave lets go of it and ends the session", context do
     assert {0, out} = run(context, ["join", ~s({"body": "wren"})])
-    assert out =~ "You are Wren."
+    assert out =~ "You are Wren, at Hollow Green."
     session = saved(context)["session"]
     assert {:session, ^session} = Players.playing(@world)["wren"]
 

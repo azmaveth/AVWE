@@ -129,9 +129,19 @@ defmodule Avwe.E2E.MCPTest do
 
     failed = step_until_done(task, @world, "wren", 3)
     assert failed.data["status"] == "failed"
-    assert failed.text =~ ~r/^Failed: /
+    assert failed.text =~ ~r/^Failed\. It is /
+    assert failed.text =~ "The rest of the plan was dropped: stop."
     assert failed.text =~ ~r/^12:01 You don't know the way there\.$/m
     assert failed.data["plan"] == []
+    assert [%{"verb" => "stop"}] = failed.data["abandoned"]
+
+    # One action that fails drops nothing, and says nothing of a plan.
+    task = calling(client, @world, "wren", "act", %{"verb" => "go", "target" => "atlantis"})
+    alone = step_until_done(task, @world, "wren", 3)
+    assert alone.data["status"] == "failed"
+    assert alone.text =~ ~r/^Failed\. It is 1 AR, day 1, 12:0\d\.\n/
+    refute alone.text =~ "plan"
+    assert alone.data["abandoned"] == []
   end
 
   test "the MCP session ending (DELETE) gives the body back", %{port: port} do
@@ -165,7 +175,8 @@ defmodule Avwe.E2E.MCPTest do
     joined = call(modern, "join", %{"body" => "odo"})
     refute joined.error?
     assert "player-" <> _ = token = joined.data["player"]
-    assert joined.text =~ "Your player token is #{token}. Pass it as player to every other tool."
+    assert joined.text =~ "Your player token is #{token}. Pass it as player to every other tool"
+    assert joined.text =~ "a join without it makes you a new player"
 
     assert call(modern, "look").error?
     assert call(modern, "look", %{"player" => token}).text =~ "You are Odo"
@@ -306,6 +317,81 @@ defmodule Avwe.E2E.MCPTest do
     refute call(forger, "leave", %{"player" => token}).error?
   end
 
+  test "a client that names its session in the legacy X-Session-Id header is that session's player",
+       %{port: port} do
+    session = legacy_initialize(port)
+    header = [{"x-session-id", session}]
+
+    joined = legacy_call(port, "join", %{"body" => "wren"}, header)
+    refute joined["isError"]
+    assert {:session, ^session} = Players.playing(@world)["wren"]
+
+    # One session, one body: not a fresh token player per join.
+    again = legacy_call(port, "join", %{"body" => "pell"}, header)
+    assert again["isError"]
+    assert [%{"text" => "You already play Wren. Call leave first."}] = again["content"]
+    refute taken?("pell")
+
+    assert [%{"text" => look}] = legacy_call(port, "look", %{}, header)["content"]
+    assert look =~ "You are Wren, at Hollow Green."
+
+    assert http(port, :delete, "/mcp", headers: [{"mcp-session-id", session}]).status in 200..204
+    eventually(fn -> not taken?("wren") end)
+  end
+
+  test "a join whose Mind cannot be kept is let go: refused at registering, or with no first look",
+       %{port: port} do
+    # Three joins of one player at once all find it free; one registers,
+    # and the other two Minds are closed, giving their bodies back.
+    players = Process.whereis(Players)
+    :ok = :sys.suspend(players)
+
+    joins =
+      for body <- ["pell", "tamsin", "odo"] do
+        Task.async(fn -> {body, Players.join({:session, "one-player"}, @world, body)} end)
+      end
+
+    eventually(fn -> Process.info(players, :message_queue_len) |> elem(1) == 3 end)
+    :ok = :sys.resume(players)
+    results = Enum.map(joins, &Task.await/1)
+
+    assert [{won, {:ok, _mind}}] = Enum.filter(results, &match?({_body, {:ok, _mind}}, &1))
+    assert Enum.count(results, &match?({_body, {:error, :already_joined}}, &1)) == 2
+    eventually(fn -> Enum.all?(["pell", "tamsin", "odo"] -- [won], &(not taken?(&1))) end)
+    assert Players.playing(@world) == %{won => {:session, "one-player"}}
+    :ok = Players.leave({:session, "one-player"})
+
+    # A Mind that gives no first look (here it is held still, so the look
+    # times out) is let go again: the player is told and is not left joined.
+    other = connect(port)
+    minds = Process.whereis(Avwe.Minds)
+    :ok = :sys.suspend(minds)
+
+    try do
+      joining = Task.async(fn -> call(other, "join", %{"body" => "wren"}) end)
+      eventually(fn -> Process.info(minds, :message_queue_len) |> elem(1) > 0 end)
+      :ok = :sys.suspend(players)
+      :ok = :sys.resume(minds)
+      eventually(fn -> Process.info(players, :message_queue_len) |> elem(1) > 0 end)
+      [{_id, mind, _type, _modules} | _rest] = DynamicSupervisor.which_children(minds)
+      :ok = :sys.suspend(mind)
+      :ok = :sys.resume(players)
+
+      refused = Task.await(joining, 15_000)
+      assert refused.error?
+
+      assert refused.text ==
+               "The world did not answer in time, so you were not joined. Try again."
+
+      assert Players.playing(@world)["wren"] == nil
+      eventually(fn -> not Process.alive?(mind) end)
+      eventually(fn -> not taken?("wren") end)
+    after
+      _ = :sys.resume(minds)
+      _ = :sys.resume(players)
+    end
+  end
+
   test "an MCP player that stops calling lets go of its body after 15 minutes", %{client: client} do
     refute call(client, "join", %{"body" => "wren"}).error?
     assert Players.quit_after() == 15 * 60_000
@@ -332,7 +418,7 @@ defmodule Avwe.E2E.MCPTest do
 
       :ok = :sys.resume(region)
       assert %{error?: false, text: text} = Task.await(joining, 10_000)
-      assert text =~ "You are Pell."
+      assert text =~ "You are Pell, at"
     after
       _ = :sys.resume(region)
     end
@@ -363,7 +449,23 @@ defmodule Avwe.E2E.MCPTest do
        "A plan has at most 50 steps; this one has 51. Plan the first part, and the rest when it is done."},
       {"act",
        %{"steps" => [%{"verb" => "say", "params" => %{"text" => "Hi"}}, %{"verb" => "say"}]},
-       "Step 2: say needs text: what to say."}
+       "Step 2: say needs text: what to say."},
+      {"act", %{"verb" => "walk", "params" => %{"direction" => "up"}},
+       "walk needs a compass direction: north, north-east, east, south-east, south, " <>
+         "south-west, west or north-west."},
+      {"act", %{"verb" => "walk", "params" => %{"direction" => "NE", "distance_m" => 5000}},
+       "A walk is 10 to 2000 m (distance_m: 5000)."},
+      {"act", %{"verb" => "walk", "params" => %{"direction" => "n", "distance_m" => %{}}},
+       "A walk is 10 to 2000 m (distance_m: %{})."},
+      {"wait", %{"hours" => 1.0e308}, "A wait lasts at most a week (hours: 1.0e308)."},
+      {"wait", %{"minutes" => Integer.pow(10, 40)},
+       "A wait lasts at most a week (minutes given)."},
+      {"wait", %{"minutes" => 10_081}, "A wait lasts at most a week (minutes: 10081)."},
+      {"act", %{"verb" => "go", "target" => "  "}, "Name the place: the target is blank."},
+      {"act", %{"verb" => "kindle", "target" => "fire\npit"},
+       "A name is plain text on one line."},
+      {"act", %{"verb" => "go", "target" => String.duplicate("x", 201)},
+       "That place's name is too long."}
     ]
 
     for {tool, args, message} <- refusals do
@@ -415,6 +517,62 @@ defmodule Avwe.E2E.MCPTest do
     said = step_until_done(task, @world, "wren", 2)
     assert said.text =~ ~r/^\d\d:\d\d You shout, "Goodnight!"$/m
     expect(tamsin, ~s(Wren shouts, "Goodnight!"))
+  end
+
+  # An MCP session begun over raw HTTP, as a session-era client does.
+  defp legacy_initialize(port) do
+    body = %{
+      "jsonrpc" => "2.0",
+      "id" => 1,
+      "method" => "initialize",
+      "params" => %{
+        "protocolVersion" => "2025-06-18",
+        "capabilities" => %{},
+        "clientInfo" => %{"name" => "legacy", "version" => "1"}
+      }
+    }
+
+    response =
+      http(port, :post, "/mcp",
+        body: body,
+        headers: [{"accept", "application/json, text/event-stream"}]
+      )
+
+    assert response.status == 200
+    session = response.headers["mcp-session-id"]
+
+    initialized = %{"jsonrpc" => "2.0", "method" => "notifications/initialized"}
+
+    http(port, :post, "/mcp",
+      body: initialized,
+      headers: [
+        {"accept", "application/json, text/event-stream"},
+        {"mcp-protocol-version", "2025-06-18"},
+        {"x-session-id", session}
+      ]
+    )
+
+    session
+  end
+
+  # One session-era tools/call over raw HTTP, with extra headers.
+  defp legacy_call(port, tool, args, headers) do
+    body = %{
+      "jsonrpc" => "2.0",
+      "id" => System.unique_integer([:positive]),
+      "method" => "tools/call",
+      "params" => %{"name" => tool, "arguments" => args}
+    }
+
+    headers =
+      [
+        {"accept", "application/json, text/event-stream"},
+        {"mcp-protocol-version", "2025-06-18"}
+      ] ++ headers
+
+    response = http(port, :post, "/mcp", body: body, headers: headers)
+    assert response.status == 200
+    message(response)["result"]
   end
 
   # One MCP 2026-07-28 tools/call over raw HTTP, with extra headers.

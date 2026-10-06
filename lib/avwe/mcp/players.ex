@@ -42,14 +42,17 @@ defmodule Avwe.MCP.Players do
 
   @doc """
   Starts a Mind for the player `key` playing `body` in `world`
-  (`Avwe.Mind.start/3` with `controller: :mcp` and this server's
-  `quit_after`). Fails with `:already_joined` when the player plays a body
-  already, or as `Avwe.Mind.start/3` does.
+  (`Avwe.Mind.start/3` with `controller: :mcp`, this server's
+  `quit_after`, and `opts`, such as `:idle_after`). Fails with
+  `:already_joined` when the player plays a body already, or as
+  `Avwe.Mind.start/3` does.
   """
-  @spec join(key(), atom(), String.t()) :: {:ok, pid()} | {:error, term()}
-  def join({kind, id} = key, world, body) when kind in [:session, :token] and is_binary(id) do
+  @spec join(key(), atom(), String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
+  def join({kind, id} = key, world, body, opts \\ [])
+      when kind in [:session, :token] and is_binary(id) do
     with {:ok, quit_after} <- GenServer.call(__MODULE__, {:free, key}),
-         {:ok, mind} <- Mind.start(world, body, controller: :mcp, quit_after: quit_after) do
+         opts = Keyword.merge(opts, controller: :mcp, quit_after: quit_after),
+         {:ok, mind} <- Mind.start(world, body, opts) do
       register(key, mind, world, body)
     end
   end
@@ -92,9 +95,12 @@ defmodule Avwe.MCP.Players do
     :ok
   end
 
-  @doc "Real milliseconds without a call before a player's Mind ends."
+  @doc """
+  Real milliseconds without a call before a player's Mind ends. Read
+  without a call to the server (the instructions tell it on every request).
+  """
   @spec quit_after() :: pos_integer()
-  def quit_after, do: GenServer.call(__MODULE__, :quit_after)
+  def quit_after, do: :persistent_term.get({__MODULE__, :quit_after}, @quit_after)
 
   @doc "The players playing a body in `world`, as `%{body => key}`."
   @spec playing(atom()) :: %{String.t() => key()}
@@ -103,10 +109,13 @@ defmodule Avwe.MCP.Players do
   @impl true
   def init(opts) do
     sweep_ms = Keyword.get(opts, :sweep_ms, @sweep_ms)
+    quit_after = Keyword.get(opts, :quit_after, @quit_after)
     Process.send_after(self(), :sweep, sweep_ms)
 
-    {:ok,
-     %{players: %{}, sweep_ms: sweep_ms, quit_after: Keyword.get(opts, :quit_after, @quit_after)}}
+    if :persistent_term.get({__MODULE__, :quit_after}, nil) != quit_after,
+      do: :persistent_term.put({__MODULE__, :quit_after}, quit_after)
+
+    {:ok, %{players: %{}, sweep_ms: sweep_ms, quit_after: quit_after}}
   end
 
   @impl true
@@ -115,8 +124,6 @@ defmodule Avwe.MCP.Players do
       do: {:reply, {:error, :already_joined}, state},
       else: {:reply, {:ok, state.quit_after}, state}
   end
-
-  def handle_call(:quit_after, _from, state), do: {:reply, state.quit_after, state}
 
   def handle_call({:register, key, mind, world, body}, _from, state) do
     if Map.has_key?(state.players, key) do

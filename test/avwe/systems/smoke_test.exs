@@ -258,10 +258,12 @@ defmodule Avwe.Systems.SmokeTest do
       own = Enum.find(Perception.percepts(view, @mira, events), &(&1.type == :smoke_smelled))
       assert %{data: %{own_fire: true}, source: %{ref: @lodge, distance_m: 0}} = own
 
+      # Beside a fire someone else lit, the smoke is that fire's, not her own.
       theirs =
         Enum.find(Perception.percepts(view, "beside", events), &(&1.type == :smoke_smelled))
 
-      assert %{data: nil, source: nil} = theirs
+      assert %{data: nil, source: %{ref: @lodge}, summary: summary} = theirs
+      assert summary =~ ~r/^(Woodsmoke rises from|The smoke from) the lodge hearth beside you/
 
       # A douse and a stranger's kindling: the fire is not hers any more.
       {out, _events} = lit |> submit(:douse, target: @lodge) |> run(30)
@@ -271,6 +273,25 @@ defmodule Avwe.Systems.SmokeTest do
       assert [smell] = smelled(events, @mira)
       refute Map.has_key?(smell, :own_fire)
       assert [%{own_fire: @lodge}] = smelled(events, "beside")
+    end
+
+    test "her own fire's smoke, smelled beyond its reach downwind, is smoke on the wind", %{
+      region: region
+    } do
+      {x, y} = Ember.places().lodge
+      {lit, _events} = region |> submit(:kindle, target: @lodge) |> run(1)
+      assert Region.get(lit, @lodge, :hearth).lit_by == @mira
+
+      # 30 m downwind of her fire (the wind is from the north): beyond its
+      # reach, the smoke is the wind's, though she lit the fire.
+      away = Region.put_component(lit, @mira, :position, {x, y + 3})
+      away = Region.put_component(away, @mira, :nose, %{smoke: :none})
+      {_away, events} = run(away, 1)
+
+      assert [smell] = smelled(events, @mira)
+      refute Map.has_key?(smell, :own_fire)
+      refute Map.has_key?(smell, :beside)
+      assert %{from: "north"} = smell
     end
 
     test "100 m downwind the smell holds steady from minute to minute", %{region: region} do

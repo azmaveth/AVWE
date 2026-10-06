@@ -48,16 +48,20 @@ defmodule Avwe.E2E.FireTest do
     expect(mira, "You light the kiln-house hearth.")
     expect(watcher, "Mira Vale lights the kiln-house hearth.")
 
-    # The smoke is at its source, whatever the wind: at least on the wind.
+    # The smoke is at its source, whatever the wind: her fire's, beside her.
     expect(
       mira,
-      ~r/^(You smell woodsmoke on the wind from the south-west\.|The smoke is thick here\.)$/
+      ~r/^(Woodsmoke rises from|The smoke from) the kiln-house hearth beside you( is thick)?\.$/
     )
 
     send_line(mira, "look")
     expect(mira, "The kiln-house hearth is burning here.")
     expect(mira, "The fire's heat is on your face.")
-    expect(mira, ~r/^(Woodsmoke on the wind from the south-west\.|The smoke is thick here\.)$/)
+
+    expect(
+      mira,
+      ~r/^(Woodsmoke rises from the kiln-house hearth beside you\.|The smoke from the kiln-house hearth is thick\.)$/
+    )
 
     act(mira, "kindle")
     expect(mira, "It is already lit.")

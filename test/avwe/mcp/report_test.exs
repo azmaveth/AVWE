@@ -12,8 +12,43 @@ defmodule Avwe.MCP.ReportTest do
       percepts: Keyword.get(opts, :percepts, []),
       plan: Keyword.get(opts, :plan, []),
       action: Keyword.get(opts, :action),
+      abandoned: Keyword.get(opts, :abandoned, []),
+      problem: Keyword.get(opts, :problem),
       dropped: 0
     }
+  end
+
+  test "a failure says only that, unless it dropped steps of a plan, which it names" do
+    assert Report.text(report(:failed), @now) == "Failed. It is 813 AR, day 220, 09:00."
+
+    abandoned = [{:say, [params: %{text: "Here."}]}, {:go, [target_name: "the lodge"]}]
+    text = Report.text(report(:failed, abandoned: abandoned), @now)
+
+    assert text =~
+             "Failed. It is 813 AR, day 220, 09:00. The rest of the plan was dropped: say, go to the lodge."
+
+    assert [%{verb: :say}, %{verb: :go, target: "the lodge"}] =
+             Report.data(report(:failed, abandoned: abandoned), @now).abandoned
+  end
+
+  test "a step the Mind could not take is explained; an earlier plan's dropped steps are named" do
+    problem = {:ambiguous, "o", ["Far Tower", "Mill Pond"]}
+
+    text =
+      Report.text(report(:failed, problem: problem, abandoned: [{:go, [target_name: "o"]}]), @now)
+
+    assert text =~ ~s(Failed. "o" could mean Far Tower or Mill Pond; name it more fully.)
+
+    assert %{problem: %{ambiguous: "o", could_be: ["Far Tower", "Mill Pond"]}} =
+             Report.data(report(:failed, problem: problem), @now)
+
+    replaced = Report.text(report(:done, abandoned: [{:wait, [params: %{for: 600}]}]), @now)
+
+    assert replaced =~
+             "Done. It is 813 AR, day 220, 09:00. Dropped from your earlier plan: wait 10 minutes."
+
+    yielded = Report.text(report(:yielded, abandoned: [{:wait, [params: %{for: 600}]}]), @now)
+    assert yielded =~ "It still had: wait 10 minutes."
   end
 
   test "a yielded plan says the routine took the body back and the plan is over" do

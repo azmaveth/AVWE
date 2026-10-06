@@ -284,6 +284,19 @@ defmodule Avwe.MindTest do
       assert first != second
       assert List.last(summaries(report)) == ~s(You say, "hi")
     end
+
+    test "are random, not a count that starts again when the server does" do
+      wren = mind("wren")
+      plan = [{:wait, params: %{for: 60}}, {:wait, params: %{for: 60}}]
+      assert {:ok, %{status: :still_going}} = Mind.act(wren, plan, max_wait_ms: 0)
+      step(wren, 2)
+      assert {:ok, %{status: :done} = report} = Mind.percepts(wren)
+      assert [first, second] = for(%{kind: :result, intent: ref} <- report.percepts, do: ref)
+
+      assert first =~ ~r/^m-[A-Za-z0-9_-]{12}$/
+      assert second =~ ~r/^m-[A-Za-z0-9_-]{12}$/
+      assert first != second
+    end
   end
 
   describe "names" do
@@ -322,6 +335,24 @@ defmodule Avwe.MindTest do
       # Looking for itself kept the first look's news for the program.
       assert {:ok, %{away: away}} = Mind.look(pell)
       assert ~s(Tamsin shouts from the west, "Pell!") in Enum.map(away, & &1.summary)
+    end
+
+    test "a name that could mean more than one thing is not submitted" do
+      wren = mind("wren")
+
+      assert {:error, {:ambiguous, "o", ["Far Tower", "Hollow Green", "Mill Pond"]}} =
+               Mind.act(wren, {:go, target_name: "o"})
+
+      task = acting(wren, [{:wait, params: %{for: 60}}, {:go, target_name: "o"}, {:stop, []}])
+      step(wren, 2)
+
+      assert {:ok, %{status: :failed} = report} = Task.await(task)
+      assert report.problem == {:ambiguous, "o", ["Far Tower", "Hollow Green", "Mill Pond"]}
+      assert [{:go, _opts}, {:stop, []}] = report.abandoned
+      assert report.plan == []
+
+      # The next reply starts clean.
+      assert {:ok, %{problem: nil, abandoned: []}} = Mind.percepts(wren)
     end
 
     test "a name that resolves to nothing is the world's to refuse" do

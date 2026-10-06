@@ -29,12 +29,13 @@ defmodule Avwe.Perception do
   is at it. `fires` lists only the fires beyond the spot a body is at (more
   than 20 m off): a burning hearth within 20 m is what is here, and shows in
   `hearths`, not in `fires`. Only the body's own nose smells smoke
-  (`Avwe.Systems.Smoke.level_at/3`, the rule the smell percepts follow), and
-  the smell of a fire the body lit and stands beside is its own: the
-  percept's `source` is that hearth and its `data` is `%{own_fire: true}`;
-  the
-  snapshot's `fields` carry the heat and smoke, and without them `warmth`
-  and `smoke` are `nil`. Steam has one rule, the reach's flag
+  (`Avwe.Systems.Smoke.level_at/3`, the rule the smell percepts follow).
+  Smoke smelled at a fire (`Avwe.Systems.Smoke.beside/3`) is that fire's:
+  the percept's `source` is the hearth and its summary says the smoke
+  rises from it, and the look's `smoke` carries it as `beside: %{id,
+  name}`. The smell of a fire the body lit and stands beside is its own:
+  its `data` is `%{own_fire: true}`. The snapshot's `fields` carry the heat
+  and smoke, and without them `warmth` and `smoke` are `nil`. Steam has one rule, the reach's flag
   (`Avwe.Systems.Heat.steaming?/2`): `warmth.steam?` on a wet cell and
   `channel.steaming` for the river's prose both read it.
 
@@ -135,7 +136,7 @@ defmodule Avwe.Perception do
       ground: view[:terrain] && Terrain.ground(view.terrain, position),
       channel: channel,
       warmth: warmth(view, position),
-      smoke: smoke(view, position),
+      smoke: smoke(view, body, position),
       hearth: List.first(hearths),
       hearths: hearths,
       fires: fires_in_sight(view, position),
@@ -500,11 +501,12 @@ defmodule Avwe.Perception do
 
   defp own_issuer(_body, _data), do: nil
 
-  # Only the body's own nose smells smoke. The smoke of a fire it lit and
-  # stands beside says so: its source is that hearth, and `own_fire` is set.
+  # Only the body's own nose smells smoke. Smoke smelled at a fire says so:
+  # its source is that hearth, and `own_fire` is set when the body lit it.
   defp smell(view, body, %Event{entity: body, data: data} = event) when body != nil do
     level = Map.get(data, :level)
-    hearth = Map.get(data, :own_fire)
+    hearth = Map.get(data, :beside) || Map.get(data, :own_fire)
+    beside = hearth && name(view, hearth)
 
     [
       %Percept{
@@ -515,8 +517,8 @@ defmodule Avwe.Perception do
         modality: :smell,
         source: hearth && fire_source(view, body, hearth),
         salience: Map.get(@smell_salience, level, 0.5),
-        summary: Prose.smell(event.type, level, Map.get(data, :from)),
-        data: hearth && %{own_fire: true}
+        summary: Prose.smell(event.type, level, Map.get(data, :from), beside),
+        data: if(Map.has_key?(data, :own_fire), do: %{own_fire: true})
       }
     ]
   end
@@ -616,14 +618,21 @@ defmodule Avwe.Perception do
     end
   end
 
-  defp smoke(%{fields: %{smoke: _field}} = view, position) do
+  defp smoke(%{fields: %{smoke: _field}} = view, body, position) do
     case Smoke.level_at(view, position, view.time) do
       :none -> nil
-      level -> %{level: level, from: wind(view).from}
+      level -> beside(%{level: level, from: wind(view).from}, view, body, position)
     end
   end
 
-  defp smoke(_view, _position), do: nil
+  defp smoke(_view, _body, _position), do: nil
+
+  defp beside(smoke, view, body, position) do
+    case Smoke.beside(view, body, position) do
+      {hearth, _own?} -> Map.put(smoke, :beside, %{id: hearth, name: name(view, hearth)})
+      nil -> smoke
+    end
+  end
 
   defp wind(view), do: Map.get(view.env, :wind, Smoke.default_wind())
 

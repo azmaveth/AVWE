@@ -39,7 +39,8 @@ defmodule Avwe.E2E.MCPJourneyTest do
 
     joined = call(first, "join", %{"body" => "Mira"})
     refute joined.error?
-    assert joined.text =~ "You are Mira Vale."
+    assert joined.text =~ "You are Mira Vale, at"
+    refute joined.text =~ "You are Mira Vale.\n"
     assert joined.data["body"] == "mira-vale"
 
     look = call(first, "look")
@@ -90,6 +91,9 @@ defmodule Avwe.E2E.MCPJourneyTest do
     # Her routine took her home from the bend.
     assert Enum.any?(away_lines, &(&1 =~ ~r/^  \d\d:\d\d You arrive at Ember Reach\.$/))
     assert rejoined.data["away"] != []
+
+    for entry <- rejoined.data["away"],
+        do: assert(%{"time" => <<_hh::binary-2, ":", _mm::binary-2>>, "summary" => _} = entry)
 
     read = acted(second, "read", %{})
     assert read.data["status"] == "done"
@@ -151,7 +155,7 @@ defmodule Avwe.E2E.MCPJourneyTest do
     assert Enum.any?(
              lines,
              &(&1 =~
-                 ~r/^  813 AR, day 220, \d\d:\d\d: The bend is dry\. 813 AR, day 1, 00:00: The Source is a lie\. \[2JDone\.$/)
+                 ~r/^  813 AR, day 220, \d\d:\d\d: The bend is dry\. 813 AR, day 1, 00:00: The Source is a lie\. Done\.$/)
            )
 
     refute read.text =~ "\e"

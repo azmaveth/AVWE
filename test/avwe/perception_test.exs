@@ -506,7 +506,7 @@ defmodule Avwe.PerceptionTest do
       assert Prose.look(faint) =~ "Woodsmoke, faint, from the south-west."
     end
 
-    test "at a hearth that smoked this step the smoke is at least on the wind" do
+    test "at a hearth that smoked this step the smoke is at least clear, and it is that hearth's" do
       {x, y} = town = Ember.places().town
 
       smoked = %{Fire.zero_step() | burn_s: 60.0, burned_kg: 0.01875, smoke_g: 0.1875}
@@ -516,8 +516,14 @@ defmodule Avwe.PerceptionTest do
 
       # No puff in the air at all: the rule alone says the smoke is here.
       at_hearth = Perception.look(with_smoke(view, {x, y - 20}, 0.0), @mira)
-      assert at_hearth.smoke == %{level: :clear, from: "south-west"}
-      assert Prose.look(at_hearth) =~ "Woodsmoke on the wind from the south-west."
+
+      assert at_hearth.smoke == %{
+               level: :clear,
+               from: "south-west",
+               beside: %{id: @town, name: "the kiln-house hearth"}
+             }
+
+      assert Prose.look(at_hearth) =~ "Woodsmoke rises from the kiln-house hearth beside you."
 
       # A thick puff on the spot is still thick; two cells off, the rule is silent.
       thick = Perception.look(with_smoke(view, town, 0.1875), @mira)

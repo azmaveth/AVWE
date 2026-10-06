@@ -51,7 +51,7 @@ defmodule Avwe.E2E.SmokeTest do
 
     send_line(wren, "look")
     expect(wren, "The bonfire on the green is burning here.")
-    expect(wren, "The smoke is thick here.")
+    expect(wren, "The smoke from the bonfire on the green is thick.")
 
     Avwe.step(@world, 6)
     expect(tamsin, "You smell woodsmoke, faint, from the north.")

@@ -141,7 +141,7 @@ defmodule Avwe.E2E.PersistenceTest do
     Avwe.step(@world, 1)
     lit = percepts(mira)
     assert "You light the kiln-house hearth." in Enum.map(lit, & &1.summary)
-    assert smells(lit) == ["You smell woodsmoke on the wind from the south-west."]
+    assert smells(lit) == ["Woodsmoke rises from the kiln-house hearth beside you."]
     Avwe.step(@world, 2)
     {:ok, _ref} = Session.act(mira, :douse)
     Avwe.step(@world, 1)
@@ -177,7 +177,7 @@ defmodule Avwe.E2E.PersistenceTest do
     Avwe.step(@world, steps)
     lit = percepts(mira)
     assert "You light the kiln-house hearth." in Enum.map(lit, & &1.summary)
-    assert smells(lit) == ["You smell woodsmoke on the wind from the south-west."]
+    assert smells(lit) == ["Woodsmoke rises from the kiln-house hearth beside you."]
     mira
   end
 

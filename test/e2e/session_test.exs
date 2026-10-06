@@ -210,12 +210,12 @@ defmodule Avwe.E2E.SessionTest do
       wren_percepts = percepts(wren)
       assert [%Percept{intent: ^ref, outcome: :success, summary: nil}] = results(wren_percepts)
 
-      # At the fire the smoke is at its source: at least on the wind.
+      # At the fire the smoke is at its source: the fire's, beside her.
       assert Enum.any?(
                wren_percepts,
                &(&1.type == :smoke_smelled and
                    &1.summary =~
-                     ~r/^(You smell woodsmoke on the wind from the north\.|The smoke is thick here\.)$/)
+                     ~r/^(Woodsmoke rises from|The smoke from) the fire pit on the green beside you( is thick)?\.$/)
              )
 
       assert [%Percept{kind: :sensed, type: :smoke_smelled, modality: :smell, summary: smelled}] =
@@ -269,7 +269,7 @@ defmodule Avwe.E2E.SessionTest do
                  intent: ^unknown,
                  outcome: :blocked,
                  reason: :no_such_hearth,
-                 summary: "There is no such hearth."
+                 summary: "You find no hearth by that name within reach."
                }
              ] = wren |> percepts() |> results()
 

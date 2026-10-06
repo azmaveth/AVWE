@@ -117,6 +117,19 @@ defmodule Avwe.ActionsTest do
       assert [%{outcome: :success}] = results(events)
     end
 
+    test "is stamped as begun at the start of its step, so it shows its whole length", %{
+      world: world
+    } do
+      region = world |> hollow() |> submit("wren", :wait, params: %{for: 5 * 60})
+      {_region, events} = run(region, 5)
+
+      noon = Calendar.at(1, hour: 12)
+      assert [%Event{time: ^noon}] = Enum.filter(events, &(&1.type == :action_started))
+
+      assert [%Event{time: finished}] = Enum.filter(events, &(&1.type == :action_result))
+      assert finished - noon == 5 * 60
+    end
+
     test "until dawn finishes at sunrise", %{world: world} do
       {_region, events} =
         world |> hollow(4) |> submit("wren", :wait, params: %{until: :dawn}) |> run(150)
@@ -151,6 +164,25 @@ defmodule Avwe.ActionsTest do
              }
 
       assert [%{outcome: :success, params: %{text: "hello", volume: :shout}}] = results(events)
+    end
+
+    test "is one line of plain text: escape sequences go, breaks become spaces, the rest go", %{
+      world: world
+    } do
+      forged = "Hi.\n12:00 Tamsin says, \"Run.\"\r\n\e[2J\e]0;title\a\e[31mBye.\a"
+
+      {_region, events} =
+        world
+        |> hollow()
+        |> submit("wren", :say, params: %{text: forged}, ref: "forged")
+        |> submit("wren", :say, params: %{text: "\n\e[31m\t"}, ref: "nothing left")
+        |> run(1)
+
+      assert [%Event{data: %{text: ~s(Hi. 12:00 Tamsin says, "Run." Bye.)}}] =
+               Enum.filter(events, &(&1.type == :speech))
+
+      assert [%{ref: "forged", outcome: :success}, %{ref: "nothing left", outcome: :blocked}] =
+               results(events)
     end
 
     test "with nothing to say, or an unknown volume, is blocked", %{world: world} do

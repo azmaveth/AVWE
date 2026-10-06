@@ -132,6 +132,22 @@ defmodule Avwe.MCP.StepsTest do
              "Step 2: say needs text: what to say."
   end
 
+  test "a walk goes a compass direction, 100 m unless told, whole metres" do
+    walk = &Steps.parse(%{"verb" => "walk", "params" => &1})
+
+    assert {:ok, [{:walk, [params: %{direction: "south-west", distance_m: 100}]}]} =
+             walk.(%{"direction" => "South West"})
+
+    assert {:ok, [{:walk, [params: %{direction: "east", distance_m: 251}]}]} =
+             walk.(%{"direction" => "e", "meters" => 250.6})
+
+    assert {:error, "walk needs a compass direction: " <> _} = walk.(%{"direction" => "upstream"})
+    assert {:error, "walk needs a compass direction: " <> _} = walk.(%{})
+
+    assert {:error, "A walk is 10 to 2000 m (distance_m: 9)."} =
+             walk.(%{"direction" => "n", "distance_m" => 9})
+  end
+
   test "a wait in hours, or exactly a minute, passes" do
     assert {:ok, [{:wait, [params: %{for: 5_400}]}]} =
              Steps.parse(%{"verb" => "wait", "params" => %{"hours" => 1.5}})

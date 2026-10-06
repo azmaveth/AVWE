@@ -6,7 +6,9 @@ defmodule Avwe.MCP do
 
   Enable it with `config :avwe, :mcp, port: 4041` (and `world:`, default
   `:ember_reach`), or start it yourself with `{Avwe.MCP, port: 0, world:
-  id, ref: name}` and ask `port/1` where it listens. The endpoint is
+  id, ref: name}` and ask `port/1` where it listens. `idle_after` (real
+  ms) sets how long its players' bodies stay in hand without a call before
+  their routine takes them (`Avwe.Session`'s idle rule; default its own). The endpoint is
   `http://127.0.0.1:4041/mcp` (on whatever port it was given); a GET there
   answers 405, as the server offers no stream to listen on.
 
@@ -18,9 +20,12 @@ defmodule Avwe.MCP do
   ending, by DELETE or expiry, ends the Mind and gives the body back
   (`Avwe.MCP.Players`, `Avwe.MCP.Sessions`).
 
+  ExMCP also takes the session id from the legacy `X-Session-Id` header
+  (and refuses a request whose two headers disagree), so AVWE reads either.
+
   MCP 2026-07-28 has no protocol session: every request stands alone, and
-  an `Mcp-Session-Id` header on such a request is ignored (ExMCP does not
-  check it there, so it names nobody). A client of that revision is given
+  a session id header on such a request is ignored (ExMCP does not check
+  it there, so it names nobody). A client of that revision is given
   a `player` token by `join`, and passes it to every other tool; its Mind
   ends when it leaves, or after its `quit_after` without a call (15 real
   minutes by default, `Avwe.MCP.Players`), so an abandoned player frees
@@ -29,7 +34,9 @@ defmodule Avwe.MCP do
   who still plays is refused rather than taking a second body, and one
   that passes a token that plays nobody (it left, its Mind ended, or it
   was never given) is refused too, so no client chooses its own token. A
-  join without a token cannot be told from a new player's, so it is one.
+  join without a token cannot be told from a new player's, so it is one:
+  the join text and the instructions warn that a client which loses its
+  token takes a second body, and the first stays held until `quit_after`.
 
   Each request runs in its own short-lived handler process (ExMCP's way),
   so nothing here keeps state between calls: the Minds live in
@@ -76,6 +83,10 @@ defmodule Avwe.MCP do
     and then tells you how things stand: done, failed, interrupted (something \
     worth your attention; your action goes on) or still going. Call `listen` \
     to hear what happened since.
+    - A plan (`act` with steps) runs on between your calls. A new `act` (or \
+    `say`, `wait`, `write`, `read`) replaces the steps of a plan not yet \
+    begun; the reply names what was dropped. Saying, writing and reading do \
+    not end a walk or a wait under way; a new walk or wait does.
     - You perceive only what is near you: what you see, hear and smell.
     - Your notebook is your memory across sessions. Write down what you learn \
     (`write`), and read it when you return (`read`). When you join, you are \
@@ -85,6 +96,10 @@ defmodule Avwe.MCP do
     - If you stop calling for a while, your body goes back to its routine \
     until you act again. After #{minutes(Players.quit_after())} without a call you let go of \
     it altogether, and must join again. Call `leave` when you are done.
+    - If `join` gives you a player token (clients without an MCP session), \
+    keep it and pass it as player to every other tool. Joining again without \
+    it makes you a new player: the body you had stays held, by nobody, until \
+    you leave with the token or #{minutes(Players.quit_after())} pass.
     """
   end
 
@@ -117,7 +132,12 @@ defmodule Avwe.MCP do
   @doc "Starts the server under a supervisor: `port`, `world`, `ref`."
   def child_spec(opts) do
     ref = Keyword.get(opts, :ref, __MODULE__)
-    config = %{world: Keyword.get(opts, :world, :ember_reach)}
+
+    config = %{
+      world: Keyword.get(opts, :world, :ember_reach),
+      idle_after: Keyword.get(opts, :idle_after)
+    }
+
     port = opts |> Keyword.get(:port, 4041) |> free_port()
 
     plug_opts = [
@@ -163,12 +183,23 @@ defmodule Avwe.MCP do
   # 2026-07-28, told the way ExMCP tells it) has none, whatever its headers.
   def handler_opts(conn, request, config) do
     session =
-      case {modern?(conn, request), Plug.Conn.get_req_header(conn, "mcp-session-id")} do
-        {false, [id | _]} -> id
-        _modern_or_none -> nil
+      case {modern?(conn, request), session_header(conn)} do
+        {false, id} -> id
+        {true, _ignored} -> nil
       end
 
     Map.put(config, :session, session)
+  end
+
+  # The session id as ExMCP reads it: `Mcp-Session-Id`, or the legacy
+  # `X-Session-Id` (ExMCP has refused the request if they disagree).
+  defp session_header(conn) do
+    Enum.find_value(["mcp-session-id", "x-session-id"], fn header ->
+      case Plug.Conn.get_req_header(conn, header) do
+        [id | _] -> id
+        [] -> nil
+      end
+    end)
   end
 
   defp modern?(conn, request) do
@@ -193,7 +224,7 @@ defmodule Avwe.MCP do
 
   @impl GenServer
   def init(config) when is_map(config), do: {:ok, config}
-  def init(_other), do: {:ok, %{world: :ember_reach, session: nil}}
+  def init(_other), do: {:ok, %{world: :ember_reach, idle_after: nil, session: nil}}
 
   @impl ExMCP.Server.Handler
   def handle_initialize(params, state) do
@@ -299,23 +330,17 @@ defmodule Avwe.MCP do
     with {:ok, key} <- join_key(state),
          {:ok, bodies} <- Avwe.bodies(state.world),
          {:ok, id} <- resolve_body(query, bodies),
-         {:ok, mind} <- Players.join(key, state.world, id),
+         {:ok, mind} <- Players.join(key, state.world, id, mind_opts(state)),
          {:ok, look} <- first_look(key, mind) do
-      name = Enum.find(bodies, &(&1.id == id)).name
       token = token(key)
 
       # The look was taken as the body was being taken: the player has it
       # now, whatever the snapshot it was read from says, but "While you
       # were away" is that snapshot's.
       look = %{look | holder: :mcp}
-
-      text =
-        Enum.join(
-          Enum.reject([token_line(token), "You are #{name}.", Prose.look(look)], &is_nil/1),
-          "\n"
-        )
-
-      data = %{body: id, player: token, look: Report.look(look), away: Report.jsonable(look.away)}
+      text = Enum.join(Enum.reject([token_line(token), Prose.look(look)], &is_nil/1), "\n")
+      away = Enum.map(look.away, &%{&1 | time: Prose.stamp(&1.time, look.time)})
+      data = %{body: id, player: token, look: Report.look(look), away: Report.jsonable(away)}
       result(text, data)
     else
       {:error, :not_found} ->
@@ -348,6 +373,11 @@ defmodule Avwe.MCP do
         error(message)
     end
   end
+
+  defp mind_opts(%{idle_after: idle_after}) when is_integer(idle_after),
+    do: [idle_after: idle_after]
+
+  defp mind_opts(_state), do: []
 
   # A session is its own key. A token passed in must be one that still
   # plays (and then joining again is refused); without one, a fresh token.
@@ -385,8 +415,11 @@ defmodule Avwe.MCP do
 
   defp token_line(nil), do: nil
 
-  defp token_line(token),
-    do: "Your player token is #{token}. Pass it as player to every other tool."
+  defp token_line(token) do
+    "Your player token is #{token}. Pass it as player to every other tool, and keep it: " <>
+      "a join without it makes you a new player, and this body stays held until you " <>
+      "leave with it or #{minutes(Players.quit_after())} pass."
+  end
 
   defp already_joined(state) do
     case Players.mind(state.player) do
@@ -442,10 +475,14 @@ defmodule Avwe.MCP do
     else
       {:error, :session_closed} -> error(not_joined())
       {:error, :invalid_plan} -> error("That is not a plan: give a verb, or a list of steps.")
+      {:error, {:ambiguous, query, names}} -> error(ambiguous(query, names))
       {:error, reason} when is_atom(reason) -> error("That can't be done (#{reason}).")
       {:error, message} -> error(message)
     end
   end
+
+  defp ambiguous(query, names),
+    do: "\"#{query}\" could mean #{Report.or_list(names)}. Name it more fully; nothing was done."
 
   defp act_opts(args) do
     interrupt_at = Map.get(args, "interrupt_at")
@@ -589,7 +626,9 @@ defmodule Avwe.MCP do
           "max_wait_seconds of real time) until the plan is done, a step fails, something " <>
           "needs your attention (interrupted; your action goes on), or the time is up (still " <>
           "going; it goes on). Returns the status and what you perceived, one line each " <>
-          "with its world time. Give either verb (with target and params) or steps.",
+          "with its world time. Give either verb (with target and params) or steps. A new " <>
+          "act replaces any steps of an earlier plan not yet begun (the reply names them); " <>
+          "say, write and read do not end a walk or wait under way.",
         Map.merge(@step_properties, %{
           steps: %{
             type: "array",

@@ -399,9 +399,9 @@ defmodule Avwe.AutopilotTest do
       events = events(trace)
       day_two = region.time + @day
 
-      # Decided on the minute of the entry's occurrence, off the next minute.
-      expected =
-        day_number(region) * @day + @day + 4 * 3600 + 30 * 60 + jitter(region, day_two) + 60
+      # Decided on the minute of the entry's occurrence, and off at once: a
+      # departure is stamped when the go begins, at the start of the next step.
+      expected = day_number(region) * @day + @day + 4 * 3600 + 30 * 60 + jitter(region, day_two)
 
       [left | _later] =
         for %Event{type: :departed, entity: @mira, time: time} <- events,
@@ -742,7 +742,7 @@ defmodule Avwe.AutopilotTest do
 
       day_start = day_number(held) * @day
       [left] = for %Event{type: :departed, entity: @mira, time: time} <- events, do: time
-      assert left == day_start + 8 * 3600 + jitter(held, held.time) + 60
+      assert left == day_start + 8 * 3600 + jitter(held, held.time)
     end
 
     test "given back at 07:30, too late for the walk, she waits for the survey" do
@@ -758,7 +758,7 @@ defmodule Avwe.AutopilotTest do
 
       day_start = day_number(held) * @day
       [left] = for %Event{type: :departed, entity: @mira, time: time} <- events, do: time
-      assert left == day_start + 8 * 3600 + jitter(held, held.time) + 60
+      assert left == day_start + 8 * 3600 + jitter(held, held.time)
     end
 
     test "released at 17:00, the survey's wait is long over: she comes home, and the lodge entry runs on time" do
@@ -774,7 +774,7 @@ defmodule Avwe.AutopilotTest do
 
       day_start = day_number(held) * @day
       [_home, lodge] = for %Event{type: :departed, entity: @mira, time: time} <- events, do: time
-      assert lodge == day_start + 18 * 3600 + jitter(held, held.time) + 60
+      assert lodge == day_start + 18 * 3600 + jitter(held, held.time)
       assert [_home] = arrivals(events, "ember-reach")
       refute Enum.any?(decided(events), &(&1.why in [:plan_abandoned, :missed]))
     end

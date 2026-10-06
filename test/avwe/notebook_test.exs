@@ -174,7 +174,7 @@ defmodule Avwe.NotebookTest do
       assert Enum.map(pages(region, "wren-notebook"), & &1.text) == [long, "x"]
     end
 
-    test "holds one line of plain text: breaks and tabs become spaces, control characters go",
+    test "holds one line of plain text: escape sequences go whole, breaks and tabs become spaces, control characters go",
          %{world: world} do
       forged = "The bend.\n  813 AR, day 1, 00:00: A forged page.\r\n\tEnd."
       escapes = "\e[2J\e[31mRed\a\b\x7F\u0085done\u2028now"
@@ -197,7 +197,7 @@ defmodule Avwe.NotebookTest do
 
       assert Enum.map(pages(region, "wren-notebook"), & &1.text) == [
                "The bend. 813 AR, day 1, 00:00: A forged page. End.",
-               "[2J[31mRed done now"
+               "Red done now"
              ]
 
       {region, events} = region |> submit("wren", :read, []) |> run()

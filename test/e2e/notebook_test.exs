@@ -105,7 +105,7 @@ defmodule Avwe.E2E.NotebookTest do
     Avwe.step(@world, 1)
     expect(mira, "You read your survey notebook (1 of 1 page):")
     [page] = expect(mira, ~r/^  813 AR, day 220, 04:01: /) |> Enum.take(-1)
-    assert page == "  813 AR, day 220, 04:01: The bend. Dry.[2J[31m Red?"
+    assert page == "  813 AR, day 220, 04:01: The bend. Dry. Red?"
   end
 
   test "joining tells what the body did while nobody held it", %{port: port} do

@@ -92,8 +92,10 @@ defmodule Avwe.Prose do
   def result(:kindle, :blocked, :no_hearth, _target, _params), do: "There is no hearth here."
   def result(:douse, :blocked, :no_hearth, _target, _params), do: "There is no hearth here."
 
+  # The target was not a hearth's id: a name that matched no hearth in reach
+  # or in sight, or something that is not a hearth.
   def result(verb, :blocked, :no_such_hearth, _target, _params) when verb in [:kindle, :douse],
-    do: "There is no such hearth."
+    do: "You find no hearth by that name within reach."
 
   def result(verb, :blocked, :too_far, _target, _params) when verb in [:kindle, :douse],
     do: "You are not close enough."
@@ -213,12 +215,29 @@ defmodule Avwe.Prose do
   def steam(:steam_fading, near),
     do: "The steam over the banks near #{near} thins and is gone."
 
-  @doc "The body's nose caught woodsmoke on the wind, or lost it."
-  @spec smell(:smoke_smelled | :smoke_faded, atom() | nil, String.t() | nil) :: String.t()
-  def smell(:smoke_smelled, :faint, from), do: "You smell woodsmoke, faint, from the #{from}."
-  def smell(:smoke_smelled, :clear, from), do: "You smell woodsmoke on the wind from the #{from}."
-  def smell(:smoke_smelled, :thick, _from), do: "The smoke is thick here."
-  def smell(:smoke_faded, _level, _from), do: "The smell of smoke fades."
+  @doc """
+  The body's nose caught woodsmoke on the wind, or lost it. `beside`, the
+  name of a fire the body stands at, says where the smoke comes from
+  instead of the wind.
+  """
+  @spec smell(:smoke_smelled | :smoke_faded, atom() | nil, String.t() | nil, String.t() | nil) ::
+          String.t()
+  def smell(type, level, from, beside \\ nil)
+
+  def smell(:smoke_smelled, :thick, _from, beside) when is_binary(beside),
+    do: "The smoke from #{beside} beside you is thick."
+
+  def smell(:smoke_smelled, _level, _from, beside) when is_binary(beside),
+    do: "Woodsmoke rises from #{beside} beside you."
+
+  def smell(:smoke_smelled, :faint, from, _beside),
+    do: "You smell woodsmoke, faint, from the #{from}."
+
+  def smell(:smoke_smelled, :clear, from, _beside),
+    do: "You smell woodsmoke on the wind from the #{from}."
+
+  def smell(:smoke_smelled, :thick, _from, _beside), do: "The smoke is thick here."
+  def smell(:smoke_faded, _level, _from, _beside), do: "The smell of smoke fades."
 
   @doc "Describes a look (`Avwe.Perception.look/2`) as a few lines of text."
   @spec look(map()) :: String.t()
@@ -401,6 +420,8 @@ defmodule Avwe.Prose do
     do: "A glow shows at #{fire.name}, #{fire.distance_m} m to the #{fire.direction}."
 
   defp smoke(nil), do: nil
+  defp smoke(%{level: :thick, beside: %{name: name}}), do: "The smoke from #{name} is thick."
+  defp smoke(%{beside: %{name: name}}), do: "Woodsmoke rises from #{name} beside you."
   defp smoke(%{level: :faint, from: from}), do: "Woodsmoke, faint, from the #{from}."
   defp smoke(%{level: :clear, from: from}), do: "Woodsmoke on the wind from the #{from}."
   defp smoke(%{level: :thick}), do: "The smoke is thick here."

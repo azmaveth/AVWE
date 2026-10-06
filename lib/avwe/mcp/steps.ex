@@ -13,11 +13,13 @@ defmodule Avwe.MCP.Steps do
 
   Everything that can be checked without the world is checked here, before
   anything is submitted, and refused in plain words: a plan has at most
-  50 steps; `say` and `write` need their text; a volume, a moment to
-  wait until and a direction to follow come from fixed lists (and only
-  those become atoms); a wait takes exactly one of `minutes`, `hours`,
-  `for` (seconds) and `until`, and lasts from a minute to a week; `read`
-  takes from 1 to 50 pages. The world still has the last word on the rest.
+  50 steps; a target is a name of 1 to 200 characters; `say` and `write`
+  need their text; a volume, a moment to wait until, a direction to follow
+  and a compass direction to walk come from fixed lists (and only those
+  become atoms); a walk is 10 to 2000 m (100 when not given); a wait takes
+  exactly one of `minutes`, `hours`, `for` (seconds) and `until`, and lasts
+  from a minute to a week; `read` takes from 1 to 50 pages. The world
+  still has the last word on the rest.
   """
 
   @verbs ~w(go follow walk wait say stop kindle douse write read)
@@ -25,8 +27,10 @@ defmodule Avwe.MCP.Steps do
   @max_speech 500
   @max_page 1_000
   @max_read 50
+  @max_name 200
   @min_wait 60
   @max_wait 7 * 86_400
+  @walk_m 10..2_000
   @volumes %{"whisper" => :whisper, "talk" => :talk, "say" => :talk, "shout" => :shout}
   @moments %{"dawn" => :dawn, "sunrise" => :dawn, "dusk" => :dusk, "sunset" => :dusk}
   @flows %{
@@ -135,7 +139,15 @@ defmodule Avwe.MCP.Steps do
   defp target(verb, query) when verb in [:write, :read], do: name(query, "notebook")
   defp target(_verb, _query), do: {:ok, nil}
 
-  defp name(query, _kind) when is_binary(query), do: {:ok, query}
+  defp name(query, kind) when is_binary(query) do
+    cond do
+      String.trim(query) == "" -> {:error, "Name the #{kind}: the target is blank."}
+      query =~ ~r/[\x{0}-\x{1F}\x{7F}-\x{9F}]/u -> {:error, "A name is plain text on one line."}
+      String.length(query) > @max_name -> {:error, "That #{kind}'s name is too long."}
+      true -> {:ok, query}
+    end
+  end
+
   defp name(_query, kind), do: {:error, "The #{kind} must be named with a string."}
 
   # Parameters
@@ -186,20 +198,9 @@ defmodule Avwe.MCP.Steps do
   end
 
   defp params(:walk, params, _target) do
-    direction = params["direction"]
-
-    direction =
-      if is_binary(direction),
-        do:
-          Map.get(
-            @compass,
-            direction |> String.downcase() |> String.replace(~r/[\s-]/, ""),
-            direction
-          ),
-        else: direction
-
-    distance = params["distance_m"] || params["meters"]
-    {:ok, Map.reject(%{direction: direction, distance_m: distance}, fn {_k, v} -> is_nil(v) end)}
+    with {:ok, direction} <- compass(params["direction"]),
+         {:ok, meters} <- meters(params["distance_m"] || params["meters"] || 100),
+         do: {:ok, %{direction: direction, distance_m: meters}}
   end
 
   defp params(:read, params, _target) do
@@ -238,15 +239,43 @@ defmodule Avwe.MCP.Steps do
       else: {:error, "#{field} must be #{listed}, not #{inspect(value)}."}
   end
 
-  defp wait_for(n, key, unit) when is_number(n) do
-    seconds = round(n * unit)
+  defp compass(direction) when is_binary(direction) do
+    key = direction |> String.downcase() |> String.replace(~r/[\s-]/, "")
 
+    case Map.fetch(@compass, key) do
+      {:ok, direction} -> {:ok, direction}
+      :error -> compass(nil)
+    end
+  end
+
+  defp compass(_direction),
+    do:
+      {:error,
+       "walk needs a compass direction: north, north-east, east, south-east, south, " <>
+         "south-west, west or north-west."}
+
+  defp meters(meters)
+       when is_number(meters) and meters >= @walk_m.first and meters <= @walk_m.last,
+       do: {:ok, round(meters)}
+
+  defp meters(meters),
+    do: {:error, "A walk is #{@walk_m.first} to #{@walk_m.last} m#{given("distance_m", meters)}."}
+
+  # The range is checked before multiplying, so a huge number is refused
+  # rather than overflowing.
+  defp wait_for(n, key, unit) when is_number(n) do
     cond do
-      seconds < @min_wait -> {:error, "A wait lasts at least a minute (#{key}: #{n})."}
-      seconds > @max_wait -> {:error, "A wait lasts at most a week (#{key}: #{n})."}
-      true -> {:ok, %{for: seconds}}
+      n > @max_wait / unit -> {:error, "A wait lasts at most a week#{given(key, n)}."}
+      round(n * unit) < @min_wait -> {:error, "A wait lasts at least a minute#{given(key, n)}."}
+      true -> {:ok, %{for: round(n * unit)}}
     end
   end
 
   defp wait_for(n, key, _unit), do: {:error, "#{key} must be a number, not #{inspect(n)}."}
+
+  # What the player gave, to repeat in a refusal, unless it is too long.
+  defp given(key, value) do
+    text = if is_number(value), do: to_string(value), else: inspect(value)
+    if String.length(text) > 24, do: " (#{key} given)", else: " (#{key}: #{text})"
+  end
 end

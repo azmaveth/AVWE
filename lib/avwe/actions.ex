@@ -23,10 +23,18 @@ defmodule Avwe.Actions do
   Writing and reading act on a notebook the body carries (an item entity
   with `:notebook` and `carried_by`): the one named, or the first by id
   when the intent names none. A page is stamped with the end of the step
-  it was written in, the time its result reports, and holds one line of
-  plain text: line breaks and tabs become single spaces and other control
-  characters are dropped. A read's result carries the pages it read, so
-  the reader is told them in the same step.
+  it was written in, the time its result reports. A read's result carries
+  the pages it read, so the reader is told them in the same step.
+
+  Speech and pages are one line of plain text: terminal escape sequences
+  are dropped, line breaks and tabs become single spaces, and other
+  control characters are dropped, before the length is checked.
+
+  A durative action's `:action_started` (and a journey's `:departed`) is
+  stamped with the start of the step, when the intent is applied and the
+  action begins; its other events, like every system's, with the step's
+  end. So a five-minute wait begun in the step from 06:00 to 06:01 shows
+  as started at 06:00 and finished at 06:05.
 
   Kindling records who lit the hearth (`lit_by`), so that body can tell
   the smoke of its own fire from a stranger's (`Avwe.Systems.Smoke`).
@@ -47,6 +55,9 @@ defmodule Avwe.Actions do
   @read_most 1..50
   # Line breaks and tabs, as regex class members: what a page turns into a space.
   @breaks "\\t\\r\\n\\v\\f\\x{85}\\x{2028}\\x{2029}"
+  # Terminal escape sequences: CSI (`ESC [ ... final`), OSC (`ESC ] ...`
+  # ended by BEL or ST, or by nothing) and the two-character kind.
+  @escapes ~r/\e(?:\[[0-?]*[ -\/]*[@-~]|\][^\a\e]*(?:\a|\e\\)?|[@-Z\\-_])/u
 
   @doc "Applies an intent at the start of a step."
   @spec handle(Region.t(), Intent.t(), Tick.t()) :: {Region.t(), [Event.t()]}
@@ -72,7 +83,7 @@ defmodule Avwe.Actions do
     end
   end
 
-  defp perform(region, %Intent{verb: :go} = intent, _tick) do
+  defp perform(region, %Intent{verb: :go} = intent, tick) do
     here = Region.get(region, intent.body, :position)
 
     case known_place(region, intent.body, intent.target) do
@@ -83,11 +94,11 @@ defmodule Avwe.Actions do
         {region, [result(intent, :success, :already_there)]}
 
       destination ->
-        travel(region, intent, [here, destination], %{toward: intent.target})
+        travel(region, intent, [here, destination], %{toward: intent.target}, tick)
     end
   end
 
-  defp perform(region, %Intent{verb: :follow} = intent, _tick) do
+  defp perform(region, %Intent{verb: :follow} = intent, tick) do
     here = Region.get(region, intent.body, :position)
 
     with {:ok, direction} <- follow_direction(intent.params),
@@ -96,14 +107,14 @@ defmodule Avwe.Actions do
 
       case path do
         [_here] -> {region, [result(intent, :success, :end_of_channel)]}
-        path -> travel(region, intent, path, %{heading: Atom.to_string(direction)})
+        path -> travel(region, intent, path, %{heading: Atom.to_string(direction)}, tick)
       end
     else
       {:error, reason} -> {region, [result(intent, :blocked, reason)]}
     end
   end
 
-  defp perform(region, %Intent{verb: :walk} = intent, _tick) do
+  defp perform(region, %Intent{verb: :walk} = intent, tick) do
     here = Region.get(region, intent.body, :position)
 
     case walk_params(intent.params) do
@@ -113,7 +124,7 @@ defmodule Avwe.Actions do
 
         if target == here,
           do: {region, [result(intent, :blocked, :edge)]},
-          else: travel(region, intent, [here, target], %{heading: direction})
+          else: travel(region, intent, [here, target], %{heading: direction}, tick)
 
       :error ->
         {region, [result(intent, :blocked, :invalid)]}
@@ -122,14 +133,17 @@ defmodule Avwe.Actions do
 
   defp perform(region, %Intent{verb: :wait} = intent, tick) do
     case wait_until(intent.params, tick.time) do
-      {:ok, until} -> start(region, intent.body, Map.put(action_base(intent), :until, until), [])
-      :error -> {region, [result(intent, :blocked, :invalid)]}
+      {:ok, until} ->
+        start(region, intent.body, Map.put(action_base(intent), :until, until), [], tick)
+
+      :error ->
+        {region, [result(intent, :blocked, :invalid)]}
     end
   end
 
   defp perform(region, %Intent{verb: :say, params: params} = intent, _tick) do
-    text = params |> Map.get(:text) |> trim()
-    volume = Map.get(params, :volume, :talk)
+    text = params |> param(:text) |> clean() |> trim()
+    volume = param(params, :volume) || :talk
 
     if text != "" and String.length(text) <= @max_speech and volume in @volumes do
       position = Region.get(region, intent.body, :position)
@@ -326,16 +340,20 @@ defmodule Avwe.Actions do
     if Fire.unquenchable?(region, id), do: {:error, :unquenchable}, else: :ok
   end
 
-  defp travel(region, intent, path, heading) do
+  defp travel(region, intent, path, heading, tick) do
     action =
       intent
       |> action_base()
       |> Map.merge(%{path: path, distance: Space.path_length(path), covered: 0.0})
 
     departed =
-      Event.new(:departed, entity: intent.body, data: Map.put(heading, :position, hd(path)))
+      Event.new(:departed,
+        entity: intent.body,
+        time: tick.time,
+        data: Map.put(heading, :position, hd(path))
+      )
 
-    start(region, intent.body, action, [departed])
+    start(region, intent.body, action, [departed], tick)
   end
 
   defp channel_route(%Terrain{} = terrain, here, direction) do
@@ -370,9 +388,15 @@ defmodule Avwe.Actions do
   defp map_cells(%Region{terrain: %Terrain{width: width}}), do: width
   defp map_cells(_region), do: @default_map_cells
 
-  defp start(region, body, action, events) do
+  # A durative action begins when its intent is applied, at the start of
+  # the step, and its start (and a journey's departure) is stamped then, so
+  # a wait shown starting at 06:00 that ends at 06:05 lasted five minutes.
+  defp start(region, body, action, events, tick) do
     {region, replaced} = complete(region, body, :interrupted, :replaced)
-    started = Event.new(:action_started, entity: body, data: summary_data(action))
+
+    started =
+      Event.new(:action_started, entity: body, time: tick.time, data: summary_data(action))
+
     {Region.put_component(region, body, :action, action), replaced ++ [started | events]}
   end
 
@@ -407,13 +431,14 @@ defmodule Avwe.Actions do
   defp trim(text) when is_binary(text), do: String.trim(text)
   defp trim(_other), do: ""
 
-  # What a page may hold: line breaks and tabs become single spaces, and
-  # every other control character (escape codes included) is dropped, so a
-  # page can neither forge the lines a reading is told in nor reach a
-  # terminal as a command.
+  # What speech and a page may hold: terminal escape sequences are dropped
+  # whole, line breaks and tabs become single spaces, and every other
+  # control character is dropped, so words can neither forge the lines a
+  # listener or a reader is told in nor reach a terminal as a command.
   defp clean(text) when is_binary(text) do
     if String.valid?(text) do
       text
+      |> String.replace(@escapes, "")
       |> String.replace(~r/[ #{@breaks}]*[#{@breaks}][ #{@breaks}]*/u, " ")
       |> String.replace(~r/[\x{0}-\x{1F}\x{7F}-\x{9F}]/u, "")
     else

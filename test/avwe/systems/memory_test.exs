@@ -119,7 +119,11 @@ defmodule Avwe.Systems.MemoryTest do
         |> run(10)
 
       assert Enum.any?(entries(region, "mira-vale"), &(&1.type == :smoke_smelled))
-      assert Enum.any?(summaries(region, "mira-vale"), &(&1 =~ ~r/^You smell woodsmoke/))
+
+      assert "Woodsmoke rises from the kiln-house hearth beside you." in summaries(
+               region,
+               "mira-vale"
+             )
     end
   end
 

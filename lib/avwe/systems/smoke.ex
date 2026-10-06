@@ -53,8 +53,10 @@ defmodule Avwe.Systems.Smoke do
   (`data: %{level, from}`, the wind's direction) or `:smoke_faded`. When
   the body stands within reach (`Avwe.Systems.Fire.at_place_cells/0`) of a
   burning hearth it lit itself (`lit_by`), the smell is its own fire's and
-  `data` names that hearth as `own_fire`. Nothing here draws random
-  numbers.
+  `data` names that hearth as `own_fire`. Either that hearth, or else one
+  that smoked this step within a cell of the body, is the one `beside` it
+  (`beside/3`): the smoke there is that fire's, not the wind's, and `data`
+  names it as `beside`. Nothing here draws random numbers.
   """
 
   @behaviour Avwe.System
@@ -276,27 +278,13 @@ defmodule Avwe.Systems.Smoke do
 
   defp smell_event(region, body, level, wind) do
     data =
-      case own_fire(region, body) do
+      case beside(region, body, Region.get(region, body, :position)) do
         nil -> %{level: level, from: wind.from}
-        hearth -> %{level: level, from: wind.from, own_fire: hearth}
+        {hearth, true} -> %{level: level, from: wind.from, beside: hearth, own_fire: hearth}
+        {hearth, false} -> %{level: level, from: wind.from, beside: hearth}
       end
 
     Event.new(:smoke_smelled, entity: body, data: data)
-  end
-
-  # The burning hearth the body lit, if it stands within reach of it (the
-  # first by id): the smoke it smells there is its own fire's.
-  defp own_fire(region, body) do
-    here = Region.get(region, body, :position)
-
-    region
-    |> Region.with_components([:hearth, :position])
-    |> Enum.find(fn id ->
-      hearth = Region.get(region, id, :hearth)
-
-      hearth.burning and Map.get(hearth, :lit_by) == body and
-        Space.distance(here, Region.get(region, id, :position)) <= Fire.at_place_cells()
-    end)
   end
 
   # Converters
@@ -354,6 +342,51 @@ defmodule Avwe.Systems.Smoke do
   end
 
   def level_at(_view, _cell, _time), do: :none
+
+  @doc """
+  The fire whose smoke `body` at `cell` smells at its source, in a region
+  or view: `{hearth, true}` for a burning hearth the body lit, within reach
+  (`Avwe.Systems.Fire.at_place_cells/0`; the first by id), the smoke of
+  its own fire; else `{hearth, false}` for the nearest hearth (then by id)
+  that smoked this step within a cell; else `nil`.
+  """
+  @spec beside(map(), String.t(), Space.cell()) :: {String.t(), boolean()} | nil
+  def beside(%{components: components}, body, cell) do
+    hearths = components |> Map.get(:hearth, %{}) |> Enum.sort()
+    positions = Map.get(components, :position, %{})
+    distance = fn id -> positions[id] && Space.distance(cell, positions[id]) end
+
+    case own_fire(hearths, body, distance) do
+      nil -> smoking_beside(hearths, distance)
+      own -> {own, true}
+    end
+  end
+
+  # The first burning hearth by id that the body lit, within reach.
+  defp own_fire(hearths, body, distance) do
+    Enum.find_value(hearths, fn {id, hearth} ->
+      d = distance.(id)
+
+      if hearth.burning and Map.get(hearth, :lit_by) == body and d != nil and
+           d <= Fire.at_place_cells(),
+         do: id
+    end)
+  end
+
+  # The nearest hearth (then by id) that smoked this step within a cell.
+  defp smoking_beside(hearths, distance) do
+    at_source =
+      for {id, %{last_step: %{smoke_g: g}}} <- hearths,
+          g > 0,
+          d = distance.(id),
+          d != nil and d <= @at_source_cells,
+          do: {d, id}
+
+    case at_source do
+      [] -> nil
+      found -> {found |> Enum.min() |> elem(1), false}
+    end
+  end
 
   defp at_source?(%{components: components}, cell) do
     hearths = Map.get(components, :hearth, %{})

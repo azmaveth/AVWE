@@ -31,16 +31,20 @@ defmodule Avwe.Mind do
     * `:target_name` - the target by name, such as `"the kiln-house
       hearth"`. A `:target` that is not the id of anything the body can
       name is taken as a name too. Names are resolved when the Mind submits
-      the step, against a fresh look (the places the body knows for `:go`,
-      the hearths in reach for `:kindle` and `:douse`, the notebooks it
-      carries for `:write` and `:read`), so a plan can name a hearth it
-      will only reach on the way. A name that matches nothing, or more
-      than one thing, is passed to the world as given, and the world
-      refuses it in its own words.
+      the step, against a fresh look (the places the body knows for `:go`;
+      the hearths in reach, then the fires in sight, for `:kindle` and
+      `:douse`; the notebooks it carries for `:write` and `:read`), so a
+      plan can name a hearth it will only reach on the way, and a fire
+      seen far off is refused as too far rather than unknown. A name that
+      matches nothing is passed to the world as given, and the world
+      refuses it in its own words. A name that matches more than one thing
+      is not submitted: the step fails with `{:ambiguous, query, names}`
+      (see `problem` under Replies).
     * `:ref` - a label of the caller's own, kept on the step's `action` in
-      reports. The Mind chooses every intent's ref itself (`"m-"` and a
-      number unique to the runtime), so a result is only ever its own
-      step's: not a ref an earlier session of the body used, nor one the
+      reports. The Mind chooses every intent's ref itself (`"m-"` and 72
+      random bits), so a result is only ever its own step's: not a ref an
+      earlier session of the body used, in this run of the server or an
+      earlier one whose actions the world still carries, nor one the
       caller used twice.
 
   The verbs `:control` and `:release`, and labels starting with `auto-`,
@@ -55,8 +59,19 @@ defmodule Avwe.Mind do
         percepts: [%Avwe.Percept{}],   # since the previous call returned, in order
         plan: [{verb, opts}],          # steps not yet submitted
         action: %{ref, verb, target} | nil,  # the step under way, or the body's own doing
+        abandoned: [{verb, opts}],     # steps dropped unsubmitted since the previous reply
+        problem: term() | nil,         # why the Mind could not submit a step
         dropped: n                     # percepts lost to the buffer bound
       }
+
+  `abandoned` are the steps of a plan that were never submitted because
+  the plan ended early: a step failed, the routine took the body back
+  (`:yielded`), or a new `act/3` replaced the plan. `problem` is set when
+  the Mind itself could not submit a step of the plan (a name that matches
+  more than one thing, `{:ambiguous, query, names}`, or the session's
+  refusal); that step and the rest are then `abandoned` and the plan
+  `:failed`. When it is the act's first step, `act/3` fails with the
+  problem instead.
 
   `action` is the plan's step under way or, when there is none, the
   durative action a step of the Mind's started that the body is still
@@ -84,9 +99,10 @@ defmodule Avwe.Mind do
   The Mind does not see an MCP client's `notifications/cancelled`: such a
   call waits out its course and its answer goes nowhere.
 
-  A waiting caller is present: the Mind marks the session present
-  (`Avwe.Session.touch/1`) when a wait starts and every half `:idle_after`
-  while it lasts, so a long wait does not hand the body to its routine.
+  A waiting caller is present: its act marked the session present, and the
+  Mind marks it again (`Avwe.Session.touch/1`) every half `:idle_after`
+  while the wait lasts, so a long wait does not hand the body to its
+  routine.
 
   When the session yields the body to its routine (its idle rule: no call
   for `:idle_after`), the plan ends there, as `:yielded`: the routine took
@@ -119,6 +135,8 @@ defmodule Avwe.Mind do
           percepts: [Avwe.Percept.t()],
           plan: [{atom(), keyword()}],
           action: %{ref: String.t(), verb: atom(), target: String.t() | nil} | nil,
+          abandoned: [{atom(), keyword()}],
+          problem: term() | nil,
           dropped: non_neg_integer()
         }
 
@@ -152,8 +170,10 @@ defmodule Avwe.Mind do
   @doc """
   Runs one step or a plan (a list of steps) and waits.
 
-  Submits the first step at once, dropping any plan the Mind was running,
-  and replies when the first of these happens:
+  Submits the first step at once, replacing any plan the Mind was running
+  (its unsubmitted steps are reported as `abandoned`; a durative action
+  under way goes on unless the new step replaces it, as any new durative
+  action does), and replies when the first of these happens:
 
     * `:done` - the last step's result is a success.
     * `:failed` - a step's result is not a success; the rest of the plan is
@@ -172,7 +192,9 @@ defmodule Avwe.Mind do
   `:max_wait_ms` (real ms, default #{@max_wait_ms}). Fails with
   `{:error, :reserved}`, `{:error, :invalid_ref}`, `{:error,
   :invalid_plan}` (not a step, or an empty plan) or `{:error,
-  :invalid_options}` without submitting anything.
+  :invalid_options}` without submitting anything, and with `{:error,
+  {:ambiguous, query, names}}` or the session's refusal when the first
+  step cannot be submitted.
   """
   @spec act(pid(), step() | [step()], keyword()) :: {:ok, report()} | {:error, term()}
   def act(mind, steps, opts \\ []) do
@@ -240,6 +262,8 @@ defmodule Avwe.Mind do
         buffered: 0,
         dropped: 0,
         plan: [],
+        abandoned: [],
+        problem: nil,
         current: nil,
         doing: nil,
         pending: %{},
@@ -288,14 +312,17 @@ defmodule Avwe.Mind do
   def handle_call({:act, steps, opts}, from, state) do
     with {:ok, plan} <- plan(steps),
          {:ok, interrupt_at, max_wait} <- act_opts(opts) do
-      state = %{answer_waiter(state) | plan: plan, current: nil, ended: nil}
+      state = answer_waiter(state)
+      replaced = state.abandoned ++ state.plan
+      state = %{state | plan: plan, abandoned: replaced, current: nil, ended: nil}
 
       case submit_next(state) do
         {:ok, state} ->
           {:noreply, state |> wait(from, interrupt_at, max_wait) |> arm_quit()}
 
+        # The caller is told why; its plan is not counted as abandoned.
         {:error, reason, state} ->
-          {:reply, {:error, reason}, arm_quit(state)}
+          {:reply, {:error, reason}, arm_quit(%{state | abandoned: replaced})}
       end
     else
       {:error, reason} -> {:reply, {:error, reason}, arm_quit(state)}
@@ -306,7 +333,6 @@ defmodule Avwe.Mind do
   def handle_info({:avwe_percepts, session, percepts}, %{session: session} = state) do
     state = Enum.reduce(percepts, state, &buffer_percept(&2, &1))
     {state, interrupted} = Enum.reduce(percepts, {state, false}, &take/2)
-    if state.waiter, do: touch(state)
     {:noreply, wake(state, interrupted)}
   end
 
@@ -347,7 +373,6 @@ defmodule Avwe.Mind do
     Process.send_after(self(), {:max_wait, tag}, max_wait)
     {caller, _tag} = from
     monitor = Process.monitor(caller)
-    touch(state)
 
     present(
       %{state | waiter: %{from: from, interrupt_at: interrupt_at, tag: tag, monitor: monitor}},
@@ -395,7 +420,7 @@ defmodule Avwe.Mind do
   defp settle(state, :success) do
     case submit_next(state) do
       {:ok, state} -> state
-      {:error, _reason, state} -> finish(state, :failed)
+      {:error, reason, state} -> finish(%{state | problem: reason}, :failed)
     end
   end
 
@@ -434,7 +459,8 @@ defmodule Avwe.Mind do
   # routine, not the Mind, decides what the body does until the next act.
   # The step under way is still the body's doing until its result says
   # otherwise.
-  defp yielded(%{current: nil} = state), do: %{state | plan: []}
+  defp yielded(%{current: nil} = state),
+    do: %{state | plan: [], abandoned: state.abandoned ++ state.plan}
 
   defp yielded(%{current: current} = state) do
     doing = if Map.has_key?(state.pending, current.ref), do: current, else: state.doing
@@ -449,29 +475,46 @@ defmodule Avwe.Mind do
   defp buffer_percept(state, percept),
     do: %{state | buffer: :queue.in(percept, state.buffer), buffered: state.buffered + 1}
 
-  defp flush(state), do: %{state | buffer: :queue.new(), buffered: 0, dropped: 0, ended: nil}
+  defp flush(state) do
+    %{
+      state
+      | buffer: :queue.new(),
+        buffered: 0,
+        dropped: 0,
+        ended: nil,
+        abandoned: [],
+        problem: nil
+    }
+  end
 
   # The plan
 
-  defp submit_next(%{plan: [{verb, opts} | rest]} = state) do
-    {target, state} = target(state, verb, opts)
-    ref = "m-#{System.unique_integer([:positive])}"
+  # A step that cannot be submitted ends the plan there: it and the rest
+  # are abandoned.
+  defp submit_next(%{plan: [{verb, opts} | rest] = plan} = state) do
+    ref = new_ref()
 
-    act_opts =
-      [ref: ref, target: target] ++
-        if Keyword.has_key?(opts, :params), do: [params: opts[:params]], else: []
-
-    case Session.act(state.session, verb, act_opts) do
-      {:ok, ^ref} ->
-        action = labelled(%{ref: ref, verb: verb, target: target}, opts[:ref])
-
-        {:ok,
-         %{state | plan: rest, current: action, pending: Map.put(state.pending, ref, action)}}
-
-      {:error, reason} ->
-        {:error, reason, %{state | plan: [], current: nil}}
+    with {{:ok, target}, state} <- target(state, verb, opts),
+         {:ok, ^ref} <- Session.act(state.session, verb, act_opts(ref, target, opts)) do
+      action = labelled(%{ref: ref, verb: verb, target: target}, opts[:ref])
+      {:ok, %{state | plan: rest, current: action, pending: Map.put(state.pending, ref, action)}}
+    else
+      {{:error, reason}, state} -> {:error, reason, abandon(state, plan)}
+      {:error, reason} -> {:error, reason, abandon(state, plan)}
     end
   end
+
+  defp abandon(state, plan),
+    do: %{state | plan: [], current: nil, abandoned: state.abandoned ++ plan}
+
+  defp act_opts(ref, target, opts) do
+    [ref: ref, target: target] ++
+      if Keyword.has_key?(opts, :params), do: [params: opts[:params]], else: []
+  end
+
+  # Unique across runs of the server too: a durative action outlives a
+  # restart on its body, and its result must never be taken for another's.
+  defp new_ref, do: "m-" <> Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)
 
   defp labelled(action, nil), do: action
   defp labelled(action, label), do: Map.put(action, :label, label)
@@ -482,33 +525,45 @@ defmodule Avwe.Mind do
       query when verb in @named_verbs and is_binary(query) ->
         case session_look(state) do
           {{:ok, look}, state} -> {resolve(query, candidates(verb, look)), state}
-          {_error, state} -> {query, state}
+          {_error, state} -> {{:ok, query}, state}
         end
 
       _no_name ->
-        {opts[:target], state}
+        {{:ok, opts[:target]}, state}
     end
   end
 
-  defp resolve(query, candidates) do
+  # Against each list of candidates in turn: the first that names the query
+  # decides. A name that matches nothing goes to the world as given.
+  defp resolve(query, []), do: {:ok, query}
+
+  defp resolve(query, [candidates | others]) do
     case Command.resolve(query, candidates) do
-      {:ok, id} -> id
-      _none_or_ambiguous -> query
+      {:ok, id} -> {:ok, id}
+      {:ambiguous, names} -> {:error, {:ambiguous, query, Enum.sort(names)}}
+      :none -> resolve(query, others)
     end
   end
 
   defp candidates(:go, look) do
     here = if look[:here], do: [{look.here.id, look.here.name}], else: []
-    Enum.map(look[:places] || [], &{&1.id, &1.name}) ++ here
+    [Enum.map(look[:places] || [], &{&1.id, &1.name}) ++ here]
   end
 
-  defp candidates(verb, look) when verb in [:kindle, :douse],
-    do: Enum.map(look[:hearths] || [], &{&1.id, &1.name})
+  defp candidates(verb, look) when verb in [:kindle, :douse] do
+    [
+      Enum.map(look[:hearths] || [], &{&1.id, &1.name}),
+      for(%{ref: id, name: name} when is_binary(name) <- look[:fires] || [], do: {id, name})
+    ]
+  end
 
   defp candidates(_notebook_verb, look),
-    do: for(%{kind: :notebook} = item <- look[:carried] || [], do: {item.id, item.name})
+    do: [for(%{kind: :notebook} = item <- look[:carried] || [], do: {item.id, item.name})]
 
-  defp finish(state, status), do: %{state | plan: [], current: nil, ended: status}
+  # The plan ends: what was left of it is abandoned.
+  defp finish(state, status) do
+    %{state | plan: [], abandoned: state.abandoned ++ state.plan, current: nil, ended: status}
+  end
 
   defp reply(%{waiter: waiter} = state, status) do
     Process.demonitor(waiter.monitor, [:flush])
@@ -525,6 +580,8 @@ defmodule Avwe.Mind do
       percepts: :queue.to_list(state.buffer),
       plan: state.plan,
       action: state.current || state.doing,
+      abandoned: state.abandoned,
+      problem: state.problem,
       dropped: state.dropped
     }
   end
