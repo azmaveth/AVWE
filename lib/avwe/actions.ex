@@ -15,7 +15,9 @@ defmodule Avwe.Actions do
   Kindling and dousing act on a hearth within 20 m: the nearest one when the
   intent names no target. They change the hearth at once and emit `:fire_lit`
   or `:fire_out` before the result, so `Avwe.Systems.Fire`, which runs later
-  in the same step, burns from the moment of the intent.
+  in the same step, burns from the moment of the intent. Those two events
+  carry the intent's `ref` beside `by`, so the body's own percept of its
+  fire says who asked for it, as its action percepts do.
   """
 
   alias Avwe.{Calendar, Event, Intent, Region, Space, Terrain, Tick}
@@ -143,7 +145,7 @@ defmodule Avwe.Actions do
         Event.new(:fire_lit,
           entity: id,
           time: tick.time,
-          data: %{position: position, by: intent.body}
+          data: %{position: position, by: intent.body, ref: intent.ref}
         )
 
       {Region.put_component(region, id, :hearth, lit),
@@ -162,7 +164,7 @@ defmodule Avwe.Actions do
         Event.new(:fire_out,
           entity: id,
           time: tick.time,
-          data: %{position: position, reason: :doused, by: intent.body}
+          data: %{position: position, reason: :doused, by: intent.body, ref: intent.ref}
         )
 
       {Region.put_component(region, id, :hearth, out),
@@ -304,11 +306,17 @@ defmodule Avwe.Actions do
     end
   end
 
-  defp wait_until(%{for: seconds}, now)
-       when is_integer(seconds) and seconds > 0 and seconds <= @max_wait,
-       do: {:ok, now + seconds}
+  @doc """
+  When a wait begun at `now` with these params ends: `for:` seconds (up to
+  a week), or the next `until:` moment (`:dawn`, `:sunrise`, `:dusk`,
+  `:sunset`). `:error` for anything else, which `:wait` refuses.
+  """
+  @spec wait_until(map(), Calendar.time()) :: {:ok, Calendar.time()} | :error
+  def wait_until(%{for: seconds}, now)
+      when is_integer(seconds) and seconds > 0 and seconds <= @max_wait,
+      do: {:ok, now + seconds}
 
-  defp wait_until(%{until: moment}, now) do
+  def wait_until(%{until: moment}, now) do
     case Map.fetch(@moments, moment) do
       {:ok, :sunrise} -> {:ok, Calendar.next(now, Calendar.day(), Daylight.sunrise())}
       {:ok, :sunset} -> {:ok, Calendar.next(now, Calendar.day(), Daylight.sunset())}
@@ -316,7 +324,7 @@ defmodule Avwe.Actions do
     end
   end
 
-  defp wait_until(_params, _now), do: :error
+  def wait_until(_params, _now), do: :error
 
   defp trim(text) when is_binary(text), do: String.trim(text)
   defp trim(_other), do: ""

@@ -80,6 +80,18 @@ defmodule Avwe.E2E.SessionTest do
       assert [%Percept{intent: "plan-7", outcome: :success}] = wren |> percepts() |> results()
     end
 
+    test "a look while waiting says so, as the body's own" do
+      wren = join("wren")
+      {:ok, ref} = Session.act(wren, :wait, params: %{for: 600})
+      Avwe.step(@world, 1)
+
+      assert {:ok, %{action: %{ref: ^ref, verb: :wait, params: %{for: 600}}} = look} =
+               Session.look(wren)
+
+      assert Prose.look(look) =~ "You are waiting here a while."
+      refute Prose.look(look) =~ "routine"
+    end
+
     test "every intent gets exactly one result, whatever happens to it" do
       odo = join("odo")
 

@@ -35,7 +35,8 @@ defmodule Avwe.Session do
   takes the body back ("You take yourself in hand."); the take on
   connecting and the release on closing say nothing. While yielded, the
   routine's own actions reach the controller as percepts whose `issuer` is
-  `:autopilot`, except its waits, which `Avwe.Perception` keeps quiet.
+  `:autopilot`, except its waits, which `Avwe.Perception` keeps quiet
+  unless the controller stops one.
 
   Start sessions with `Avwe.connect/2`.
   """

@@ -162,9 +162,12 @@ defmodule Avwe.E2E.TelnetTest do
     test "she waits for dawn", %{mira: mira} do
       send_line(mira, "wait until dawn")
       sync(mira)
-      Avwe.step(@world, 120)
-
+      Avwe.step(@world, 1)
       expect(mira, "You settle in to wait for dawn.")
+      send_line(mira, "look")
+      expect(mira, "You are resting until dawn.")
+      Avwe.step(@world, 119)
+
       expect(mira, "The sun rises.")
       expect(mira, "You finish waiting.")
 

@@ -104,7 +104,8 @@ config :avwe, :worlds,
             ],
             note: "warms her hands at the lodge on the way home"
           ],
-          [at: "22:00", do: {:rest}]
+          # Home first, wherever the day (or a player) left her, then rest.
+          [at: "22:00", do: [{:go, target: "ember-reach"}, {:rest}]]
         ]
       ]
     ]

@@ -3,7 +3,8 @@ defmodule Avwe.E2E.AutopilotTest do
   End to end through sessions and telnet: the Ember Reach with Mira on her
   own, watched; a player taking her over mid-journey and leaving again; a
   session and a telnet player that go idle and see the hand-over (and not
-  the routine's waits); a session kept in hand by looking; and the canon
+  the routine's waits, except one they stop); the `- ` mark that follows
+  who holds the body; a session kept in hand by looking; and the canon
   check on the Hearth Compact, the evening before the river fails against
   the same evening a year later.
   """
@@ -13,7 +14,7 @@ defmodule Avwe.E2E.AutopilotTest do
   import Avwe.Test.Fixtures
   import Avwe.Test.TelnetClient
 
-  alias Avwe.{Percept, Session}
+  alias Avwe.{Percept, Prose, Session}
 
   @world :ember_autopilot
   @moduletag start: {813, day: 220, hour: 4}
@@ -209,11 +210,15 @@ defmodule Avwe.E2E.AutopilotTest do
     refute_line(mira, ~r/wait/)
     refute_line(watcher, ~r/routine|in hand|^- /)
 
+    send_line(mira, "look")
+    expect(mira, "Your routine has you waiting here.")
+    assert %{controller: :autopilot} = mira()
+
     send_line(mira, "help")
 
     expect(
       mira,
-      ~s(Lines starting with "- " are what your routine does with you while you stop acting; any command takes you back in hand.)
+      ~s(Lines starting with "- " are what your routine does with you while you stop acting; any command that acts \(go, say, wait, light...\) takes you back in hand; look does not.)
     )
 
     send_line(mira, "wait 1")
@@ -225,6 +230,55 @@ defmodule Avwe.E2E.AutopilotTest do
     Avwe.step(@world, 1)
     expect(mira, "You finish waiting.")
     refute_line(watcher, ~r/routine|in hand|^- /)
+  end
+
+  test "a telnet player who takes over mid-journey reads its remaining lines, and their stop, unmarked" do
+    port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0}))
+    step_until_walking()
+
+    mira = join(port, "mira")
+    expect(mira, "You are on your way to The Dry Bend.")
+    Avwe.step(@world, 5)
+    walked = expect(mira, ~r/^You're (a quarter of the way|halfway|nearly at)/)
+
+    send_line(mira, "stop")
+    sync(mira)
+    Avwe.step(@world, 1)
+    stopped = expect(mira, "You stop short of The Dry Bend.")
+    refute Enum.any?(walked ++ stopped, &String.starts_with?(&1, "- "))
+
+    send_line(mira, "look")
+    expect(mira, ~r/^You are Mira Vale, \d+ m [a-z-]+ of /)
+  end
+
+  test "stopping the wait the routine has her in says so" do
+    {:ok, session} = Avwe.connect(@world, body: "mira-vale", idle_after: 100)
+    Process.sleep(200)
+    Avwe.step(@world, 2)
+    assert %{verb: :wait, ref: "auto-" <> _step = ref} = mira_action()
+    assert [%Percept{type: :control_released}] = percepts(session)
+
+    # Resting until dawn at 04:00, her look says whose wait it is.
+    {:ok, look} = Session.look(session)
+    assert Prose.look(look) =~ "Your routine has you resting until dawn."
+
+    {:ok, stop} = Session.act(session, :stop)
+    Avwe.step(@world, 1)
+
+    assert [
+             %Percept{type: :control_taken},
+             %Percept{
+               kind: :result,
+               intent: ^ref,
+               issuer: :autopilot,
+               outcome: :interrupted,
+               reason: :stopped,
+               summary: "You stop waiting."
+             },
+             %Percept{kind: :result, intent: ^stop, outcome: :success, summary: nil}
+           ] = percepts(session)
+
+    assert mira_action() == nil
   end
 
   # The `:decided` events for Mira since the last call, from the world's
@@ -240,6 +294,35 @@ defmodule Avwe.E2E.AutopilotTest do
 
   describe "the Hearth Compact" do
     @describetag start: {812, day: 199, hour: 18}
+
+    @tag start: {812, day: 199, hour: 3}
+    test "a yielded player sees the fire the routine lights, marked, and takes the body back by stopping" do
+      port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0, idle_after: 300}))
+      mira = join(port, "mira")
+      Avwe.step(@world, 1)
+      assert %{controller: :human} = mira()
+
+      Process.sleep(400)
+      Avwe.step(@world, 1)
+      expect(mira, "You let your routine carry you.")
+
+      Avwe.step(@world, 10)
+      expect(mira, "- You light the kiln-house hearth.")
+      Avwe.step(@world, 2)
+      assert %{verb: :wait, ref: "auto-" <> _step} = mira_action()
+      send_line(mira, "look")
+      expect(mira, "The kiln-house hearth is burning here.")
+      expect(mira, "Your routine has you waiting here.")
+
+      # Stopping the quiet wait says so, and the line is hers, unmarked.
+      send_line(mira, "stop")
+      sync(mira)
+      Avwe.step(@world, 1)
+      expect(mira, "You take yourself in hand.")
+      lines = expect(mira, "You stop waiting.")
+      refute Enum.any?(lines, &String.starts_with?(&1, "- "))
+      assert %{controller: :human} = mira()
+    end
 
     test "the evening before the river fails, a watcher sees Mira light the kiln-house hearth" do
       {:ok, watcher} = Avwe.connect(@world)

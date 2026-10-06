@@ -34,12 +34,13 @@ defmodule Avwe.Systems.Fire do
 
   ## Events
 
-    * `:fire_lit` (from `:kindle`), `data: %{position, by}`.
+    * `:fire_lit` (from `:kindle`), `data: %{position, by, ref}`: the body
+      that lit it and its intent's ref.
     * `:fire_low` when the fuel falls to `low_kg`, stamped with the exact
       second, `data: %{position}`.
     * `:fire_out` when the fuel is gone (`reason: :fuel`, `by: nil`) or the
-      fire is doused (`reason: :doused`, `by: body`), stamped with the exact
-      second; `out_at` on the hearth records it.
+      fire is doused (`reason: :doused`, `by: body`, `ref`), stamped with the
+      exact second; `out_at` on the hearth records it.
 
   Felt warmth (`felt/2`) is perception only: no energy moves.
   """

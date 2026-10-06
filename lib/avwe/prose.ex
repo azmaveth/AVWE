@@ -4,7 +4,7 @@ defmodule Avwe.Prose do
   they are; richer clients use the structured fields instead.
   """
 
-  alias Avwe.Calendar
+  alias Avwe.{Calendar, Percept}
 
   @speech_verbs %{whisper: "whispers", talk: "says", shout: "shouts"}
   @own_speech_verbs %{whisper: "whisper", talk: "say", shout: "shout"}
@@ -360,8 +360,21 @@ defmodule Avwe.Prose do
     do: "You are following the channel #{direction}."
 
   defp doing(%{verb: :walk, params: %{direction: direction}}), do: "You are walking #{direction}."
-  defp doing(%{verb: :wait}), do: "You are waiting."
+
+  # A wait is the body's own or its routine's, by the action's ref.
+  defp doing(%{verb: :wait} = action) do
+    case {Percept.issuer(Map.get(action, :ref) || ""), until_dawn?(action)} do
+      {:autopilot, true} -> "Your routine has you resting until dawn."
+      {:autopilot, false} -> "Your routine has you waiting here."
+      {:controller, true} -> "You are resting until dawn."
+      {:controller, false} -> "You are waiting here a while."
+    end
+  end
+
   defp doing(_action), do: nil
+
+  defp until_dawn?(%{params: %{until: moment}}), do: moment in [:dawn, :sunrise]
+  defp until_dawn?(_action), do: false
 
   defp river_status(nil), do: nil
   defp river_status(%{flowing: 0, name: name}), do: "#{capitalize(name)} is dry."

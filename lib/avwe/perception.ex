@@ -36,13 +36,16 @@ defmodule Avwe.Perception do
   `channel.steaming` for the river's prose both read it.
 
   A body's own actions carry who asked for them (`Avwe.Percept`'s
-  `issuer`): its controller, or its routine when autopilot had it. The
-  waits autopilot issues (an idle, resting or fireside body) are quiet:
-  they raise no percept at all, started, under way or ended, so a yielded
-  session is not told every ten minutes that it is still waiting; the
-  routine's journeys and kindling still show. The hand-over between the
-  two (`:control_released`, `:control_taken`) is a percept of the body's
-  own and nobody else's; `:decided` stays the game master's.
+  `issuer`): its controller, or its routine when autopilot had it; so does
+  its own lighting or dousing of a hearth, whose `:fire_lit` and
+  `:fire_out` events carry the intent's ref. The waits autopilot issues
+  (an idle, resting or fireside body) are quiet: they raise no percept at
+  all, started, under way or ended, so a yielded session is not told every
+  hour that it is still waiting; the routine's journeys and kindling still
+  show, and so does the end of a wait the controller stopped (`:interrupted`
+  with reason `:stopped`), since they asked. The hand-over between the two
+  (`:control_released`, `:control_taken`) is a percept of the body's own
+  and nobody else's; `:decided` stays the game master's.
   """
 
   alias Avwe.{Event, Percept, Prose, Space, Terrain}
@@ -163,7 +166,8 @@ defmodule Avwe.Perception do
 
   defp perceive(_view, _body, _event), do: []
 
-  # Autopilot's waits say nothing.
+  # Autopilot's waits say nothing, except when the controller stopped one.
+  defp quiet?(%{verb: :wait, outcome: :interrupted, reason: :stopped}), do: false
   defp quiet?(%{verb: :wait, ref: ref}), do: Percept.issuer(ref) == :autopilot
   defp quiet?(_data), do: false
 
@@ -354,7 +358,8 @@ defmodule Avwe.Perception do
   end
 
   # A fire is its own light: it is seen at least 200 m off whatever the hour.
-  # Burning low and going out name the hearth unless the body is at it.
+  # Burning low and going out name the hearth unless the body is at it. The
+  # body's own lighting or dousing says who asked for it, as its actions do.
   defp see_fire(view, body, %Event{entity: hearth, data: data} = event) do
     observer = body && position(view, body)
     distance = observer && Space.distance(observer, data.position)
@@ -374,6 +379,7 @@ defmodule Avwe.Perception do
                 distance_m: Space.meters(distance),
                 direction: Space.direction(observer, data.position)
               },
+          issuer: own_issuer(body, data),
           salience: @fire_salience[event.type],
           summary:
             Prose.fire(
@@ -392,6 +398,12 @@ defmodule Avwe.Perception do
   defp who(_view, _body, nil), do: nil
   defp who(_view, body, body), do: :you
   defp who(view, _body, other), do: name(view, other)
+
+  # Who asked for what the body itself did, by the intent's ref.
+  defp own_issuer(body, %{by: body, ref: ref}) when body != nil and is_binary(ref),
+    do: Percept.issuer(ref)
+
+  defp own_issuer(_body, _data), do: nil
 
   # Only the body's own nose smells smoke.
   defp smell(_view, body, %Event{entity: body, data: data} = event) when body != nil do

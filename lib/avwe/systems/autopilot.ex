@@ -14,8 +14,10 @@ defmodule Avwe.Systems.Autopilot do
   A body with a controller is left entirely alone: no intents, and no
   cancelling of what it is doing. Its plan, if a routine entry's was under
   way, is kept: when control is released autopilot resumes at the next
-  step, issuing the pending step again if the entry's window is still open
-  and dropping the plan if it has closed (`Avwe.Autopilot`, Plans).
+  step, issuing what is left of the pending step if the entry's window is
+  still open and dropping the plan if it has closed (`Avwe.Autopilot`,
+  Plans). For that, a wait step's end is written into the plan as `until`
+  when the step is issued, as `Avwe.Actions.wait_until/2` will set it.
 
   Each choice is recorded in the body's `:autopilot` component
   (`%{current: utility, why: atom, since: time, done: %{entry => day up to
@@ -27,9 +29,12 @@ defmodule Avwe.Systems.Autopilot do
   action as its first step submits nothing and names the action's ref as
   `adopted` instead of `intent_ref`. A plan that ends early is announced
   the same way with `why: :plan_abandoned`, the `entry`, the `step_ref`
-  that ended it and its `outcome` and `reason`; it submits nothing, so it
-  names no `intent_ref`. An entry whose window closed before it was done is
-  marked done and announced with `why: :missed` and the `entry`, before the
+  that ended it and its `outcome` and `reason` (`:superseded` when a
+  routine entry replaced its wait, `:window_closed` when the body came
+  back too late to go on with it). An entry whose window closed before it
+  was done, or has too little of it left to start (`Avwe.Autopilot`, the
+  start margin), is marked done and announced with `why: :missed`, the
+  `entry` and the `reason` (`:window_closed` or `:too_late`), before the
   body decides.
 
   `prepare/1` marks the routine entries whose time is before the region's
@@ -41,7 +46,7 @@ defmodule Avwe.Systems.Autopilot do
 
   @behaviour Avwe.System
 
-  alias Avwe.{Autopilot, Calendar, Event, Intent, Region, Tick}
+  alias Avwe.{Actions, Autopilot, Calendar, Event, Intent, Region, Tick}
 
   @impl Avwe.System
   def prepare(region) do
@@ -93,15 +98,15 @@ defmodule Avwe.Systems.Autopilot do
         {region, events}
 
       missed ->
-        done = Map.new(missed, fn {index, _entry, day} -> {index, day} end)
+        done = Map.new(missed, fn {index, _entry, day, _reason} -> {index, day} end)
         record = %{record | done: Map.merge(record.done, done)}
 
         announced =
-          for {index, entry, _day} <- missed,
+          for {index, entry, _day, reason} <- missed,
               do:
                 Event.new(:decided,
                   entity: body,
-                  data: %{why: :missed, entry: index, note: entry.note}
+                  data: %{why: :missed, entry: index, note: entry.note, reason: reason}
                 )
 
         {Region.put_component(region, body, :autopilot, record), events ++ announced}
@@ -144,7 +149,7 @@ defmodule Avwe.Systems.Autopilot do
     plan =
       case Map.get(choice, :plan) do
         nil -> Map.get(record, :plan)
-        plan -> %{plan | ref: ref}
+        plan -> %{plan | ref: ref, until: wait_end(choice.intent, tick)}
       end
 
     data = Map.merge(announced(choice), %{intent_ref: ref})
@@ -166,6 +171,17 @@ defmodule Avwe.Systems.Autopilot do
     region = Region.put_component(region, body, :autopilot, decided(record, tick, choice, plan))
     {region, events ++ [Event.new(:decided, entity: body, data: data)]}
   end
+
+  # When a wait step will end: the intent is applied at the start of the
+  # next step, which is the end of this one.
+  defp wait_end({:wait, opts}, tick) do
+    case Actions.wait_until(Keyword.get(opts, :params, %{}), Tick.end_time(tick)) do
+      {:ok, until} -> until
+      :error -> nil
+    end
+  end
+
+  defp wait_end(_intent, _tick), do: nil
 
   defp decided(record, tick, choice, plan) do
     Map.merge(record, %{

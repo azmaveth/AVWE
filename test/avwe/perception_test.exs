@@ -182,6 +182,22 @@ defmodule Avwe.PerceptionTest do
 
       assert Perception.percepts(view, "wren", [wait, ended]) == []
 
+      # Except a wait the controller stopped: they asked, so it answers.
+      stopped = %{
+        ended
+        | data: %{ended.data | outcome: :interrupted, reason: :stopped}
+      }
+
+      assert [
+               %{
+                 kind: :result,
+                 intent: "auto-wren-7",
+                 issuer: :autopilot,
+                 reason: :stopped,
+                 summary: "You stop waiting."
+               }
+             ] = Perception.percepts(view, "wren", [stopped])
+
       own = %{wait | data: %{wait.data | ref: "i-7"}}
 
       assert [%{kind: :progress, intent: "i-7", issuer: :controller}] =
@@ -602,15 +618,40 @@ defmodule Avwe.PerceptionTest do
     test "a fire is seen 200 m off at night, not 210 m" do
       {x, y} = lodge = Ember.places().lodge
       view = ember_snapshot(@dawn)
-      lit = fire_event(:fire_lit, view, %{position: lodge, by: @mira})
+      lit = fire_event(:fire_lit, view, %{position: lodge, by: @mira, ref: "i-3"})
 
-      assert [%{summary: "You light the lodge hearth.", modality: :sight, salience: 0.7}] =
-               Perception.percepts(at(view, @mira, {x, y + 20}), @mira, [lit])
+      assert [
+               %{
+                 summary: "You light the lodge hearth.",
+                 modality: :sight,
+                 salience: 0.7,
+                 issuer: :controller
+               }
+             ] = Perception.percepts(at(view, @mira, {x, y + 20}), @mira, [lit])
 
       assert Perception.percepts(at(view, @mira, {x, y + 21}), @mira, [lit]) == []
 
-      assert [%{summary: "Mira Vale lights the lodge hearth."}] =
+      assert [%{summary: "Mira Vale lights the lodge hearth.", issuer: nil}] =
                Perception.percepts(view, nil, [lit])
+    end
+
+    test "the body's own fire says who asked for it; another's does not" do
+      lodge = Ember.places().lodge
+      view = at(ember_snapshot(@dawn), @mira, lodge)
+
+      routine =
+        fire_event(:fire_lit, view, %{position: lodge, by: @mira, ref: "auto-mira-vale-9"})
+
+      doused =
+        fire_event(:fire_out, view, %{position: lodge, reason: :doused, by: @mira, ref: "i-4"})
+
+      other = fire_event(:fire_lit, view, %{position: lodge, by: "tam", ref: "i-1"})
+
+      assert [
+               %{summary: "You light the lodge hearth.", issuer: :autopilot},
+               %{summary: "You douse the lodge hearth.", issuer: :controller},
+               %{summary: "tam lights the lodge hearth.", issuer: nil}
+             ] = Perception.percepts(view, @mira, [routine, doused, other])
     end
 
     test "burning low and going out are seen, and say who doused it" do

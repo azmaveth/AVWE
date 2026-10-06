@@ -7,10 +7,15 @@ defmodule Avwe.Telnet.Connection do
   their percepts into lines of text. Everything goes through an
   `Avwe.Session`, like any other controller. A player who stops typing
   yields the body to its routine (the session's idle rule, `:idle_after` in
-  the options; looking around keeps the body in hand): the lines for what
-  the routine does with the body are prefixed with `- `, so a reading
-  player can tell them from their own, and any command that acts takes the
-  body back.
+  the options): while it is yielded, the lines for what is done with the
+  body (its actions, and the fires it lights or puts out) are prefixed with
+  `- `, so a reading player can tell them from their own. The prefix
+  follows who holds the body, not whose intent a line reports: the
+  connection keeps a `yielded` flag from the hand-over percepts it
+  receives (`:control_released` sets it, `:control_taken` clears it), so a
+  player who takes over a journey the routine began reads its remaining
+  lines, and their own stop, unmarked. Any command that acts takes the body
+  back; `look` re-arms the idle timer but does not retake.
   """
 
   use GenServer, restart: :temporary
@@ -33,14 +38,22 @@ defmodule Avwe.Telnet.Connection do
     stop              stop what you're doing
     time              the time in the world
     quit              leave
-  Lines starting with "- " are what your routine does with you while you stop acting; any command takes you back in hand.\
+  Lines starting with "- " are what your routine does with you while you stop acting; any command that acts (go, say, wait, light...) takes you back in hand; look does not.\
   """
 
   def start_link({socket, opts}), do: GenServer.start_link(__MODULE__, {socket, opts})
 
   @impl true
   def init({socket, opts}) do
-    {:ok, %{socket: socket, phase: :starting, world: nil, session: nil, session_opts: opts}}
+    {:ok,
+     %{
+       socket: socket,
+       phase: :starting,
+       world: nil,
+       session: nil,
+       session_opts: opts,
+       yielded: false
+     }}
   end
 
   @impl true
@@ -53,10 +66,7 @@ defmodule Avwe.Telnet.Connection do
   end
 
   def handle_info({:avwe_percepts, _session, percepts}, state) do
-    for %{summary: summary} = percept when is_binary(summary) <- percepts,
-        do: write(state, line(percept))
-
-    {:noreply, state}
+    {:noreply, Enum.reduce(percepts, state, &show/2)}
   end
 
   def handle_info({:tcp_closed, _socket}, state), do: {:stop, :normal, state}
@@ -271,8 +281,24 @@ defmodule Avwe.Telnet.Connection do
 
   # I/O
 
-  defp line(%{issuer: :autopilot, summary: summary}), do: @routine_prefix <> summary
-  defp line(%{summary: summary}), do: summary
+  # Percepts are shown in order, each against who held the body when it
+  # happened: the hand-over percepts move the `yielded` flag as they pass.
+  defp show(percept, state) do
+    state = hand_over(state, percept)
+    if is_binary(percept.summary), do: write(state, line(percept, state))
+    state
+  end
+
+  defp hand_over(state, %{type: :control_released}), do: %{state | yielded: true}
+  defp hand_over(state, %{type: :control_taken}), do: %{state | yielded: false}
+  defp hand_over(state, _percept), do: state
+
+  # What is done with the body while the player has yielded it carries the
+  # mark: its actions and its fires, whoever asked for them.
+  defp line(%{issuer: issuer, summary: summary}, %{yielded: true}) when issuer != nil,
+    do: @routine_prefix <> summary
+
+  defp line(%{summary: summary}, _state), do: summary
 
   defp write(state, text) do
     lines = text |> String.split("\n") |> Enum.map(&[&1, "\r\n"])

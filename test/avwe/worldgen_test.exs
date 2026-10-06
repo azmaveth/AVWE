@@ -99,7 +99,7 @@ defmodule Avwe.WorldgenTest do
                },
                %{at: 28_800, do: [_, {:wait, params: %{for: 10_800}}, _], note: "the survey"},
                %{at: 64_800, do: [{:go, target: "ashwarden-lodge"}, _, _]},
-               %{at: 79_200, do: [{:rest}], note: nil}
+               %{at: 79_200, do: [{:go, target: "ember-reach"}, {:rest}], note: nil}
              ] = Region.get(region, "mira-vale", :routine)
     end
 
