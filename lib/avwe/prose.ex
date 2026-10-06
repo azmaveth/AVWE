@@ -319,7 +319,12 @@ defmodule Avwe.Prose do
     end)
   end
 
-  defp clock(look), do: "#{Calendar.format(look.time)}. #{light(look.light)}"
+  @doc """
+  The time and the light, as a look begins: "1 AR, day 1, 12:25. It is
+  daylight." A client that shows them apart from the look says it the same way.
+  """
+  @spec clock(map()) :: String.t()
+  def clock(look), do: "#{Calendar.format(look.time)}. #{light(look.light)}"
 
   defp light(level) when level == 0, do: "It is dark."
   defp light(level) when level < 0.25, do: "The light is low."
