@@ -7,8 +7,10 @@ defmodule Avwe.Telnet.Connection do
   their percepts into lines of text. Everything goes through an
   `Avwe.Session`, like any other controller. A player who stops typing
   yields the body to its routine (the session's idle rule, `:idle_after` in
-  the options): the lines for what the routine does with the body are
-  prefixed with `- `, so a reading player can tell them from their own.
+  the options; looking around keeps the body in hand): the lines for what
+  the routine does with the body are prefixed with `- `, so a reading
+  player can tell them from their own, and any command that acts takes the
+  body back.
   """
 
   use GenServer, restart: :temporary
@@ -30,7 +32,8 @@ defmodule Avwe.Telnet.Connection do
     douse [hearth]    put the fire out (also: put out the fire, douse the coal)
     stop              stop what you're doing
     time              the time in the world
-    quit              leave\
+    quit              leave
+  Lines starting with "- " are what your routine does with you while you stop acting; any command takes you back in hand.\
   """
 
   def start_link({socket, opts}), do: GenServer.start_link(__MODULE__, {socket, opts})

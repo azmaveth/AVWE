@@ -111,6 +111,8 @@ defmodule Avwe.E2E.SessionTest do
       assert Session.act(wren, :wait, params: %{for: 60}, ref: "auto-wren-1") ==
                {:error, :reserved}
 
+      assert Session.act(wren, :wait, params: %{for: 60}, ref: 1) == {:error, :invalid_ref}
+
       Avwe.step(@world, 1)
       assert percepts(wren) == []
 

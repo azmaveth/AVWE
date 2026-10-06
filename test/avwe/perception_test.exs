@@ -156,18 +156,36 @@ defmodule Avwe.PerceptionTest do
       assert Perception.percepts(view, nil, [result]) == []
     end
 
-    test "the routine's actions say so", %{world: world} do
+    test "the routine's actions say so, and its waits say nothing", %{world: world} do
       view = view(world, 12)
 
       started = %Event{
         type: :action_started,
         time: view.time,
         entity: "wren",
-        data: %{ref: "auto-wren-7", verb: :wait, target: nil, params: %{for: 600}}
+        data: %{ref: "auto-wren-7", verb: :go, target: "mill-pond", params: %{}}
       }
 
       assert [%{kind: :progress, intent: "auto-wren-7", issuer: :autopilot}] =
                Perception.percepts(view, "wren", [started])
+
+      wait = %{
+        started
+        | data: %{ref: "auto-wren-7", verb: :wait, target: nil, params: %{for: 600}}
+      }
+
+      ended = %{
+        wait
+        | type: :action_result,
+          data: Map.merge(wait.data, %{outcome: :success, reason: :done})
+      }
+
+      assert Perception.percepts(view, "wren", [wait, ended]) == []
+
+      own = %{wait | data: %{wait.data | ref: "i-7"}}
+
+      assert [%{kind: :progress, intent: "i-7", issuer: :controller}] =
+               Perception.percepts(view, "wren", [own])
     end
 
     test "only the body senses the hand-over between its controller and its routine", %{

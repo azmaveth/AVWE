@@ -1,9 +1,9 @@
 defmodule Avwe.AutopilotTest do
   @moduledoc """
   The brain and its system on the Ember Reach, stepped as a pure region:
-  Mira's routine and its plans, the jitter, the invited fire, warmth at
-  night, rest, control and determinism. Sessions and the idle rule are in
-  `test/e2e/autopilot_test.exs`.
+  Mira's routine, its plans and their windows, takeovers, the jitter, the
+  invited fire, warmth at night, rest, control and determinism. Sessions
+  and the idle rule are in `test/e2e/autopilot_test.exs`.
   """
 
   use ExUnit.Case, async: true
@@ -27,6 +27,12 @@ defmodule Avwe.AutopilotTest do
 
   defp events(trace), do: Enum.flat_map(trace, fn {_region, events} -> events end)
   defp decided(events), do: for(%Event{type: :decided, data: data} <- events, do: data)
+  defp intent_refs(events), do: for(%{intent_ref: ref} <- decided(events), do: ref)
+
+  # When each decision was made.
+  defp decided_at(events),
+    do: for(%Event{type: :decided, data: data, time: time} <- events, do: {data, time})
+
   defp results(events), do: for(%Event{type: :action_result, data: data} <- events, do: data)
   defp of(events, type), do: Enum.filter(events, &(&1.type == type))
 
@@ -68,6 +74,38 @@ defmodule Avwe.AutopilotTest do
   end
 
   defp day_number(region), do: Integer.floor_div(region.time, @day)
+
+  defp tick(region, dt \\ 60),
+    do: %Avwe.Tick{
+      step: region.step,
+      time: region.time,
+      dt: dt,
+      seed: region.seed,
+      region: region.id
+    }
+
+  # Mira's routine offset on the day `time` falls in.
+  defp jitter(region, time),
+    do: Autopilot.jitter(%{tick(region) | time: time}, [@mira])[@mira]
+
+  defp candidates(region, body \\ @mira),
+    do: Autopilot.candidates(region, tick(region), body, record(region, body))
+
+  defp whys(region), do: region |> candidates() |> Enum.map(& &1.why)
+
+  # Steps `region` up to `{hour, minute}` of its day.
+  defp run_to(region, hour, minute) do
+    %{hour: h, minute: m} = Calendar.describe(region.time)
+    run(region, (hour - h) * 60 + (minute - m))
+  end
+
+  # Mira controlled from `region` for one `wait` of sixty seconds, as a
+  # player would, and held until `fun` says otherwise.
+  defp taken(region) do
+    region
+    |> Ember.controlled(@mira, :human)
+    |> Region.submit(Intent.new(@mira, :wait, ref: "w", controller: :human, params: %{for: 60}))
+  end
 
   defp released(region, body \\ @mira),
     do: Region.put_component(region, body, :control, %{holder: nil, since: region.time})
@@ -141,11 +179,17 @@ defmodule Avwe.AutopilotTest do
                nil
              ]
 
-      assert Enum.all?(decided(events), &String.starts_with?(&1.intent_ref, "auto-mira-vale-"))
+      assert Enum.all?(intent_refs(events), &String.starts_with?(&1, "auto-mira-vale-"))
+
+      # The rest entry found her resting already and adopted that wait.
+      assert [%{entry: 3, step: 0, adopted: "auto-mira-vale-" <> _}] =
+               for(%{adopted: _ref} = data <- decided(events), do: data)
 
       # Still on the last entry's plan at 04:00: resting until dawn.
       assert %{why: :routine, current: 0.6, plan: %{entry: 3, steps: [], ref: "auto-" <> _}} =
                record(final)
+
+      refute Enum.any?(decided(events), &(&1.why == :missed))
     end
 
     test "no routine leads to the source", %{trace: trace, events: events} do
@@ -159,7 +203,7 @@ defmodule Avwe.AutopilotTest do
       {final, _events} = List.last(trace)
       pending = final |> Region.pending() |> Enum.map(& &1.ref)
       running = if action = action(final), do: [action.ref], else: []
-      decided = events |> decided() |> Enum.map(& &1.intent_ref)
+      decided = intent_refs(events)
 
       assert results(events) |> Enum.map(& &1.ref) |> Enum.sort() ==
                Enum.sort(decided -- (pending ++ running))
@@ -171,7 +215,7 @@ defmodule Avwe.AutopilotTest do
   describe "plans" do
     @bend [{:go, target: "the-dry-bend"}]
 
-    test "two entries ten minutes apart in one long step: the last is taken, both are done" do
+    test "two entries ten minutes apart in one long step: the last is taken, the first missed" do
       region =
         Ember.region()
         |> Region.put_component(@mira, :routine, [
@@ -182,7 +226,9 @@ defmodule Avwe.AutopilotTest do
       {[{after_step, events}], _final} = run(region, 1, 3600)
       day = day_number(after_step)
 
-      assert [%{why: :routine, entry: 1, note: "last"}] = decided(events)
+      assert [%{why: :missed, entry: 0, note: "first"}, %{why: :routine, entry: 1, note: "last"}] =
+               decided(events)
+
       assert %{done: %{0 => ^day, 1 => ^day}} = record(after_step)
       assert [%{verb: :go, target: "ashwarden-lodge"}] = Region.pending(after_step)
     end
@@ -230,22 +276,202 @@ defmodule Avwe.AutopilotTest do
       assert %{done: %{0 => _day}, plan: nil} = record(final)
     end
 
-    test "a plan is dropped when control is taken, and does not resume on release" do
-      {trace, walking} = Ember.region() |> run(35)
-      assert %{verb: :go, target: "the-dry-bend", ref: ref} = action(walking)
-      assert %{plan: %{entry: 0, steps: [_wait, _home], ref: ^ref}} = record(walking)
+    test "the rest entry adopts a rest already begun instead of starting it again" do
+      # Dark at 20:00, she rests; at 22:00 the rest entry finds her at it.
+      {trace, final} = {813, day: 220, hour: 20} |> Ember.region() |> run_to(22, 10)
+      events = events(trace)
 
-      {[{held, _events}], _final} = walking |> Ember.controlled(@mira, :human) |> run(1)
-      assert %{plan: nil} = record(held)
+      assert [%{why: :rest, intent_ref: ref}, %{why: :routine, entry: 3, step: 0, adopted: ref}] =
+               decided(events)
 
-      # Her own again, she carries the journey on but not the plan: no wait
-      # at the bend, and the cold dark takes her home.
-      {trace2, _final} = held |> released() |> run(60)
-      events = events(trace ++ trace2)
-      assert [_bend] = arrivals(events, "the-dry-bend")
-      assert routine_steps(events) == [{0, 0}]
-      assert [%{why: :rest, utility: 0.55} | _rest] = decided(events(trace2))
-      assert [_home] = arrivals(events, "ember-reach")
+      assert results(events) == []
+      assert %{verb: :wait, params: %{until: :dawn}, ref: ^ref} = action(final)
+      assert %{plan: %{entry: 3, step: 0, steps: [], ref: ^ref}} = record(final)
+    end
+
+    test "the night's rest does not lock out the walk at dawn: she leaves on day two as on day one" do
+      region = Ember.region()
+      {trace, _final} = run(region, 2 * 1440)
+      events = events(trace)
+      day_two = region.time + @day
+
+      # Decided on the minute of the entry's occurrence, off the next minute.
+      expected =
+        day_number(region) * @day + @day + 4 * 3600 + 30 * 60 + jitter(region, day_two) + 60
+
+      [left | _later] =
+        for %Event{type: :departed, entity: @mira, time: time} <- events,
+            time >= day_two,
+            do: time
+
+      assert left == expected
+      assert %{hour: 4, minute: minute} = Calendar.describe(left)
+      assert minute in 25..36
+
+      assert Enum.count(routine_steps(events), &(&1 == {0, 0})) == 2
+      assert length(arrivals(events, "the-dry-bend")) == 4
+      refute Enum.any?(decided(events), &(&1.why in [:plan_abandoned, :missed]))
+    end
+
+    test "by the hour too, day two begins like day one" do
+      region = Ember.region()
+      {trace, _final} = run(region, 48, 3600)
+      events = events(trace)
+
+      assert [_day_one, _day_two] =
+               for(%{why: :routine, entry: 0, step: 0} = data <- decided(events), do: data)
+
+      day_two = region.time + @day
+      left = for %Event{type: :departed, entity: @mira, time: time} <- events, do: time
+      [first | _rest] = Enum.filter(left, &(&1 < day_two))
+      [second | _rest] = Enum.filter(left, &(&1 >= day_two))
+      assert second == first + @day
+      assert length(arrivals(events, "the-dry-bend")) == 4
+    end
+  end
+
+  describe "takeovers" do
+    # Mira at the bend in the survey's wait, around 08:30.
+    defp surveying do
+      {_trace, waiting} = Ember.region() |> run_to(8, 30)
+      assert at_place?(waiting, "the-dry-bend")
+      assert %{verb: :wait, ref: ref} = action(waiting)
+      assert %{plan: %{entry: 1, step: 1, steps: [_home], ref: ^ref}} = record(waiting)
+      waiting
+    end
+
+    test "a plan survives a short takeover: the pending step is issued again" do
+      waiting = surveying()
+      {[{held, events}, {done, _events}], _final} = waiting |> taken() |> run(2)
+      assert [%{ref: "w", outcome: :success}] = results(events) |> Enum.filter(&(&1.ref == "w"))
+      assert decided(events) == []
+      assert %{plan: %{entry: 1, step: 1}} = record(held)
+      assert action(done) == nil
+
+      # Her own again, she waits her three hours out and comes home.
+      {trace, final} = done |> released() |> run_to(13, 0)
+      events = events(trace)
+
+      assert [%{why: :routine, entry: 1, step: 1}, %{why: :routine, entry: 1, step: 2} | later] =
+               decided(events)
+
+      refute Enum.any?(later, &(&1.why in [:routine, :plan_abandoned, :missed]))
+      assert [%{hour: 11, minute: minute}] = arrivals(events, "ember-reach")
+      assert minute >= 40
+      assert at_place?(final, "ember-reach")
+      assert %{plan: nil} = record(final)
+    end
+
+    test "a plan whose window closed during the takeover is dropped" do
+      {_trace, held} = surveying() |> taken() |> run_to(18, 30)
+      assert %{plan: %{entry: 1, step: 1}} = record(held)
+
+      {trace, final} = held |> released() |> run(100)
+      events = events(trace)
+
+      assert [
+               %{why: :plan_abandoned, entry: 1, outcome: nil, reason: :window_closed},
+               %{why: :routine, entry: 2, step: 0} | _later
+             ] = decided(events)
+
+      assert arrivals(events, "the-dry-bend") == []
+      assert [_lodge] = arrivals(events, "ashwarden-lodge")
+      assert at_place?(final, "ashwarden-lodge")
+    end
+
+    test "released at 17:00 the survey's wait is issued again, and the lodge entry cuts it on time" do
+      {_trace, held} = surveying() |> taken() |> run_to(17, 0)
+      {trace, _final} = held |> released() |> run_to(18, 40)
+      events = events(trace)
+
+      assert [%{why: :routine, entry: 1, step: 1}, %{why: :routine, entry: 2, step: 0} | _rest] =
+               decided(events)
+
+      day_start = day_number(held) * @day
+      [left] = for %Event{type: :departed, entity: @mira, time: time} <- events, do: time
+      assert left == day_start + 18 * 3600 + jitter(held, held.time) + 60
+      refute Enum.any?(decided(events), &(&1.why in [:plan_abandoned, :missed]))
+    end
+
+    test "released late in the day, she runs only the entry still in its window" do
+      {_trace, held} = Ember.region() |> Ember.controlled(@mira, :human) |> run_to(18, 30)
+      {trace, _final} = held |> released() |> run(4 * 60)
+      events = events(trace)
+
+      assert [
+               %{why: :missed, entry: 0, note: "walks the banks before dawn"},
+               %{why: :missed, entry: 1, note: "the survey"},
+               %{why: :routine, entry: 2, step: 0} | _later
+             ] = decided(events)
+
+      assert arrivals(events, "the-dry-bend") == []
+      assert [_lodge] = arrivals(events, "ashwarden-lodge")
+    end
+  end
+
+  describe "windows" do
+    @late [%{at: 23 * 3600 + 30 * 60, do: [{:wait, params: %{for: 600}}], note: "late"}]
+
+    test "an entry at 23:30 fires once each day, by the minute" do
+      region = Ember.region() |> Region.put_component(@mira, :routine, @late)
+      {trace, final} = run(region, 2 * 1440)
+      events = events(trace)
+
+      expected =
+        for day <- [region.time, region.time + @day],
+            do: Integer.floor_div(day, @day) * @day + 23 * 3600 + 30 * 60 + jitter(region, day)
+
+      assert for({%{why: :routine, entry: 0}, time} <- decided_at(events), do: time) == expected
+      refute Enum.any?(decided(events), &(&1.why == :missed))
+      assert %{done: %{0 => day}} = record(final)
+      assert day == day_number(region) + 1
+    end
+
+    test "an entry at 23:30 fires once each day, by the hour" do
+      region = Ember.region() |> Region.put_component(@mira, :routine, @late)
+      {trace, _final} = run(region, 48, 3600)
+      events = events(trace)
+
+      # Found by the step that ends on the stroke of midnight.
+      assert [first, second] =
+               for({%{why: :routine, entry: 0}, time} <- decided_at(events), do: time)
+
+      assert %{hour: 0, minute: 0} = Calendar.describe(first)
+      assert second == first + @day
+      refute Enum.any?(decided(events), &(&1.why == :missed))
+    end
+
+    test "an entry jittered past midnight is still that day's, and fires once a day" do
+      # A day on which Mira's offset carries a late entry past midnight, and
+      # the next day's offset is smaller, so the two occurrences fall on
+      # either side of it.
+      {region, offset} =
+        Enum.find_value(220..300, fn day ->
+          region = Ember.region({813, day: day, hour: 4})
+          offset = jitter(region, region.time)
+          if offset >= 120 and jitter(region, region.time + @day) < offset, do: {region, offset}
+        end)
+
+      at = @day - offset + 60
+
+      region =
+        Region.put_component(region, @mira, :routine, [
+          %{at: at, do: [{:wait, params: %{for: 600}}], note: nil}
+        ])
+
+      {trace, final} = run(region, 2 * 1440)
+      events = events(trace)
+      day_start = day_number(region) * @day
+
+      expected = [
+        day_start + @day + 60,
+        day_start + @day + at + jitter(region, region.time + @day)
+      ]
+
+      assert for({%{why: :routine, entry: 0}, time} <- decided_at(events), do: time) == expected
+      refute Enum.any?(decided(events), &(&1.why == :missed))
+      assert %{done: %{0 => day}} = record(final)
+      assert day == day_number(region) + 1
     end
   end
 
@@ -439,6 +665,152 @@ defmodule Avwe.AutopilotTest do
     end
   end
 
+  describe "the conditions" do
+    # 21:00 on a cold 813 night, Mira 120 m east of `place`, whose hearth
+    # burns in the dark.
+    defp fire_east_of(place, hearth) do
+      {x, y} = Ember.places()[place]
+      region = Ember.region({813, day: 220, hour: 21})
+      burning = Region.get(region, hearth, :hearth)
+
+      region
+      |> Region.put_component(@mira, :position, {x + 12, y})
+      |> Region.put_component(hearth, :hearth, %{burning | burning: true, lit_at: region.time})
+    end
+
+    # A routine of one entry, done for yesterday (as `prepare/1` would have
+    # it) and due whatever the jitter at the first step after `at` plus five
+    # minutes: a wait of `seconds`, then a walk to `place`.
+    defp watch(region, at, seconds, place) do
+      region
+      |> Region.put_component(@mira, :autopilot, %{
+        Autopilot.fresh()
+        | done: %{0 => day_number(region) - 1}
+      })
+      |> Region.put_component(@mira, :routine, [
+        %{at: at, do: [{:wait, params: %{for: seconds}}, {:go, target: place}], note: "a watch"}
+      ])
+    end
+
+    # A fire burning at Mira's own cell.
+    defp camp_fire(region) do
+      hearth = Region.get(region, @lodge_hearth, :hearth)
+
+      Region.put_entity(region, "camp", %{
+        hearth: %{hearth | burning: true, lit_at: region.time},
+        position: position(region),
+        repr: %{name: "a camp fire", description: nil}
+      })
+    end
+
+    test "a running plan is not interrupted by a fire in sight" do
+      {x, y} = Ember.places().town
+
+      region =
+        {813, day: 220, hour: 21}
+        |> Ember.region()
+        |> Region.put_component(@mira, :position, {x + 12, y})
+        |> watch(21 * 3600 - 5 * 60, 3600, "ashwarden-lodge")
+
+      # Decided in the first step, under way from the second.
+      {trace, waiting} = run(region, 2)
+      assert %{plan: %{entry: 0, step: 0, ref: ref}} = record(waiting)
+      assert %{verb: :wait, ref: ^ref} = action(waiting)
+      hearth = Region.get(waiting, @hearth, :hearth)
+
+      lit =
+        Region.put_component(waiting, @hearth, :hearth, %{
+          hearth
+          | burning: true,
+            lit_at: waiting.time
+        })
+
+      assert :fire in whys(lit)
+
+      {trace2, final} = run(lit, 65)
+      events = events(trace ++ trace2)
+      refute Enum.any?(decided(events), &(&1.why in [:fire, :plan_abandoned]))
+      assert routine_steps(events) == [{0, 0}, {0, 1}]
+      assert [%{ref: ^ref, verb: :wait, outcome: :success}] = results(events)
+      assert %{verb: :go, target: "ashwarden-lodge"} = action(final)
+    end
+
+    test "going to a fire needs no fire felt where the body stands" do
+      region = fire_east_of(:lodge, @lodge_hearth)
+
+      assert [%{why: :fire, intent: {:go, target: "ashwarden-lodge"}} | _rest] =
+               candidates(region)
+
+      refute :stay in whys(region)
+
+      warmed = camp_fire(region)
+      refute :fire in whys(warmed)
+      assert :stay in whys(warmed)
+    end
+
+    test "going home for the night needs no fire felt" do
+      region = fire_east_of(:docks, @lodge_hearth)
+
+      assert [%{why: :rest, utility: 0.55, intent: {:go, target: "ember-reach"}}, %{why: :idle}] =
+               candidates(region)
+
+      assert whys(camp_fire(region)) == [:stay, :idle]
+    end
+
+    test "staying by the fire needs the cold" do
+      region =
+        {813, day: 220, hour: 21}
+        |> Ember.region()
+        |> Region.put_component(@mira, :position, Ember.places().lodge)
+        |> camp_fire()
+
+      assert region.env.air_c < Autopilot.cold_c()
+      assert :stay in whys(region)
+      refute :stay in whys(Region.put_env(region, :air_c, 20.0))
+    end
+
+    test "kindling needs fuel" do
+      region = Ember.region({812, day: 199, hour: 3})
+      assert [%{why: :kindle, intent: {:kindle, target: @hearth}} | _rest] = candidates(region)
+
+      hearth = Region.get(region, @hearth, :hearth)
+      bare = Region.put_component(region, @hearth, :hearth, %{hearth | fuel_kg: 0.0})
+      refute :kindle in whys(bare)
+    end
+
+    test "the kindle that cuts in does not end a plan" do
+      region = Ember.region({812, day: 199, hour: 3})
+      hearth = Region.get(region, @hearth, :hearth)
+
+      region =
+        region
+        |> Region.put_component(@hearth, :hearth, %{hearth | fuel_kg: 0.0})
+        |> watch(3 * 3600 - 5 * 60, 1800, "the-dry-bend")
+
+      {trace, waiting} = run(region, 2)
+      assert %{plan: %{entry: 0, step: 0, ref: ref}} = record(waiting)
+      assert %{verb: :wait, ref: ^ref} = action(waiting)
+
+      fuelled = Region.put_component(waiting, @hearth, :hearth, %{hearth | fuel_kg: 8.0})
+      {trace2, final} = run(fuelled, 40)
+      events = events(trace ++ trace2)
+
+      # The walk after the half hour brings her to the bend, and the dark
+      # then turns her home: the plan ran out, it was not cut short.
+      assert [
+               %{why: :routine, entry: 0, step: 0},
+               %{why: :kindle},
+               %{why: :routine, entry: 0, step: 1},
+               %{why: :rest, utility: 0.55}
+             ] = decided(events)
+
+      assert [_bend] = arrivals(events, "the-dry-bend")
+      assert [%Event{entity: @hearth, data: %{by: @mira}}] = of(events, :fire_lit)
+      assert %{ref: ^ref} = action(elem(Enum.at(trace2, 3), 0))
+      assert %{verb: :go, target: "ember-reach"} = action(final)
+    end
+  end
+
   describe "rest" do
     test "a body away from home at dark goes home" do
       region =
@@ -454,6 +826,22 @@ defmodule Avwe.AutopilotTest do
 
       assert %{verb: :go, target: "ember-reach"} = action(elem(Enum.at(trace, 1), 0))
       assert at_place?(elem(List.last(trace), 0), "ember-reach")
+    end
+
+    test "by day, away from home with nothing to do, it goes home" do
+      region =
+        {813, day: 220, hour: 13}
+        |> Ember.region()
+        |> Region.put_component(@mira, :position, Ember.places().dry_bend)
+
+      {trace, final} = run(region, 40)
+      events = events(trace)
+
+      assert [%{why: :idle, utility: 0.3}, %{why: :idle, utility: 0.1} | _rest] = decided(events)
+      assert %{verb: :go, target: "ember-reach"} = action(elem(Enum.at(trace, 1), 0))
+      assert [_home] = arrivals(events, "ember-reach")
+      assert at_place?(final, "ember-reach")
+      assert %{verb: :wait, params: %{for: 600}} = action(final)
     end
 
     test "at home it waits until dawn" do
@@ -517,7 +905,14 @@ defmodule Avwe.AutopilotTest do
       assert position(final) == Ember.places().town
 
       {[{_region, events}], _final} = final |> released() |> run(1)
-      assert [%{why: _why}] = decided(events)
+
+      assert [
+               %{why: :missed, entry: 0},
+               %{why: :missed, entry: 1},
+               %{why: :missed, entry: 2},
+               %{why: :missed, entry: 3},
+               %{why: :rest}
+             ] = decided(events)
     end
   end
 

@@ -23,17 +23,19 @@ defmodule Avwe.Session do
   controller as percepts; `act/3` refuses the two verbs, and the `auto-`
   refs that mark autopilot's intents, with `{:error, :reserved}`.
 
-  **Idle.** When no `act/3` has arrived for `:idle_after` real milliseconds
-  (default ten minutes), the session submits `:release` and marks itself
-  yielded, so the body goes back to its routine while the player reads. The
-  next `act/3` submits `:control` first and then the act, in that order.
-  Idleness is real time and lives here, never in the pure core. The
-  controller sees the hand-over: a `:control_released` percept when the
-  session yields ("You let your routine carry you.") and a `:control_taken`
-  one when it takes the body back ("You take yourself in hand."); the take
-  on connecting and the release on closing say nothing. While yielded, the
+  **Idle.** When the controller has made no call, neither `act/3` nor
+  `look/1`, for `:idle_after` real milliseconds (default ten minutes), the
+  session submits `:release` and marks itself yielded, so the body goes
+  back to its routine while the player reads. Every call re-arms the
+  timer; a look keeps the body in hand, and the next `act/3` takes it back,
+  submitting `:control` first and then the act, in that order. Idleness is
+  real time and lives here, never in the pure core. The controller sees
+  the hand-over: a `:control_released` percept when the session yields
+  ("You let your routine carry you.") and a `:control_taken` one when it
+  takes the body back ("You take yourself in hand."); the take on
+  connecting and the release on closing say nothing. While yielded, the
   routine's own actions reach the controller as percepts whose `issuer` is
-  `:autopilot`.
+  `:autopilot`, except its waits, which `Avwe.Perception` keeps quiet.
 
   Start sessions with `Avwe.connect/2`.
   """
@@ -59,12 +61,13 @@ defmodule Avwe.Session do
   Asks the body to do something. Returns the intent's ref; its result arrives
   later as a percept with `intent: ref`.
 
-  Options: `:target`, `:params`, and `:ref` to choose the ref yourself. The
+  Options: `:target`, `:params`, and `:ref` to choose the ref yourself (a
+  string; anything else is refused with `{:error, :invalid_ref}`). The
   verbs `:control` and `:release` are the session's own, and refs starting
   with `auto-` are autopilot's: both are refused with `{:error, :reserved}`.
   """
   @spec act(pid(), Intent.verb(), keyword()) ::
-          {:ok, String.t()} | {:error, :spectator | :reserved}
+          {:ok, String.t()} | {:error, :spectator | :reserved | :invalid_ref}
   def act(session, verb, opts \\ []), do: GenServer.call(session, {:act, verb, opts})
 
   @doc "The id of the session's body, or `nil` for a spectator."
@@ -116,7 +119,7 @@ defmodule Avwe.Session do
         {:ok, Perception.look(view, state.body)}
       end
 
-    {:reply, reply, state}
+    {:reply, reply, arm_idle(state)}
   end
 
   def handle_call(:body, _from, state), do: {:reply, state.body, state}
@@ -132,21 +135,27 @@ defmodule Avwe.Session do
   def handle_call({:act, verb, opts}, _from, state) do
     ref = Keyword.get_lazy(opts, :ref, fn -> "i-#{state.next_ref}" end)
 
-    if is_binary(ref) and String.starts_with?(ref, @reserved_ref) do
-      {:reply, {:error, :reserved}, state}
-    else
-      state = if state.yielded, do: take_control(%{state | yielded: false}, :retake), else: state
+    cond do
+      not is_binary(ref) ->
+        {:reply, {:error, :invalid_ref}, state}
 
-      intent =
-        Intent.new(state.body, verb,
-          ref: ref,
-          target: opts[:target],
-          params: Keyword.get(opts, :params, %{}),
-          controller: state.controller
-        )
+      String.starts_with?(ref, @reserved_ref) ->
+        {:reply, {:error, :reserved}, state}
 
-      :ok = RegionServer.submit(state.world, @region, intent)
-      {:reply, {:ok, ref}, arm_idle(%{state | next_ref: state.next_ref + 1})}
+      true ->
+        state =
+          if state.yielded, do: take_control(%{state | yielded: false}, :retake), else: state
+
+        intent =
+          Intent.new(state.body, verb,
+            ref: ref,
+            target: opts[:target],
+            params: Keyword.get(opts, :params, %{}),
+            controller: state.controller
+          )
+
+        :ok = RegionServer.submit(state.world, @region, intent)
+        {:reply, {:ok, ref}, arm_idle(%{state | next_ref: state.next_ref + 1})}
     end
   end
 
@@ -229,7 +238,10 @@ defmodule Avwe.Session do
 
   defp announced?(_percept, _settled), do: true
 
+  # A yielded session has nothing to time: the next act takes the body back
+  # and arms it again.
   defp arm_idle(%{body: nil} = state), do: state
+  defp arm_idle(%{yielded: true} = state), do: state
 
   defp arm_idle(state) do
     tag = make_ref()

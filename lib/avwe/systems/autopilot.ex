@@ -13,23 +13,30 @@ defmodule Avwe.Systems.Autopilot do
 
   A body with a controller is left entirely alone: no intents, and no
   cancelling of what it is doing. Its plan, if a routine entry's was under
-  way, is dropped: when control is released autopilot resumes at the next
-  step with whatever is due then, and the entry runs again the next day.
+  way, is kept: when control is released autopilot resumes at the next
+  step, issuing the pending step again if the entry's window is still open
+  and dropping the plan if it has closed (`Avwe.Autopilot`, Plans).
 
   Each choice is recorded in the body's `:autopilot` component
-  (`%{current: utility, why: atom, since: time, done: %{entry => day},
-  plan: plan | nil}`) and announced with a `:decided` event (`entity: body,
-  data: %{why, intent_ref, utility}`, plus `entry`, `note` and `step` for a
-  routine entry's step) that bodies never perceive: it is for the game
-  master, like `:miracle`. A plan that ends early is announced the same way
-  with `why: :plan_abandoned`, the `entry`, the `step_ref` that ended it
-  and its `outcome` and `reason`; it submits nothing, so it names no
-  `intent_ref`.
+  (`%{current: utility, why: atom, since: time, done: %{entry => day up to
+  which it is done}, plan: plan | nil}`) and announced with a `:decided`
+  event (`entity: body, data: %{why, intent_ref, utility}`, plus `entry`,
+  `note` and `step` for a routine entry's step) that bodies never perceive:
+  it is for the game master, like `:miracle`. A routine entry that adopts
+  the body's running
+  action as its first step submits nothing and names the action's ref as
+  `adopted` instead of `intent_ref`. A plan that ends early is announced
+  the same way with `why: :plan_abandoned`, the `entry`, the `step_ref`
+  that ended it and its `outcome` and `reason`; it submits nothing, so it
+  names no `intent_ref`. An entry whose window closed before it was done is
+  marked done and announced with `why: :missed` and the `entry`, before the
+  body decides.
 
   `prepare/1` marks the routine entries whose time is before the region's
-  starting time as done for that day: a world begun at noon did not miss
-  the morning. The entries' own times count here, not the day's jitter, so
-  an entry at the starting hour is still to come.
+  starting time as done for that day, and the rest for the day before: a
+  world begun at noon did not miss the morning, nor the night before. The
+  entries' own times count here, not the day's jitter, so an entry at the
+  starting hour is still to come.
   """
 
   @behaviour Avwe.System
@@ -48,23 +55,24 @@ defmodule Avwe.Systems.Autopilot do
 
       past =
         for {entry, index} <- Enum.with_index(Region.get(acc, body, :routine)),
-            entry.at < tod,
             into: %{},
-            do: {index, today}
+            do: {index, if(entry.at < tod, do: today, else: today - 1)}
 
       Region.put_component(acc, body, :autopilot, %{record | done: Map.merge(past, record.done)})
     end)
   end
 
+  # A plan's step ends with the `:action_result` the brain reads from this
+  # step's outbox, so this system must run after Movement and Waiting, which
+  # emit those results, or a step's end would go by unseen.
   @impl Avwe.System
   def run(region, tick) do
-    bodies = Region.with_components(region, [:body, :autopilot, :position])
-    jitter = Autopilot.jitter(tick, bodies)
-
-    Enum.reduce(bodies, {region, []}, fn body, {acc, events} ->
+    region
+    |> Region.with_components([:body, :autopilot, :position])
+    |> Enum.reduce({region, []}, fn body, {acc, events} ->
       if free?(acc, body),
-        do: drive(acc, tick, body, jitter[body], events),
-        else: {drop_plan(acc, body), events}
+        do: acc |> miss(tick, body, events) |> drive(tick, body),
+        else: {acc, events}
     end)
   end
 
@@ -75,13 +83,41 @@ defmodule Avwe.Systems.Autopilot do
     end
   end
 
-  defp drive(region, tick, body, jitter_s, events) do
-    case Autopilot.decide(region, tick, body, jitter_s) do
+  # Marks the entries whose window closed before they were done.
+  defp miss(region, tick, body, events) do
+    record = Region.get(region, body, :autopilot)
+    entries = Region.get(region, body, :routine) || []
+
+    case Autopilot.missed(entries, tick, body, record.done) do
+      [] ->
+        {region, events}
+
+      missed ->
+        done = Map.new(missed, fn {index, _entry, day} -> {index, day} end)
+        record = %{record | done: Map.merge(record.done, done)}
+
+        announced =
+          for {index, entry, _day} <- missed,
+              do:
+                Event.new(:decided,
+                  entity: body,
+                  data: %{why: :missed, entry: index, note: entry.note}
+                )
+
+        {Region.put_component(region, body, :autopilot, record), events ++ announced}
+    end
+  end
+
+  defp drive({region, events}, tick, body) do
+    case Autopilot.decide(region, tick, body) do
       :stay ->
         {region, events}
 
       {:act, choice} ->
         act(region, tick, body, choice, events)
+
+      {:adopt, choice} ->
+        adopt(region, tick, body, choice, events)
 
       {:plan_done, then} ->
         region |> drop_plan(body) |> carry_on(tick, body, then, events)
@@ -111,26 +147,40 @@ defmodule Avwe.Systems.Autopilot do
         plan -> %{plan | ref: ref}
       end
 
-    decided =
-      Map.merge(record, %{
-        current: choice.utility,
-        why: choice.why,
-        since: Tick.end_time(tick),
-        done: Map.merge(record.done, Map.get(choice, :done, %{})),
-        plan: plan
-      })
-
-    data =
-      choice
-      |> Map.take([:entry, :note, :step])
-      |> Map.merge(%{why: choice.why, intent_ref: ref, utility: choice.utility})
+    data = Map.merge(announced(choice), %{intent_ref: ref})
 
     region =
       region
       |> Region.submit(intent)
-      |> Region.put_component(body, :autopilot, decided)
+      |> Region.put_component(body, :autopilot, decided(record, tick, choice, plan))
 
     {region, events ++ [Event.new(:decided, entity: body, data: data)]}
+  end
+
+  # The running action becomes the routine step: nothing is submitted.
+  defp adopt(region, tick, body, choice, events) do
+    record = Region.get(region, body, :autopilot)
+    %{ref: ref} = Region.get(region, body, :action)
+    plan = %{choice.plan | ref: ref}
+    data = Map.merge(announced(choice), %{adopted: ref})
+    region = Region.put_component(region, body, :autopilot, decided(record, tick, choice, plan))
+    {region, events ++ [Event.new(:decided, entity: body, data: data)]}
+  end
+
+  defp decided(record, tick, choice, plan) do
+    Map.merge(record, %{
+      current: choice.utility,
+      why: choice.why,
+      since: Tick.end_time(tick),
+      done: Map.merge(record.done, Map.get(choice, :done, %{})),
+      plan: plan
+    })
+  end
+
+  defp announced(choice) do
+    choice
+    |> Map.take([:entry, :note, :step])
+    |> Map.merge(%{why: choice.why, utility: choice.utility})
   end
 
   defp abandon(region, body, outcome, reason) do

@@ -12,12 +12,21 @@ defmodule Avwe.Autopilot do
      entries `%{at: seconds_of_day, do: [step], note: string | nil}`, sorted
      by time. Each step is an intent, `{verb, opts}` or `{verb}`, and
      `{:rest}` means wait until dawn; a single step stands for a plan of one.
-     An entry is due when its occurrence for the day (its time plus the
-     body's jitter) is at or before the end of the step and it has not been
-     done today (`autopilot.done`, entry index to day number), so an entry
-     whose moment passed while a controller had the body fires at the next
-     decision point. When several are due, the last is taken and all of
-     them are marked done. Taking an entry starts its **plan** (below).
+     An entry has a **window**: it is due from its occurrence for the day
+     (its time plus the body's jitter for that day) up to the next entry's
+     occurrence, the last entry up to and including midnight (so a history
+     step ending on the stroke of midnight still finds it), unless it has
+     been done that day. `autopilot.done` maps entry index to the day
+     number, of the entry's own time, up to which it is done (or missed):
+     an entry jittered past midnight is still that day's, and the day
+     before is looked at as well as the day the step ends in. An entry
+     whose window has closed before it was done
+     was **missed**: a decision point marks it done and says so (a
+     `:decided` event with `why: :missed`, no intent), so a body given back
+     late in the day runs only the latest entry still in its window, never
+     the stale ones back to back. When several are due, the last is taken
+     and all of them are marked done. Taking an entry starts its **plan**
+     (below).
   2. **Kindle at home** (0.8, urgent). When the air is cold, below
      `#{15.0} °C` (the air `Avwe.Prose` calls cool), no burning source is
      felt at the body's cell (`Avwe.Systems.Fire.felt/2`), and the body is
@@ -27,30 +36,47 @@ defmodule Avwe.Autopilot do
      where the body stands: wait thirty minutes. The body keeps its place by
      the fire instead of setting off home and turning back for the warmth.
   4. **Go to a fire** (0.7). Dark and cold, nothing felt, and a burning
-     hearth the body can see (as fires are seen: within sight or 200 m)
-     stands at a known place nearer than 500 m: go there.
+     hearth the body can see (as fires are seen: within sight, or 200 m at
+     night) stands at a known place: go there.
   5. **Rest** (0.5). Dark (from sunset up to sunrise, when `env.light` is
      0.0) and at home: wait until dawn. Dark, away from home and no fire
      felt: go home (0.55).
-  6. **Idle** (0.1): wait ten minutes.
+  6. **Idle**. By day, away from home: go home (0.3), so a body given back
+     wherever it was does not stand there all day. Otherwise wait ten
+     minutes (0.1).
 
   ## Plans
 
   A routine entry's steps run in sequence. The body's `:autopilot` record
-  keeps `plan: %{entry: index, steps: [remaining], ref: pending_ref}` while
-  one runs: `ref` is the step under way. The step's `:action_result`, read
-  from the region's outbox in the step it is emitted, ends it: `:success`
-  submits the next step, or ends the plan after the last; anything else
-  (`:blocked`, `:failure`, `:interrupted`) abandons the plan, announced
-  with a `:decided` event whose `why` is `:plan_abandoned`. A step refused
-  outright never replaced what the body was doing, so its result is read
-  whatever the body is doing, not only when it stands idle.
-  An entry is marked done when its plan starts, so a plan that fails is not
-  retried that day. A plan is routine work: while one runs, only the urgent
-  kindle may cut in; rest, the fires and idling never do, so the morning
-  walk is not cut short by a cold hour. When a controller takes the body
-  the plan is dropped and does not resume on release; the entry runs again
-  the next day.
+  keeps `plan: %{entry: index, day: day, step: n, steps: [remaining], ref:
+  pending_ref}` while one runs: `step` is the index of the step under way
+  in the entry's `do`, `ref` its intent's ref, `day` the day the entry is
+  done for. The step's `:action_result`, read from the region's outbox in
+  the step it is emitted, ends it: `:success` submits the next step, or
+  ends the plan after the last; anything else (`:blocked`, `:failure`,
+  `:interrupted`) abandons the plan, announced with a `:decided` event
+  whose `why` is `:plan_abandoned`. A step refused outright never replaced
+  what the body was doing, so its result is read whatever the body is
+  doing, not only when it stands idle. An entry is marked done when its
+  plan starts, so a plan that fails is not retried that day.
+
+  A plan is routine work: it resists needs, not the next entry. While one
+  runs, the urgent kindle may cut in (it is instant, and leaves the plan
+  under way), and a routine entry that comes due may replace a step that is
+  a wait; rest, the fires and idling never do, so the morning walk is not
+  cut short by a cold hour, and the night's rest does not lock out the walk
+  at dawn. An entry whose first step is the very intent the body is already
+  on (same verb, target and params) does not interrupt it: the entry is
+  marked done, the running action is adopted as that step, and the plan
+  goes on from the next (announced with `adopted: ref` in place of
+  `intent_ref`), so the rest entry does not restart a rest already begun.
+
+  When a controller takes the body the plan is kept. On release, if the
+  entry's window is still open, the pending step is issued again (`go` to
+  a place the body is already at succeeds as `:already_there` and the plan
+  goes on; a wait simply waits again); if the window has closed the plan is
+  dropped, announced as abandoned with reason `:window_closed`, and the
+  entry is done for the day.
 
   ## Deciding
 
@@ -93,7 +119,6 @@ defmodule Avwe.Autopilot do
   @invited_c 25.0
   @at_place_cells 2
   @fire_sight_cells 20
-  @fire_reach_cells 50
   @idle_s 600
   @stay_s 1_800
   @jitter_minutes 5
@@ -104,7 +129,8 @@ defmodule Avwe.Autopilot do
     fire: 0.7,
     rest: 0.5,
     rest_away: 0.55,
-    idle: 0.1
+    idle: 0.1,
+    idle_away: 0.3
   }
   @order [:routine, :kindle, :stay, :fire, :rest, :idle]
   @fresh %{current: nil, why: nil, since: nil, done: %{}, plan: nil}
@@ -112,7 +138,13 @@ defmodule Avwe.Autopilot do
   @type step :: {atom()} | {atom(), keyword()}
   @type entry :: %{at: non_neg_integer(), do: [step()] | step(), note: String.t() | nil}
   @type done :: %{non_neg_integer() => integer()}
-  @type plan :: %{entry: non_neg_integer(), steps: [step()], ref: String.t() | nil}
+  @type plan :: %{
+          entry: non_neg_integer(),
+          day: integer(),
+          step: non_neg_integer(),
+          steps: [step()],
+          ref: String.t() | nil
+        }
 
   @type candidate :: %{
           required(:utility) => float(),
@@ -126,12 +158,14 @@ defmodule Avwe.Autopilot do
         }
 
   @typedoc """
-  What a body does this step: act on a candidate, leave its action alone, or
-  first end its plan (finished, or abandoned with the step's outcome and
-  reason) and then one of those two.
+  What a body does this step: act on a candidate, adopt its running action
+  as a routine entry's first step, leave its action alone, or first end its
+  plan (finished, or abandoned with the step's outcome and reason) and then
+  one of those.
   """
   @type decision ::
           {:act, candidate()}
+          | {:adopt, candidate()}
           | :stay
           | {:plan_done, {:act, candidate()} | :stay}
           | {:plan_abandoned, {atom() | nil, atom()}, {:act, candidate()} | :stay}
@@ -148,39 +182,36 @@ defmodule Avwe.Autopilot do
   @spec cold_c() :: float()
   def cold_c, do: @cold_c
 
-  @doc """
-  What a body on its own does this step. `jitter_s` is the body's routine
-  offset for the day (`jitter/2`).
-  """
-  @spec decide(Region.t(), Tick.t(), Region.entity_id(), integer()) :: decision()
-  def decide(%Region{} = region, %Tick{} = tick, body, jitter_s) do
+  @doc "What a body on its own does this step."
+  @spec decide(Region.t(), Tick.t(), Region.entity_id()) :: decision()
+  def decide(%Region{} = region, %Tick{} = tick, body) do
     action = Region.get(region, body, :action)
     record = Region.get(region, body, :autopilot) || @fresh
     plan = Map.get(record, :plan)
     result = plan && step_result(region, plan.ref)
 
     cond do
-      result != nil -> step_ended(region, tick, body, jitter_s, record, plan, result, action)
-      plan != nil and action == nil -> plan_lost(region, tick, body, jitter_s, record)
-      action == nil -> {:act, best(region, tick, body, jitter_s, record)}
-      true -> interrupt(region, tick, body, jitter_s, record, action, plan)
+      result != nil -> step_ended(region, tick, body, record, plan, result, action)
+      plan != nil and not under_way?(action, plan) -> resume(region, tick, body, record)
+      action == nil -> {:act, best(region, tick, body, record)}
+      true -> interrupt(region, tick, body, record, action, plan)
     end
   end
 
   @doc """
   Every candidate open to the body this step, in order of preference.
   """
-  @spec candidates(Region.t(), Tick.t(), Region.entity_id(), integer(), map()) :: [candidate()]
-  def candidates(%Region{} = region, %Tick{} = tick, body, jitter_s, record) do
+  @spec candidates(Region.t(), Tick.t(), Region.entity_id(), map()) :: [candidate()]
+  def candidates(%Region{} = region, %Tick{} = tick, body, record) do
     here = situation(region, tick, body)
 
     [
-      routine(region, tick, body, jitter_s, record),
+      routine(region, tick, body, record),
       kindle(region, body, here),
       stay(here),
       fire(region, body, here),
       rest(here),
-      idle()
+      idle(here)
     ]
     |> Enum.reject(&is_nil/1)
   end
@@ -218,21 +249,65 @@ defmodule Avwe.Autopilot do
   end
 
   @doc """
-  The routine entries due this step, as `{index, entry, day}`, earliest
-  first: those whose occurrence for the day the step ends in is at or
-  before the step's end and that `done` does not record for that day.
+  The body's routine entries due this step, as `{index, entry, day}`, the
+  day before the step's end first and then that day, each day's earliest
+  first: those whose window (see the module doc) holds the end of the step
+  and that `done` does not record as done up to `day`, the day of the
+  entry's own time.
   """
-  @spec due([entry()], Tick.t(), integer(), done()) ::
+  @spec due([entry()], Tick.t(), Region.entity_id(), done()) ::
           [{non_neg_integer(), entry(), integer()}]
-  def due(entries, %Tick{} = tick, jitter_s, done) do
-    day = Calendar.day()
-    today = Integer.floor_div(Tick.end_time(tick), day)
+  def due(entries, %Tick{} = tick, body, done) do
+    for %{open?: true} = window <- windows(entries, tick, body, done),
+        do: {window.index, window.entry, window.day}
+  end
 
-    for {entry, index} <- Enum.with_index(entries),
-        occurrence = Tick.last_occurrence(tick, day, entry.at + jitter_s),
-        Integer.floor_div(occurrence, day) == today,
-        Map.get(done, index) != today,
-        do: {index, entry, today}
+  @doc """
+  The body's routine entries missed, as `{index, entry, day}`, in the order
+  of `due/4`: their occurrence has passed, their window has closed, and
+  `done` does not record them for that day.
+  """
+  @spec missed([entry()], Tick.t(), Region.entity_id(), done()) ::
+          [{non_neg_integer(), entry(), integer()}]
+  def missed(entries, %Tick{} = tick, body, done) do
+    for %{open?: false} = window <- windows(entries, tick, body, done),
+        do: {window.index, window.entry, window.day}
+  end
+
+  # Each entry's occurrence that has come, for the day before the step's
+  # end and for that day (a window never reaches further back), when `done`
+  # does not record the entry for that day, with whether its window still
+  # holds the end of the step. The window runs from the occurrence up to the
+  # next entry's, in the body's jittered frame for the day; the last entry's
+  # up to and including the day's midnight (or the occurrence itself, when
+  # the jitter put it past midnight).
+  defp windows(entries, tick, body, done) do
+    day = Calendar.day()
+    now = Tick.end_time(tick)
+    today = Integer.floor_div(now, day)
+
+    for key <- [today - 1, today],
+        offset = offset(tick, body, key),
+        day_start = key * day,
+        {entry, index} <- Enum.with_index(entries),
+        occurrence = day_start + entry.at + offset,
+        occurrence <= now,
+        not done?(done, index, key) do
+      until =
+        case Enum.at(entries, index + 1) do
+          nil -> max(day_start + day, occurrence)
+          next -> day_start + next.at + offset - 1
+        end
+
+      %{index: index, entry: entry, day: key, open?: now <= until}
+    end
+  end
+
+  defp done?(done, index, key) do
+    case done do
+      %{^index => day} -> day >= key
+      _not_yet -> false
+    end
   end
 
   @doc """
@@ -243,13 +318,15 @@ defmodule Avwe.Autopilot do
   """
   @spec jitter(Tick.t(), [Region.entity_id()]) :: %{Region.entity_id() => integer()}
   def jitter(%Tick{} = tick, bodies) do
-    day_start = Integer.floor_div(tick.time, Calendar.day()) * Calendar.day()
+    today = Integer.floor_div(tick.time, Calendar.day())
+    Map.new(bodies, &{&1, offset(tick, &1, today)})
+  end
 
-    Map.new(bodies, fn body ->
-      rng = Tick.rng(%{tick | time: day_start}, {__MODULE__, body})
-      {minutes, _rng} = :rand.uniform_s(2 * @jitter_minutes + 1, rng)
-      {body, (minutes - @jitter_minutes - 1) * Calendar.minute()}
-    end)
+  # The body's routine offset for day number `day`, in seconds.
+  defp offset(tick, body, day) do
+    rng = Tick.rng(%{tick | time: day * Calendar.day()}, {__MODULE__, body})
+    {minutes, _rng} = :rand.uniform_s(2 * @jitter_minutes + 1, rng)
+    (minutes - @jitter_minutes - 1) * Calendar.minute()
   end
 
   @doc """
@@ -274,21 +351,40 @@ defmodule Avwe.Autopilot do
 
   # Deciding
 
-  defp best(region, tick, body, jitter_s, record),
-    do: region |> candidates(tick, body, jitter_s, record) |> choose()
+  defp best(region, tick, body, record), do: region |> candidates(tick, body, record) |> choose()
 
-  # The body has an action. A plan's step yields only to something urgent; a
-  # wait of the body's own (not a plan's) to anything better and to a routine
-  # entry come due; anything else only to something urgent.
-  defp interrupt(region, tick, body, jitter_s, record, action, plan) do
-    best = best(region, tick, body, jitter_s, record)
+  # The body has an action. An entry whose first step is that very action
+  # adopts it. Otherwise a plan's step yields to something urgent, and a
+  # plan's wait to a routine entry come due; a wait of the body's own (not a
+  # plan's) to anything better and to a routine entry; anything else only
+  # to something urgent.
+  defp interrupt(region, tick, body, record, action, plan) do
+    best = best(region, tick, body, record)
 
     cond do
-      plan != nil -> if urgent?(best, record), do: {:act, best}, else: :stay
-      own_wait?(action, body) and (best.why == :routine or better?(best, record)) -> {:act, best}
-      urgent?(best, record) -> {:act, best}
-      true -> :stay
+      best.why == :routine and same_intent?(best.intent, action) ->
+        {:adopt, best}
+
+      plan != nil ->
+        on_plan(best, record, action)
+
+      own_wait?(action, body) and (best.why == :routine or better?(best, record)) ->
+        {:act, best}
+
+      urgent?(best, record) ->
+        {:act, best}
+
+      true ->
+        :stay
     end
+  end
+
+  # A plan's step yields to something urgent, and a plan's wait to a routine
+  # entry come due.
+  defp on_plan(best, record, %{verb: verb}) do
+    if urgent?(best, record) or (best.why == :routine and verb == :wait),
+      do: {:act, best},
+      else: :stay
   end
 
   # The plan's pending step has ended this step. On success the next step
@@ -296,31 +392,41 @@ defmodule Avwe.Autopilot do
   # refused outright, or an instant one, ends without having replaced the
   # body's action, so what comes after the plan is decided as for a body
   # with no plan: freely when idle, under the interrupt rules otherwise.
-  defp step_ended(region, tick, body, jitter_s, record, plan, result, action) do
+  defp step_ended(region, tick, body, record, plan, result, action) do
     case {result, plan.steps} do
-      {%{outcome: :success}, [step | rest]} ->
-        {:act, plan_candidate(Region.get(region, body, :routine), plan.entry, step, rest)}
+      {%{outcome: :success}, [_step | _rest]} ->
+        {:act,
+         plan_candidate(Region.get(region, body, :routine), plan.entry, plan.day, plan.step + 1)}
 
       {%{outcome: :success}, []} ->
-        {:plan_done, after_plan(region, tick, body, jitter_s, record, action)}
+        {:plan_done, after_plan(region, tick, body, record, action)}
 
       {%{outcome: outcome, reason: reason}, _steps} ->
-        {:plan_abandoned, {outcome, reason},
-         after_plan(region, tick, body, jitter_s, record, action)}
+        {:plan_abandoned, {outcome, reason}, after_plan(region, tick, body, record, action)}
     end
   end
 
-  # No action, a plan, and no result for its step this step: the result
-  # went by unseen (it never should), so the plan is given up rather than
-  # waited on for ever.
-  defp plan_lost(region, tick, body, jitter_s, record),
-    do: {:plan_abandoned, {nil, :lost}, {:act, best(region, tick, body, jitter_s, record)}}
+  # A plan whose pending step is neither under way nor ending this step: its
+  # result went by while a controller had the body. If the entry's window is
+  # still open the step is issued again; if not, the plan is dropped.
+  defp resume(region, tick, body, %{plan: plan} = record) do
+    entries = Region.get(region, body, :routine) || []
 
-  defp after_plan(region, tick, body, jitter_s, record, nil),
-    do: {:act, best(region, tick, body, jitter_s, record)}
+    if open?(entries, plan, tick, body),
+      do: {:act, plan_candidate(entries, plan.entry, plan.day, plan.step)},
+      else: {:plan_abandoned, {nil, :window_closed}, {:act, best(region, tick, body, record)}}
+  end
 
-  defp after_plan(region, tick, body, jitter_s, record, action),
-    do: interrupt(region, tick, body, jitter_s, record, action, nil)
+  defp open?(entries, plan, tick, body) do
+    Enum.any?(due(entries, tick, body, %{}), fn {index, _entry, day} ->
+      index == plan.entry and day == plan.day
+    end)
+  end
+
+  defp after_plan(region, tick, body, record, nil), do: {:act, best(region, tick, body, record)}
+
+  defp after_plan(region, tick, body, record, action),
+    do: interrupt(region, tick, body, record, action, nil)
 
   # The pending step's result among the events emitted so far. Refs are
   # unique, and this step's events are at the head of the outbox.
@@ -331,6 +437,9 @@ defmodule Avwe.Autopilot do
     end)
   end
 
+  defp under_way?(%{ref: ref}, %{ref: ref}), do: true
+  defp under_way?(_action, _plan), do: false
+
   defp urgent?(candidate, record), do: candidate.utility >= @urgent and better?(candidate, record)
 
   defp own_wait?(%{verb: :wait, ref: ref}, body), do: String.starts_with?(ref, "auto-#{body}-")
@@ -339,33 +448,41 @@ defmodule Avwe.Autopilot do
   defp better?(candidate, %{current: nil}), do: candidate.utility > 0.0
   defp better?(candidate, %{current: current}), do: candidate.utility > current
 
+  # The same verb, target and params as the running action.
+  defp same_intent?({verb, opts}, %{verb: verb} = action) do
+    opts[:target] == action.target and Keyword.get(opts, :params, %{}) == action.params
+  end
+
+  defp same_intent?(_intent, _action), do: false
+
   # Candidates
 
-  defp routine(region, tick, body, jitter_s, record) do
+  defp routine(region, tick, body, record) do
     with entries when entries != nil <- Region.get(region, body, :routine),
-         [_due | _rest] = due <- due(entries, tick, jitter_s, record.done) do
-      {index, entry, _today} = List.last(due)
-      [step | rest] = steps(entry)
+         [_due | _rest] = due <- due(entries, tick, body, record.done) do
+      {index, _entry, day} = List.last(due)
 
       entries
-      |> plan_candidate(index, step, rest)
-      |> Map.put(:done, Map.new(due, fn {index, _entry, today} -> {index, today} end))
+      |> plan_candidate(index, day, 0)
+      |> Map.put(:done, Map.new(due, fn {index, _entry, day} -> {index, day} end))
     else
       _nothing_due -> nil
     end
   end
 
-  defp plan_candidate(entries, index, step, rest) do
-    entry = Enum.at(entries || [], index)
+  # The candidate for step `n` of an entry's plan.
+  defp plan_candidate(entries, index, day, n) do
+    entry = Enum.at(entries, index)
+    [step | rest] = entry |> steps() |> Enum.drop(n)
 
     %{
       utility: @utilities.routine,
       intent: step_intent(step),
       why: :routine,
       entry: index,
-      note: entry && entry.note,
-      step: if(entry, do: length(steps(entry)) - length(rest) - 1, else: 0),
-      plan: %{entry: index, steps: rest, ref: nil}
+      note: entry.note,
+      step: n,
+      plan: %{entry: index, day: day, step: n, steps: rest, ref: nil}
     }
   end
 
@@ -411,7 +528,8 @@ defmodule Avwe.Autopilot do
 
   defp fire(_region, _body, _here), do: nil
 
-  # The known place at the nearest burning hearth the body can see within 500 m.
+  # The known place at the nearest burning hearth the body can see: within
+  # sight, or 200 m, as a fire is seen at night.
   defp fire_in_sight(region, body, position) do
     knows = Region.get(region, body, :knows) || MapSet.new()
     sight = max(Perception.sight_cells(Map.get(region.env, :light, 0.0)), @fire_sight_cells)
@@ -424,9 +542,7 @@ defmodule Avwe.Autopilot do
     region
     |> Heat.sources()
     |> Enum.map(&{Space.distance(position, &1.position), &1})
-    |> Enum.filter(fn {distance, _source} ->
-      distance > 0 and distance <= sight and distance < @fire_reach_cells
-    end)
+    |> Enum.filter(fn {distance, _source} -> distance > 0 and distance <= sight end)
     |> Enum.sort_by(fn {distance, source} -> {distance, source.id} end)
     |> Enum.find_value(fn {_distance, source} -> place_at(places, source.position) end)
   end
@@ -459,7 +575,10 @@ defmodule Avwe.Autopilot do
     tod < Daylight.sunrise() or tod >= Daylight.sunset()
   end
 
-  defp idle, do: candidate(:idle, {:wait, params: %{for: @idle_s}})
+  defp idle(%{dark?: false, away?: true, home: home}),
+    do: %{candidate(:idle, {:go, target: home}) | utility: @utilities.idle_away}
+
+  defp idle(_here), do: candidate(:idle, {:wait, params: %{for: @idle_s}})
 
   defp candidate(why, intent) when why in @order,
     do: %{utility: @utilities[why], intent: intent, why: why}

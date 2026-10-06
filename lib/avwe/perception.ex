@@ -37,9 +37,12 @@ defmodule Avwe.Perception do
 
   A body's own actions carry who asked for them (`Avwe.Percept`'s
   `issuer`): its controller, or its routine when autopilot had it. The
-  hand-over between the two (`:control_released`, `:control_taken`) is a
-  percept of the body's own and nobody else's; `:decided` stays the game
-  master's.
+  waits autopilot issues (an idle, resting or fireside body) are quiet:
+  they raise no percept at all, started, under way or ended, so a yielded
+  session is not told every ten minutes that it is still waiting; the
+  routine's journeys and kindling still show. The hand-over between the
+  two (`:control_released`, `:control_taken`) is a percept of the body's
+  own and nobody else's; `:decided` stays the game master's.
   """
 
   alias Avwe.{Event, Percept, Prose, Space, Terrain}
@@ -123,7 +126,9 @@ defmodule Avwe.Perception do
   def percepts(view, body, events), do: Enum.flat_map(events, &perceive(view, body, &1))
 
   defp perceive(view, body, %Event{type: type} = event) when type in @own_events do
-    if body != nil and event.entity == body, do: [own(view, body, event)], else: []
+    if body != nil and event.entity == body and not quiet?(event.data),
+      do: [own(view, body, event)],
+      else: []
   end
 
   defp perceive(view, body, %Event{type: :speech} = event), do: hear(view, body, event)
@@ -157,6 +162,10 @@ defmodule Avwe.Perception do
        do: [hand_over(body, event)]
 
   defp perceive(_view, _body, _event), do: []
+
+  # Autopilot's waits say nothing.
+  defp quiet?(%{verb: :wait, ref: ref}), do: Percept.issuer(ref) == :autopilot
+  defp quiet?(_data), do: false
 
   defp own(view, body, %Event{type: :action_started, data: data} = event) do
     %Percept{

@@ -174,9 +174,9 @@ defmodule Avwe do
     * `:sink` - the process that receives percepts. Default: the caller.
     * `:controller` - `:human` (default), `:mcp` or `:arbor`; anything else
       fails with `:invalid_controller`.
-    * `:idle_after` - real milliseconds without an `Avwe.Session.act/3`
-      after which the session yields the body to autopilot until its next
-      act. Default: ten minutes.
+    * `:idle_after` - real milliseconds without a call on the session
+      (`Avwe.Session.act/3` or `Avwe.Session.look/1`) after which it yields
+      the body to autopilot until its next act. Default: ten minutes.
 
   Fails with `:no_such_world`, `:no_such_body`, `:body_taken` or
   `:invalid_controller`.
