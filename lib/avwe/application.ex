@@ -5,7 +5,7 @@ defmodule Avwe.Application do
 
   require Logger
 
-  @impl true
+  @impl Application
   def start(_type, _args) do
     children =
       [

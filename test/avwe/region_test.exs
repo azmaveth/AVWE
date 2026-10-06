@@ -74,7 +74,7 @@ defmodule Avwe.RegionTest do
 
     # Emits one event a step, then a second that records how many events
     # `Region.step_events/2` showed it.
-    @impl true
+    @impl Avwe.System
     def run(region, tick) do
       tock = Event.new(:tock, data: %{step: tick.step})
       seen = Region.step_events(%{region | outbox: [tock | region.outbox]}, tick)

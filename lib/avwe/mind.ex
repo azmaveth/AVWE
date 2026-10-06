@@ -239,7 +239,7 @@ defmodule Avwe.Mind do
     :exit, _gone -> :ok
   end
 
-  @impl true
+  @impl GenServer
   def init(opts) do
     controller = Keyword.get(opts, :controller, :mcp)
     body = Keyword.fetch!(opts, :body)
@@ -281,7 +281,7 @@ defmodule Avwe.Mind do
     end
   end
 
-  @impl true
+  @impl GenServer
   def handle_call(:look, _from, state) do
     {reply, state} =
       case session_look(state) do
@@ -329,7 +329,7 @@ defmodule Avwe.Mind do
     end
   end
 
-  @impl true
+  @impl GenServer
   def handle_info({:avwe_percepts, session, percepts}, %{session: session} = state) do
     state = Enum.reduce(percepts, state, &buffer_percept(&2, &1))
     {state, interrupted} = Enum.reduce(percepts, {state, false}, &take/2)

@@ -54,7 +54,7 @@ defmodule Avwe.World do
     }
   end
 
-  @impl true
+  @impl Supervisor
   def init(opts) do
     id = Keyword.fetch!(opts, :id)
     regions = Keyword.fetch!(opts, :regions)

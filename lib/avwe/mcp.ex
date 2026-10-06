@@ -55,12 +55,12 @@ defmodule Avwe.MCP do
 
   use ExMCP.Server.Handler
 
-  require Logger
-
   alias Avwe.MCP.{Players, Report, Steps}
   alias Avwe.{Mind, Prose}
   alias Avwe.Telnet.Command
   alias ExMCP.Internal.VersionRegistry
+
+  require Logger
 
   @max_wait_seconds 25
   @handler_timeout (@max_wait_seconds + 15) * 1_000

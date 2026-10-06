@@ -40,9 +40,9 @@ defmodule Avwe.RegionServer do
 
   use GenServer
 
-  require Logger
-
   alias Avwe.{Intent, Region, Store}
+
+  require Logger
 
   @default_snapshot_every 1_000
   @default_snapshot_keep 5
@@ -102,7 +102,7 @@ defmodule Avwe.RegionServer do
     end
   end
 
-  @impl true
+  @impl GenServer
   def init(opts) do
     # So terminate/2 runs on supervisor shutdown and closes the store.
     Process.flag(:trap_exit, true)
@@ -133,7 +133,7 @@ defmodule Avwe.RegionServer do
     end
   end
 
-  @impl true
+  @impl GenServer
   def handle_call({:submit, intent}, _from, state), do: {:reply, :ok, accept(state, intent)}
 
   def handle_call({:advance, steps}, _from, state) do
@@ -152,12 +152,12 @@ defmodule Avwe.RegionServer do
     {:reply, {:ok, Region.state_hash(state.region)}, state}
   end
 
-  @impl true
+  @impl GenServer
   def handle_info({:EXIT, _pid, reason}, state) do
     {:stop, {:linked_process_exited, reason}, state}
   end
 
-  @impl true
+  @impl GenServer
   def terminate(_reason, %{store: nil}), do: :ok
   def terminate(_reason, %{store: store}), do: Store.close(store)
 

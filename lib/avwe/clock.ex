@@ -29,7 +29,7 @@ defmodule Avwe.Clock do
 
   defp via(world), do: {:via, Registry, {Avwe.Registry, {:clock, world}}}
 
-  @impl true
+  @impl GenServer
   def init(opts) do
     state = %{
       world: Keyword.fetch!(opts, :world),
@@ -42,13 +42,13 @@ defmodule Avwe.Clock do
     {:ok, state}
   end
 
-  @impl true
+  @impl GenServer
   def handle_call({:step, ticks}, _from, state) do
     state = Enum.reduce(1..ticks, state, fn _n, acc -> tick(acc) end)
     {:reply, {:ok, state.last}, state}
   end
 
-  @impl true
+  @impl GenServer
   def handle_info(:tick, state) do
     schedule(state.mode)
     {:noreply, tick(state)}

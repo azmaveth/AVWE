@@ -11,9 +11,9 @@ defmodule Avwe.Telnet do
 
   use GenServer
 
-  require Logger
-
   alias Avwe.Telnet.Connection
+
+  require Logger
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, Keyword.take(opts, [:name]))
@@ -23,7 +23,7 @@ defmodule Avwe.Telnet do
   @spec port(GenServer.server()) :: :inet.port_number()
   def port(server), do: GenServer.call(server, :port)
 
-  @impl true
+  @impl GenServer
   def init(opts) do
     options = [:binary, packet: :line, active: false, reuseaddr: true]
 
@@ -41,7 +41,7 @@ defmodule Avwe.Telnet do
     end
   end
 
-  @impl true
+  @impl GenServer
   def handle_call(:port, _from, state), do: {:reply, state.port, state}
 
   defp accept(listen, connections, session_opts) do

@@ -27,9 +27,9 @@ defmodule Avwe.MCP.Players do
 
   use GenServer
 
-  require Logger
-
   alias Avwe.Mind
+
+  require Logger
 
   @sweep_ms 60_000
   @quit_after 15 * 60_000
@@ -106,7 +106,7 @@ defmodule Avwe.MCP.Players do
   @spec playing(atom()) :: %{String.t() => key()}
   def playing(world), do: GenServer.call(__MODULE__, {:playing, world})
 
-  @impl true
+  @impl GenServer
   def init(opts) do
     sweep_ms = Keyword.get(opts, :sweep_ms, @sweep_ms)
     quit_after = Keyword.get(opts, :quit_after, @quit_after)
@@ -118,7 +118,7 @@ defmodule Avwe.MCP.Players do
     {:ok, %{players: %{}, sweep_ms: sweep_ms, quit_after: quit_after}}
   end
 
-  @impl true
+  @impl GenServer
   def handle_call({:free, key}, _from, state) do
     if Map.has_key?(state.players, key),
       do: {:reply, {:error, :already_joined}, state},
@@ -163,7 +163,7 @@ defmodule Avwe.MCP.Players do
     {:reply, playing, state}
   end
 
-  @impl true
+  @impl GenServer
   def handle_info({:DOWN, monitor, :process, _mind, _reason}, state) do
     players = Map.reject(state.players, fn {_key, player} -> player.monitor == monitor end)
     {:noreply, %{state | players: players}}

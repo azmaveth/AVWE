@@ -47,7 +47,7 @@ defmodule Avwe.Telnet.Connection do
 
   def start_link({socket, opts}), do: GenServer.start_link(__MODULE__, {socket, opts})
 
-  @impl true
+  @impl GenServer
   def init({socket, opts}) do
     {:ok,
      %{
@@ -60,7 +60,7 @@ defmodule Avwe.Telnet.Connection do
      }}
   end
 
-  @impl true
+  @impl GenServer
   def handle_info(:socket_ready, state) do
     state |> greet() |> continue()
   end

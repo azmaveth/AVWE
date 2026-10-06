@@ -110,7 +110,7 @@ defmodule Avwe.Session do
   @spec close(pid()) :: :ok
   def close(session), do: GenServer.stop(session)
 
-  @impl true
+  @impl GenServer
   def init(opts) do
     world = Keyword.fetch!(opts, :world)
     body = opts[:body]
@@ -148,7 +148,7 @@ defmodule Avwe.Session do
     end
   end
 
-  @impl true
+  @impl GenServer
   def handle_call(:look, _from, state) do
     reply =
       with {:ok, view} <- snapshot(state.world) do
@@ -197,7 +197,7 @@ defmodule Avwe.Session do
     end
   end
 
-  @impl true
+  @impl GenServer
   def handle_info({:avwe_events, world, events, view}, %{world: world} = state) do
     events = Enum.reject(events, &foreign_lease?(&1, state.lease_refs))
     percepts = Perception.percepts(Map.put(view, :terrain, state.terrain), state.body, events)
@@ -238,7 +238,7 @@ defmodule Avwe.Session do
     {:stop, :normal, %{state | world_pid: nil}}
   end
 
-  @impl true
+  @impl GenServer
   def terminate(_reason, %{body: body, yielded: false, world_pid: pid} = state)
       when body != nil and pid != nil do
     release(state, :close)
