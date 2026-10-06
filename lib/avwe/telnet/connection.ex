@@ -22,8 +22,7 @@ defmodule Avwe.Telnet.Connection do
 
   use GenServer, restart: :temporary
 
-  alias Avwe.{Prose, Session}
-  alias Avwe.Telnet.Command
+  alias Avwe.{Command, Prose, Session}
 
   @routine_prefix "- "
 
@@ -193,90 +192,36 @@ defmodule Avwe.Telnet.Connection do
 
   # Playing
 
-  defp run(state, :look) do
-    {:ok, look} = Session.look(state.session)
-    write(state, Prose.look(look))
-    state
-  end
+  # What a command means is `Avwe.Command`'s to say; this only does it.
+  defp run(state, command) do
+    look = if Command.needs_look?(command), do: look(state)
 
-  defp run(state, {:go, query}) do
-    {:ok, look} = Session.look(state.session)
-    places = Enum.map(look.places, &{&1.id, &1.name}) ++ here(look)
-
-    case Command.resolve(query, places) do
-      {:ok, place} -> act(state, :go, target: place)
-      {:ambiguous, names} -> write(state, "Which do you mean: #{Enum.join(names, ", ")}?")
-      :none -> write(state, "You don't know a place called \"#{query}\".")
+    case Command.interpret(command, look) do
+      {:act, verb, opts} -> act(state, verb, opts)
+      {:error, message} -> reply(state, message)
+      :look -> reply(state, Prose.look(look(state)))
+      :time -> present(state, Avwe.now(state.world))
+      :help -> present(state, @help)
+      :quit -> reply(%{state | phase: :closed}, "Goodbye.")
+      :noop -> state
     end
-
-    state
   end
 
-  defp run(state, {:follow, direction}), do: act(state, :follow, params: %{direction: direction})
-
-  defp run(state, {:walk, direction, meters}),
-    do: act(state, :walk, params: %{direction: direction, distance_m: meters})
-
-  defp run(state, {:say, volume, text}),
-    do: act(state, :say, params: %{text: text, volume: volume})
-
-  defp run(state, {:wait, params}), do: act(state, :wait, params: params)
-  defp run(state, {:write, text}), do: act(state, :write, params: %{text: text})
-  defp run(state, {:read, nil}), do: act(state, :read, params: %{})
-  defp run(state, {:read, pages}), do: act(state, :read, params: %{last: pages})
-  defp run(state, :stop), do: act(state, :stop, [])
-  defp run(state, {verb, nil}) when verb in [:kindle, :douse], do: act(state, verb, [])
-
-  # A named hearth is one of those within reach: the world answers for the
-  # nearest when none is named, never when a name matches nothing.
-  defp run(state, {verb, query}) when verb in [:kindle, :douse] do
+  defp look(state) do
     {:ok, look} = Session.look(state.session)
-    hearths = Enum.map(look[:hearths] || [], &{&1.id, &1.name})
-
-    if look.spectator,
-      do: write(state, "You're only watching."),
-      else: name_hearth(state, verb, query, hearths)
-
-    state
+    look
   end
 
   # Asking the time or for help is the player's presence, not an act: the
   # session keeps the body in hand for them.
-  defp run(state, :time) do
+  defp present(state, text) do
     :ok = Session.touch(state.session)
-    write(state, Avwe.now(state.world))
+    reply(state, text)
+  end
+
+  defp reply(state, text) do
+    write(state, text)
     state
-  end
-
-  defp run(state, :help) do
-    :ok = Session.touch(state.session)
-    write(state, @help)
-    state
-  end
-
-  defp run(state, :quit) do
-    write(state, "Goodbye.")
-    %{state | phase: :closed}
-  end
-
-  defp run(state, :empty), do: state
-
-  defp run(state, {:invalid, message}) do
-    write(state, message)
-    state
-  end
-
-  defp run(state, {:unknown, line}) do
-    write(state, "I don't understand \"#{line}\". Type help for a list of commands.")
-    state
-  end
-
-  defp name_hearth(state, verb, query, hearths) do
-    case Command.resolve(query, hearths) do
-      {:ok, hearth} -> act(state, verb, target: hearth)
-      {:ambiguous, names} -> write(state, "Which do you mean: #{Enum.join(names, ", ")}?")
-      :none -> write(state, "There is no hearth called \"#{query}\" here.")
-    end
   end
 
   defp act(state, verb, opts) do
@@ -287,9 +232,6 @@ defmodule Avwe.Telnet.Connection do
 
     state
   end
-
-  defp here(%{here: %{id: id, name: name}}), do: [{id, name}]
-  defp here(_look), do: []
 
   # I/O
 

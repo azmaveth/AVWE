@@ -1,9 +1,9 @@
-defmodule Avwe.Telnet.CommandTest do
+defmodule Avwe.CommandTest do
   use ExUnit.Case, async: true
 
-  alias Avwe.Telnet.Command
+  alias Avwe.Command
 
-  doctest Avwe.Telnet.Command
+  doctest Avwe.Command
 
   describe "parse/1" do
     test "looking, going, stopping and leaving" do
@@ -115,6 +115,123 @@ defmodule Avwe.Telnet.CommandTest do
     test "prefers an exact match over partial ones" do
       assert Command.resolve("mill", [{"mill", "Mill"}, {"mill-pond", "Mill Pond"}]) ==
                {:ok, "mill"}
+    end
+  end
+
+  describe "interpret/2" do
+    @look %{
+      spectator: false,
+      here: %{id: "ember-reach", name: "Ember Reach"},
+      places: [
+        %{id: "the-dry-bend", name: "The Dry Bend"},
+        %{id: "willow-docks", name: "Willow Docks"}
+      ],
+      hearths: [
+        %{id: "kiln-hearth", name: "the kiln-house hearth"},
+        %{id: "lodge-hearth", name: "the lodge hearth"}
+      ]
+    }
+
+    defp interpret(line, look \\ @look), do: line |> Command.parse() |> Command.interpret(look)
+
+    test "what a client answers in its own way passes through, and an empty line is nothing" do
+      assert interpret("look") == :look
+      assert interpret("time") == :time
+      assert interpret("help") == :help
+      assert interpret("quit") == :quit
+      assert interpret("   ") == :noop
+    end
+
+    test "an act carries its parameters as telnet has always sent them" do
+      assert interpret("follow upstream") == {:act, :follow, params: %{direction: :upstream}}
+
+      assert interpret("go north-east 200") ==
+               {:act, :walk, params: %{direction: "north-east", distance_m: 200}}
+
+      assert interpret("shout fire!") == {:act, :say, params: %{text: "fire!", volume: :shout}}
+      assert interpret("wait until dawn") == {:act, :wait, params: %{until: :dawn}}
+      assert interpret("wait 30") == {:act, :wait, params: %{for: 1_800}}
+
+      assert interpret("write The reeds lean north.") ==
+               {:act, :write, params: %{text: "The reeds lean north."}}
+
+      assert interpret("read") == {:act, :read, params: %{}}
+      assert interpret("read 3") == {:act, :read, params: %{last: 3}}
+      assert interpret("stop") == {:act, :stop, []}
+    end
+
+    test "a place is resolved among those the body knows, and the one it is at" do
+      assert interpret("go to the dry bend") == {:act, :go, target: "the-dry-bend"}
+      assert interpret("go docks") == {:act, :go, target: "willow-docks"}
+      assert interpret("go ember reach") == {:act, :go, target: "ember-reach"}
+    end
+
+    test "a place that matches nothing, or several things, is refused in words" do
+      assert interpret("go atlantis") == {:error, ~s(You don't know a place called "atlantis".)}
+      assert interpret("go d") == {:error, "Which do you mean: The Dry Bend, Willow Docks?"}
+
+      assert interpret("go dry bend", nil) ==
+               {:error, ~s(You don't know a place called "dry bend".)}
+    end
+
+    test "a hearth is resolved among those within reach; none named means the nearest" do
+      assert interpret("kindle") == {:act, :kindle, []}
+      assert interpret("light the fire") == {:act, :kindle, []}
+      assert interpret("douse") == {:act, :douse, []}
+      assert interpret("light the lodge hearth") == {:act, :kindle, target: "lodge-hearth"}
+
+      assert interpret("put out the fire in the kiln-house hearth") ==
+               {:act, :douse, target: "kiln-hearth"}
+    end
+
+    test "a hearth that matches nothing, or several things, is refused in words" do
+      assert interpret("douse the coal") == {:error, ~s(There is no hearth called "coal" here.)}
+
+      assert interpret("light the e hearth") ==
+               {:error, "Which do you mean: the kiln-house hearth, the lodge hearth?"}
+    end
+
+    test "a spectator is refused a named hearth here; its other acts are the session's to refuse" do
+      spectator = %{@look | spectator: true}
+
+      assert interpret("light the lodge hearth", spectator) == {:error, "You're only watching."}
+      assert interpret("kindle", spectator) == {:act, :kindle, []}
+
+      assert interpret("say hello", spectator) ==
+               {:act, :say, params: %{text: "hello", volume: :talk}}
+    end
+
+    test "what could not be understood is a refusal, in the words telnet uses" do
+      assert interpret("go") == {:error, "Go where?"}
+      assert interpret("say") == {:error, "Say what?"}
+
+      assert interpret("dance wildly") ==
+               {:error, ~s(I don't understand "dance wildly". Type help for a list of commands.)}
+    end
+  end
+
+  describe "needs_look?/1" do
+    test "only a place, or a named hearth, is resolved against the look" do
+      assert Command.needs_look?({:go, "the dry bend"})
+      assert Command.needs_look?({:kindle, "lodge hearth"})
+      assert Command.needs_look?({:douse, "the coal"})
+
+      refute Command.needs_look?({:kindle, nil})
+      refute Command.needs_look?({:say, :talk, "hi"})
+      refute Command.needs_look?(:look)
+      refute Command.needs_look?(:stop)
+    end
+
+    test "every command that does not need the look can be interpreted without one" do
+      lines =
+        ~w(look time help quit stop kindle douse wait read) ++
+          ["write x", "say hi", "follow up", "go north 100", "", "dance"]
+
+      for line <- lines do
+        command = Command.parse(line)
+        refute Command.needs_look?(command), line
+        assert Command.interpret(command, nil), line
+      end
     end
   end
 end

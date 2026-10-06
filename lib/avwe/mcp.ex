@@ -55,9 +55,8 @@ defmodule Avwe.MCP do
 
   use ExMCP.Server.Handler
 
+  alias Avwe.{Command, Mind, Prose}
   alias Avwe.MCP.{Players, Report, Steps}
-  alias Avwe.{Mind, Prose}
-  alias Avwe.Telnet.Command
   alias ExMCP.Internal.VersionRegistry
 
   require Logger

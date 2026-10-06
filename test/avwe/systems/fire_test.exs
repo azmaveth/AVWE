@@ -2,9 +2,8 @@ defmodule Avwe.Systems.FireTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Avwe.{Event, Intent, Region}
+  alias Avwe.{Command, Event, Intent, Region}
   alias Avwe.Systems.{Fire, Miracles}
-  alias Avwe.Telnet.Command
   alias Avwe.Test.Ember
 
   @systems [Miracles, Fire]

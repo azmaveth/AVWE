@@ -63,22 +63,28 @@ M2 adds state: a scene is derived, so the journal, the snapshots and
 
 ## 2. Core changes (pure, except where marked)
 
-### 2.1 One command layer
+### 2.1 One command layer (built)
 
-Extract the part of `Avwe.Telnet.Connection` that turns a parsed command and
-the current look into an act into `Avwe.Commands` (pure):
+The part of `Avwe.Telnet.Connection` that turned a parsed command and the
+current look into an act now lives with the parser, in `Avwe.Command` (which
+moved from `Avwe.Telnet.Command`, as nothing in it is telnet's). It gained
+two pure functions:
 
-    Avwe.Commands.plan(command, look) ::
-      {:act, verb, opts} | :touch | {:text, String.t()} | {:error, String.t()}
+    Avwe.Command.needs_look?(command) :: boolean()
+    Avwe.Command.interpret(command, look) ::
+      {:act, verb, opts} | :look | :time | :help | :quit | :noop | {:error, String.t()}
 
-`{:act, ...}` is what to hand to `Session.act/3`, with names already
-resolved (`go the dry bend`, `kindle the lodge hearth`); `{:text, ...}` is
-an answer that needs no act (`help`, `time`); `{:error, ...}` is the
-message for a refusal, in the words telnet uses now ("Which do you mean:
-...", "You don't know a place called ...", "You're only watching."). Telnet
-is changed to use it, with no change in what a telnet player sees: its
-end-to-end tests are the safety net, and are not edited. `Avwe.Telnet.Command`
-moves to `Avwe.Command` (parse and resolve), as nothing in it is telnet's.
+`{:act, ...}` is what to hand to `Session.act/3`, with a place or hearth
+already resolved (`go the dry bend`, `kindle the lodge hearth`).
+`:look`, `:time`, `:help` and `:quit` are answers each client gives in its own
+way (the telnet help text is not the web page's), and `:time` and `:help` are
+the player's presence, so the client touches the session for them. `:noop` is
+an empty line. `{:error, ...}` is the refusal in the words telnet has always
+used ("Which do you mean: ...", "You don't know a place called ...", "You're
+only watching."). The look is read only for `go` and for a named hearth;
+`needs_look?/1` says when, so a client fetches one only then. Telnet's
+`run/2` is now a switch over the outcome, and its end-to-end tests, which are
+the safety net, were not edited.
 
 ### 2.2 Representation layers
 
