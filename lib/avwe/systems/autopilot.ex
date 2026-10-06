@@ -17,7 +17,8 @@ defmodule Avwe.Systems.Autopilot do
   step, issuing what is left of the pending step if the entry's window is
   still open and dropping the plan if it has closed (`Avwe.Autopilot`,
   Plans). For that, a wait step's end is written into the plan as `until`
-  when the step is issued, as `Avwe.Actions.wait_until/2` will set it.
+  when the step is issued, as `Avwe.Actions.wait_until/2` will set it, or
+  copied from the running wait when the step adopts it.
 
   Each choice is recorded in the body's `:autopilot` component
   (`%{current: utility, why: atom, since: time, done: %{entry => day up to
@@ -162,11 +163,12 @@ defmodule Avwe.Systems.Autopilot do
     {region, events ++ [Event.new(:decided, entity: body, data: data)]}
   end
 
-  # The running action becomes the routine step: nothing is submitted.
+  # The running action becomes the routine step, with its end when it is a
+  # wait: nothing is submitted.
   defp adopt(region, tick, body, choice, events) do
     record = Region.get(region, body, :autopilot)
-    %{ref: ref} = Region.get(region, body, :action)
-    plan = %{choice.plan | ref: ref}
+    %{ref: ref} = action = Region.get(region, body, :action)
+    plan = %{choice.plan | ref: ref, until: Map.get(action, :until)}
     data = Map.merge(announced(choice), %{adopted: ref})
     region = Region.put_component(region, body, :autopilot, decided(record, tick, choice, plan))
     {region, events ++ [Event.new(:decided, entity: body, data: data)]}

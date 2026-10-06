@@ -4,7 +4,7 @@ defmodule Avwe.Prose do
   they are; richer clients use the structured fields instead.
   """
 
-  alias Avwe.{Calendar, Percept}
+  alias Avwe.Calendar
 
   @speech_verbs %{whisper: "whispers", talk: "says", shout: "shouts"}
   @own_speech_verbs %{whisper: "whisper", talk: "say", shout: "shout"}
@@ -217,7 +217,7 @@ defmodule Avwe.Prose do
       smoke(look[:smoke]),
       others(look.bodies),
       known(look.places),
-      doing(look.action)
+      doing(look.action, look[:holder])
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
@@ -353,25 +353,39 @@ defmodule Avwe.Prose do
     "You know the way to: #{listed}."
   end
 
-  defp doing(nil), do: nil
-  defp doing(%{verb: :go, target_name: target}), do: "You are on your way to #{target}."
+  # What the body is doing is its routine's while nobody holds it (`holder`
+  # is `nil`) and the controller's own while one does, whoever asked for
+  # it: a wait the routine began reads as the player's once they have the
+  # body, and a journey they began as the routine's once they have let go.
+  defp doing(nil, _holder), do: nil
 
-  defp doing(%{verb: :follow, params: %{direction: direction}}),
+  defp doing(%{verb: :go, target_name: target}, nil),
+    do: "Your routine has you on your way to #{target}."
+
+  defp doing(%{verb: :go, target_name: target}, _holder), do: "You are on your way to #{target}."
+
+  defp doing(%{verb: :follow, params: %{direction: direction}}, nil),
+    do: "Your routine has you following the channel #{direction}."
+
+  defp doing(%{verb: :follow, params: %{direction: direction}}, _holder),
     do: "You are following the channel #{direction}."
 
-  defp doing(%{verb: :walk, params: %{direction: direction}}), do: "You are walking #{direction}."
+  defp doing(%{verb: :walk, params: %{direction: direction}}, nil),
+    do: "Your routine has you walking #{direction}."
 
-  # A wait is the body's own or its routine's, by the action's ref.
-  defp doing(%{verb: :wait} = action) do
-    case {Percept.issuer(Map.get(action, :ref) || ""), until_dawn?(action)} do
-      {:autopilot, true} -> "Your routine has you resting until dawn."
-      {:autopilot, false} -> "Your routine has you waiting here."
-      {:controller, true} -> "You are resting until dawn."
-      {:controller, false} -> "You are waiting here a while."
+  defp doing(%{verb: :walk, params: %{direction: direction}}, _holder),
+    do: "You are walking #{direction}."
+
+  defp doing(%{verb: :wait} = action, holder) do
+    case {holder, until_dawn?(action)} do
+      {nil, true} -> "Your routine has you resting until dawn."
+      {nil, false} -> "Your routine has you waiting here."
+      {_held, true} -> "You are resting until dawn."
+      {_held, false} -> "You are waiting here a while."
     end
   end
 
-  defp doing(_action), do: nil
+  defp doing(_action, _holder), do: nil
 
   defp until_dawn?(%{params: %{until: moment}}), do: moment in [:dawn, :sunrise]
   defp until_dawn?(_action), do: false

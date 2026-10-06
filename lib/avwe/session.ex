@@ -23,13 +23,15 @@ defmodule Avwe.Session do
   controller as percepts; `act/3` refuses the two verbs, and the `auto-`
   refs that mark autopilot's intents, with `{:error, :reserved}`.
 
-  **Idle.** When the controller has made no call, neither `act/3` nor
-  `look/1`, for `:idle_after` real milliseconds (default ten minutes), the
-  session submits `:release` and marks itself yielded, so the body goes
-  back to its routine while the player reads. Every call re-arms the
-  timer; a look keeps the body in hand, and the next `act/3` takes it back,
-  submitting `:control` first and then the act, in that order. Idleness is
-  real time and lives here, never in the pure core. The controller sees
+  **Idle.** When the controller has made no call, none of `act/3`,
+  `look/1` and `touch/1`, for `:idle_after` real milliseconds (default ten
+  minutes), the session submits `:release` and marks itself yielded, so
+  the body goes back to its routine while the player reads. Every call
+  re-arms the timer: a look, or a touch, which does nothing else, keeps
+  the body in hand for that long again, and the next `act/3` takes it
+  back, submitting `:control` first and then the act, in that order.
+  Idleness is real time and lives here, never in the pure core. The
+  controller sees
   the hand-over: a `:control_released` percept when the session yields
   ("You let your routine carry you.") and a `:control_taken` one when it
   takes the body back ("You take yourself in hand."); the take on
@@ -70,6 +72,14 @@ defmodule Avwe.Session do
   @spec act(pid(), Intent.verb(), keyword()) ::
           {:ok, String.t()} | {:error, :spectator | :reserved | :invalid_ref}
   def act(session, verb, opts \\ []), do: GenServer.call(session, {:act, verb, opts})
+
+  @doc """
+  Marks the controller present: re-arms the idle timer, and nothing else.
+  For the calls a client makes that neither act nor look, such as asking
+  the time.
+  """
+  @spec touch(pid()) :: :ok
+  def touch(session), do: GenServer.call(session, :touch)
 
   @doc "The id of the session's body, or `nil` for a spectator."
   @spec body(pid()) :: String.t() | nil
@@ -122,6 +132,8 @@ defmodule Avwe.Session do
 
     {:reply, reply, arm_idle(state)}
   end
+
+  def handle_call(:touch, _from, state), do: {:reply, :ok, arm_idle(state)}
 
   def handle_call(:body, _from, state), do: {:reply, state.body, state}
 

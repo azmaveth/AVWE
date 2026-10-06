@@ -25,12 +25,15 @@ defmodule Avwe.Autopilot do
      :missed` and `reason: :window_closed`, no intent), so a body given
      back late in the day runs only the latest entry still in its window,
      never the stale ones back to back. An entry starts its plan only with
-     a **start margin**: at least #{60} minutes left in its window, unless
-     the entry has only just come due (its occurrence falls within this
-     step, so the body was not late for it, the window is simply short);
-     one found with less is marked done as missed too, with `reason:
-     :too_late`, so a body given back at 07:30 does not set out on a walk
-     the survey will cut short at 08:00. When several are due, the last is
+     a **start margin**: at least #{60} minutes left in its window, or
+     half the window when it is shorter than two hours, unless the entry
+     has only just come due (its occurrence falls within this step, so the
+     body was not late for it, the window is simply short); one found
+     with less is marked done as missed too, with `reason: :too_late`, so
+     a body given back at 07:30 does not set out on a walk the survey will
+     cut short at 08:00. The day's last entry is never too late: its
+     window runs to midnight only because the day ends there, and its
+     purpose is to bring the body home. When several are due, the last is
      taken and all of them are marked done. Taking an entry starts its
      **plan** (below).
   2. **Kindle at home** (0.8, urgent). When the air is cold, below
@@ -87,16 +90,23 @@ defmodule Avwe.Autopilot do
   When a controller takes the body the plan is kept. On release, if the
   entry's window is still open, the plan **resumes** at the pending step,
   serving only what is left of it: a `go` is issued again (to a place the
-  body is already at it succeeds as `:already_there`); a wait is issued
-  again for the seconds that remain until the time recorded in `until`
-  (`until: :dawn` keeps its moment), and is skipped altogether when none
-  remain or when the controller moved the body more than #{2} cells from
-  the target of the `go` step before it, so the next step brings it back
-  on course (a plan whose last step is skipped is done). If the window has
-  closed the plan is dropped, announced as abandoned with reason
-  `:window_closed`, the entry is done for the day, and what the body does
-  next follows the interrupt rules below, so a journey the controller left
-  it on is not cut by a candidate that is not urgent.
+  body is already at it succeeds as `:already_there`); a wait, the rest
+  included, is issued again for the seconds that remain until the time
+  recorded in `until` (`until: :dawn` keeps its moment), and is skipped
+  altogether when none remain or when the controller moved the body more
+  than #{2} cells from the target of the `go` step before it, so the next
+  step brings it back on course (a plan whose last step is skipped is
+  done, so a body the controller moved off its night's rest goes on as
+  any body does in the dark: home, or by a fire it stands at). If the
+  window has closed the plan is
+  dropped, announced as abandoned with reason `:window_closed`, and the
+  entry is done for the day. Either way, what the body does next follows
+  the interrupt rules below: what is left of the plan is a candidate like
+  any other against what the controller left the body doing, so it cuts a
+  wait, as a routine entry come due does, but not a journey, which it
+  takes up when the journey ends, unless something urgent comes first; the
+  same intent as the running action is adopted as the step. A body left
+  doing nothing takes it up at once.
 
   ## Deciding
 
@@ -221,7 +231,7 @@ defmodule Avwe.Autopilot do
       result != nil -> step_ended(region, tick, body, record, plan, result, action)
       plan != nil and not under_way?(action, plan) -> resume(region, tick, body, record, action)
       action == nil -> {:act, best(region, tick, body, record)}
-      true -> interrupt(region, tick, body, record, action, plan)
+      true -> interrupt(best(region, tick, body, record), record, action, plan)
     end
   end
 
@@ -229,11 +239,16 @@ defmodule Avwe.Autopilot do
   Every candidate open to the body this step, in order of preference.
   """
   @spec candidates(Region.t(), Tick.t(), Region.entity_id(), map()) :: [candidate()]
-  def candidates(%Region{} = region, %Tick{} = tick, body, record) do
+  def candidates(%Region{} = region, %Tick{} = tick, body, record),
+    do: candidates(region, tick, body, record, routine(region, tick, body, record))
+
+  # The candidates with `routine` (a routine entry's step, or `nil`) in the
+  # routine's place.
+  defp candidates(region, tick, body, _record, routine) do
     here = situation(region, tick, body)
 
     [
-      routine(region, tick, body, record),
+      routine,
       kindle(region, body, here),
       stay(here),
       fire(region, body, here),
@@ -313,10 +328,10 @@ defmodule Avwe.Autopilot do
   # does not record the entry for that day, with whether its window still
   # holds the end of the step and, if so, whether the body is too late to
   # start it (the occurrence fell in an earlier step and less than the
-  # start margin is left). The window runs from the occurrence up to the
-  # next entry's, in the body's jittered frame for the day; the last
-  # entry's up to and including the day's midnight (or the occurrence
-  # itself, when the jitter put it past midnight).
+  # start margin is left; the last entry never is). The window runs from
+  # the occurrence up to the next entry's, in the body's jittered frame for
+  # the day; the last entry's up to and including the day's midnight (or
+  # the occurrence itself, when the jitter put it past midnight).
   defp windows(entries, tick, body, done) do
     day = Calendar.day()
     now = Tick.end_time(tick)
@@ -329,17 +344,25 @@ defmodule Avwe.Autopilot do
         occurrence = day_start + entry.at + offset,
         occurrence <= now,
         not done?(done, index, key) do
-      until =
+      {until, last?} =
         case Enum.at(entries, index + 1) do
-          nil -> max(day_start + day, occurrence)
-          next -> day_start + next.at + offset - 1
+          nil -> {max(day_start + day, occurrence), true}
+          next -> {day_start + next.at + offset - 1, false}
         end
 
       open? = now <= until
-      late? = open? and occurrence <= tick.time and until - now < @start_margin
+
+      late? =
+        open? and not last? and occurrence <= tick.time and
+          until - now < start_margin(occurrence, until)
+
       %{index: index, entry: entry, day: key, open?: open?, late?: late?}
     end
   end
+
+  # An hour, or half the window when it is shorter than two.
+  defp start_margin(occurrence, until),
+    do: min(@start_margin, Integer.floor_div(until - occurrence + 1, 2))
 
   # The next of the body's routine occurrences today after the end of the
   # step, or `nil`.
@@ -405,14 +428,13 @@ defmodule Avwe.Autopilot do
 
   defp best(region, tick, body, record), do: region |> candidates(tick, body, record) |> choose()
 
-  # The body has an action. An entry whose first step is that very action
-  # adopts it. Otherwise a plan's step yields to something urgent, and a
-  # plan's wait to a routine entry come due; a wait that is not a plan's
-  # (the body's own, or one a controller left it on) to anything better and
-  # to a routine entry; anything else only to something urgent.
-  defp interrupt(region, tick, body, record, action, plan) do
-    best = best(region, tick, body, record)
-
+  # The body has an action, and `best` is the best candidate against it. A
+  # routine step that is that very action adopts it. Otherwise a plan's
+  # step yields to something urgent, and a plan's wait to a routine entry
+  # come due; a wait that is not a plan's (the body's own, or one a
+  # controller left it on) to anything better and to a routine entry;
+  # anything else only to something urgent.
+  defp interrupt(best, record, action, plan) do
     cond do
       best.why == :routine and same_intent?(best.intent, action) ->
         {:adopt, best}
@@ -467,13 +489,14 @@ defmodule Avwe.Autopilot do
 
   # A plan whose pending step is neither under way nor ending this step: its
   # result went by while a controller had the body. If the entry's window is
-  # still open what is left of the step is issued again; if not, the plan is
-  # dropped and the body goes on under the interrupt rules.
+  # still open what is left of the step is taken up; if not, the plan is
+  # dropped. Either way the body goes on under the interrupt rules.
   defp resume(region, tick, body, %{plan: plan} = record, action) do
     entries = Region.get(region, body, :routine) || []
 
     if open?(entries, plan, tick, body),
-      do: remainder(region, tick, body, record, entries, action),
+      do:
+        take_up(region, tick, body, record, remainder(region, tick, body, plan, entries), action),
       else:
         {:plan_abandoned, {nil, :window_closed}, after_plan(region, tick, body, record, action)}
   end
@@ -484,25 +507,40 @@ defmodule Avwe.Autopilot do
     end)
   end
 
-  # The pending step, or what is left of it. A wait is served for the
-  # seconds that remain until the end recorded when it started, and skipped
-  # when none remain or the controller moved the body off the place the
-  # `go` step before it reached: the next step brings it back on course.
-  defp remainder(region, tick, body, %{plan: plan} = record, entries, action) do
+  # The pending step, or what is left of it, as a candidate; `:done` when
+  # it is skipped and was the last. A wait (the rest is one) is served for
+  # the seconds that remain until the end recorded when it started, and
+  # skipped when none remain or the controller moved the body off the place
+  # the `go` step before it reached: the next step brings it back on course.
+  defp remainder(region, tick, body, plan, entries) do
     steps = entries |> Enum.at(plan.entry) |> steps()
     before = if plan.step > 0, do: Enum.at(steps, plan.step - 1)
 
-    case Enum.at(steps, plan.step) do
+    case steps |> Enum.at(plan.step) |> step_intent() do
       {:wait, opts} ->
         left = time_left(plan, tick)
 
         if off_course?(region, body, before) or left == :none,
-          do: skip(region, tick, body, record, entries, action),
-          else: {:act, wait_left(entries, plan, opts, left)}
+          do: skip(plan, entries),
+          else: wait_left(entries, plan, opts, left)
 
       _step ->
-        {:act, plan_candidate(entries, plan.entry, plan.day, plan.step)}
+        plan_candidate(entries, plan.entry, plan.day, plan.step)
     end
+  end
+
+  # What is left of the plan against what the controller left the body
+  # doing: taken up at once by a body doing nothing, and otherwise under
+  # the interrupt rules as the routine's candidate, so it cuts a wait and
+  # lets a journey end first.
+  defp take_up(region, tick, body, record, :done, action),
+    do: {:plan_done, after_plan(region, tick, body, record, action)}
+
+  defp take_up(_region, _tick, _body, _record, candidate, nil), do: {:act, candidate}
+
+  defp take_up(region, tick, body, record, candidate, action) do
+    best = region |> candidates(tick, body, record, candidate) |> choose()
+    interrupt(best, record, action, nil)
   end
 
   # The seconds left of the plan's wait at the end of the step: `:all` when
@@ -528,12 +566,8 @@ defmodule Avwe.Autopilot do
   end
 
   # The pending step is passed over: the next follows, or the plan is done.
-  defp skip(region, tick, body, %{plan: plan} = record, entries, action) do
-    case plan.steps do
-      [_next | _rest] -> {:act, plan_candidate(entries, plan.entry, plan.day, plan.step + 1)}
-      [] -> {:plan_done, after_plan(region, tick, body, record, action)}
-    end
-  end
+  defp skip(%{steps: []}, _entries), do: :done
+  defp skip(plan, entries), do: plan_candidate(entries, plan.entry, plan.day, plan.step + 1)
 
   # The body is more than two cells from the target of a `go` step.
   defp off_course?(region, body, {:go, opts}) do
@@ -548,7 +582,7 @@ defmodule Avwe.Autopilot do
   defp after_plan(region, tick, body, record, nil), do: {:act, best(region, tick, body, record)}
 
   defp after_plan(region, tick, body, record, action),
-    do: interrupt(region, tick, body, record, action, nil)
+    do: interrupt(best(region, tick, body, record), record, action, nil)
 
   # The pending step's result among the events emitted so far. Refs are
   # unique, and this step's events are at the head of the outbox.

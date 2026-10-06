@@ -15,7 +15,8 @@ defmodule Avwe.Telnet.Connection do
   receives (`:control_released` sets it, `:control_taken` clears it), so a
   player who takes over a journey the routine began reads its remaining
   lines, and their own stop, unmarked. Any command that acts takes the body
-  back; `look` re-arms the idle timer but does not retake.
+  back; `look`, `time` and `help` re-arm the idle timer (`time` and `help`
+  through `Avwe.Session.touch/1`) but do not retake.
   """
 
   use GenServer, restart: :temporary
@@ -38,7 +39,7 @@ defmodule Avwe.Telnet.Connection do
     stop              stop what you're doing
     time              the time in the world
     quit              leave
-  Lines starting with "- " are what your routine does with you while you stop acting; any command that acts (go, say, wait, light...) takes you back in hand; look does not.\
+  Lines starting with "- " are what your routine does with you while you stop acting; any command keeps you in hand for ten more minutes, and any command that acts (go, say, wait, light...) takes you back if the routine had you.\
   """
 
   def start_link({socket, opts}), do: GenServer.start_link(__MODULE__, {socket, opts})
@@ -232,12 +233,16 @@ defmodule Avwe.Telnet.Connection do
     state
   end
 
+  # Asking the time or for help is the player's presence, not an act: the
+  # session keeps the body in hand for them.
   defp run(state, :time) do
+    :ok = Session.touch(state.session)
     write(state, Avwe.now(state.world))
     state
   end
 
   defp run(state, :help) do
+    :ok = Session.touch(state.session)
     write(state, @help)
     state
   end

@@ -38,12 +38,20 @@ defmodule Avwe.Perception do
   A body's own actions carry who asked for them (`Avwe.Percept`'s
   `issuer`): its controller, or its routine when autopilot had it; so does
   its own lighting or dousing of a hearth, whose `:fire_lit` and
-  `:fire_out` events carry the intent's ref. The waits autopilot issues
-  (an idle, resting or fireside body) are quiet: they raise no percept at
-  all, started, under way or ended, so a yielded session is not told every
-  hour that it is still waiting; the routine's journeys and kindling still
-  show, and so does the end of a wait the controller stopped (`:interrupted`
-  with reason `:stopped`), since they asked. The hand-over between the two
+  `:fire_out` events carry the intent's ref. What the body is doing is
+  told by who **holds** it, the `holder` of its `:control` component in
+  the view (`look/2` carries it as `holder`): its routine's while nobody
+  does, the controller's own while one does, whoever asked for it. So the
+  waits autopilot issues (an idle, resting or fireside body) are quiet
+  while the routine has the body: they raise no percept at all, started,
+  under way or ended, so a yielded session is not told every hour that it
+  is still waiting, and so is a `go` of the routine's that finds the body
+  already there (the nightly step home); the routine's journeys and
+  kindling still show. A wait the routine began and the controller
+  inherited says when it ends, since they hold the body, and one the
+  controller stopped (`:interrupted` with reason `:stopped`) says so, since
+  they asked; one their own act replaced (reason `:replaced`) says nothing,
+  their act tells the story. The hand-over between the two
   (`:control_released`, `:control_taken`) is a percept of the body's own
   and nobody else's; `:decided` stays the game master's.
   """
@@ -105,6 +113,7 @@ defmodule Avwe.Perception do
       time: view.time,
       light: light(view),
       body: %{id: body, name: name(view, body)},
+      holder: holder(view, body),
       here: here,
       nearest: if(here, do: nil, else: nearest_place(view, body, position)),
       action:
@@ -129,7 +138,7 @@ defmodule Avwe.Perception do
   def percepts(view, body, events), do: Enum.flat_map(events, &perceive(view, body, &1))
 
   defp perceive(view, body, %Event{type: type} = event) when type in @own_events do
-    if body != nil and event.entity == body and not quiet?(event.data),
+    if body != nil and event.entity == body and not quiet?(event.data, holder(view, body)),
       do: [own(view, body, event)],
       else: []
   end
@@ -166,10 +175,32 @@ defmodule Avwe.Perception do
 
   defp perceive(_view, _body, _event), do: []
 
-  # Autopilot's waits say nothing, except when the controller stopped one.
-  defp quiet?(%{verb: :wait, outcome: :interrupted, reason: :stopped}), do: false
-  defp quiet?(%{verb: :wait, ref: ref}), do: Percept.issuer(ref) == :autopilot
-  defp quiet?(_data), do: false
+  # Autopilot's waits say nothing while the routine has the body (`holder`
+  # is `nil`), nor does its `go` to a place the body is already at; a wait
+  # of its own the controller's act replaced says nothing either. One the
+  # controller stopped, or inherited and let run out, says so.
+  defp quiet?(%{verb: :wait, outcome: :interrupted, reason: :stopped}, _holder), do: false
+
+  defp quiet?(%{verb: :wait, outcome: :interrupted, reason: :replaced, ref: ref}, _holder),
+    do: routine?(ref)
+
+  defp quiet?(%{verb: :wait, ref: ref}, nil), do: routine?(ref)
+
+  defp quiet?(%{verb: :go, outcome: :success, reason: :already_there, ref: ref}, nil),
+    do: routine?(ref)
+
+  defp quiet?(_data, _holder), do: false
+
+  defp routine?(ref), do: Percept.issuer(ref) == :autopilot
+
+  # Who holds the body in the simulation: its controller's kind, or `nil`
+  # when its routine has it.
+  defp holder(view, body) do
+    case component(view, :control)[body] do
+      %{holder: holder} -> holder
+      _on_its_own -> nil
+    end
+  end
 
   defp own(view, body, %Event{type: :action_started, data: data} = event) do
     %Percept{
