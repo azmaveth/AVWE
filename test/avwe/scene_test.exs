@@ -308,6 +308,65 @@ defmodule Avwe.SceneTest do
     end
   end
 
+  describe "to_map/1" do
+    test "is plain data that goes to JSON and back unchanged" do
+      scene = Scene.build(view(light_up(at_night(), "town-hearth")), @mira)
+      map = Scene.to_map(scene)
+
+      assert map |> Jason.encode!() |> Jason.decode!() == map
+    end
+
+    test "says what the scene says, with cells as pairs and kinds as strings" do
+      scene = Scene.build(view(light_up(at_night(), "town-hearth")), @mira)
+      map = Scene.to_map(scene)
+      {cx, cy} = scene.center
+      {ox, oy} = scene.origin
+
+      assert %{"center" => [^cx, ^cy], "origin" => [^ox, ^oy], "size" => 11, "radius" => 5.0} =
+               map
+
+      assert map["light"] == 0.0
+      assert map["time"] == scene.time
+      assert map["rows"] == scene.rows
+      assert map["holder"] == "human"
+
+      assert %{
+               "id" => "mira-vale",
+               "name" => "Mira Vale",
+               "glyph" => %{"char" => "@", "color" => _}
+             } =
+               map["you"]
+
+      assert %{"id" => "town-hearth", "kind" => "hearth_burning", "cell" => [^cx, ^cy]} =
+               Enum.find(map["things"], &(&1["id"] == "town-hearth"))
+
+      assert Enum.map(map["things"], & &1["kind"]) |> Enum.uniq() |> Enum.all?(&is_binary/1)
+      assert %{"name" => "clay", "glyph" => %{"char" => ":"}} = map["legend"]["clay"]
+      assert Map.keys(map["legend"]) |> Enum.all?(&is_binary/1)
+    end
+
+    test "keeps what is missing missing: no rows without terrain, no holder for a routine" do
+      {:ok, world} = Quire.load(Fixtures.lantern_hollow())
+
+      view =
+        world
+        |> Quire.Seed.region(
+          id: {0, 0},
+          seed: 1,
+          time: Calendar.at(1, hour: 12),
+          systems: [Daylight]
+        )
+        |> Region.prepare()
+        |> Region.view()
+
+      map = view |> Scene.build("wren") |> Scene.to_map()
+
+      assert map["rows"] == nil
+      assert map["holder"] == nil
+      assert map |> Jason.encode!() |> Jason.decode!() == map
+    end
+  end
+
   describe "nothing is drawn that the look does not say" do
     property "the bodies, hearths, fires and places of a scene are those of the look" do
       check all(

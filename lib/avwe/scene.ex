@@ -127,6 +127,54 @@ defmodule Avwe.Scene do
 
   def kind_at(%__MODULE__{}, _cell), do: nil
 
+  @doc """
+  The scene as plain data any client can read: strings, numbers, lists and
+  maps with string keys, so it goes to JSON as it is. A cell is `[x, y]`; a
+  kind and the holder are strings (and `nil` stays `nil`).
+  """
+  @spec to_map(t()) :: map()
+  def to_map(%__MODULE__{} = scene) do
+    %{
+      "time" => scene.time,
+      "light" => scene.light,
+      "radius" => scene.radius,
+      "center" => cell(scene.center),
+      "origin" => cell(scene.origin),
+      "size" => scene.size,
+      "rows" => scene.rows,
+      "you" => %{
+        "id" => scene.you.id,
+        "name" => scene.you.name,
+        "glyph" => glyph(scene.you.glyph)
+      },
+      "holder" => scene.holder && to_string(scene.holder),
+      "things" => Enum.map(scene.things, &thing_map/1),
+      "legend" => Map.new(scene.legend, &layers_map/1)
+    }
+  end
+
+  defp thing_map(thing) do
+    %{
+      "id" => thing.id,
+      "kind" => Atom.to_string(thing.kind),
+      "cell" => cell(thing.cell),
+      "name" => thing.name,
+      "glyph" => glyph(thing.glyph)
+    }
+  end
+
+  defp layers_map({kind, layers}) do
+    {Atom.to_string(kind),
+     %{
+       "name" => layers.name,
+       "description" => layers.description,
+       "glyph" => glyph(layers.glyph)
+     }}
+  end
+
+  defp cell({x, y}), do: [x, y]
+  defp glyph(%{char: char, color: color}), do: %{"char" => char, "color" => color}
+
   # The scene
 
   defp scene(view, body) do
