@@ -27,9 +27,11 @@ defmodule Avwe.Intent do
     * `:douse` - put a hearth out; same target rule. Blocked with
       `:not_burning`; fails with `:unquenchable` when the fire won't go out.
     * `:write` - write a page in a notebook the body carries. `params`:
-      `%{text: text}`, trimmed, 1 to 1 000 characters. `target` is the
-      notebook's id, or `nil` for the one it carries (the first by id). The
-      page is `%{time, text}`, stamped with the step's start. Blocked with
+      `%{text: text}`, 1 to 1 000 characters once line breaks and tabs
+      are made single spaces, other control characters dropped and the
+      ends trimmed. `target` is the notebook's id, or `nil` for the one it
+      carries (the first by id). The page is `%{time, text}`, stamped with
+      the step's end, the time its result reports. Blocked with
       `:no_notebook` when the body carries no such notebook, `:invalid` for
       bad text, `:full` when the notebook holds 500 pages.
     * `:read` - read the last pages of a notebook the body carries; same

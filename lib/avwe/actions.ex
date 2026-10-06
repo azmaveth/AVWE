@@ -22,8 +22,14 @@ defmodule Avwe.Actions do
 
   Writing and reading act on a notebook the body carries (an item entity
   with `:notebook` and `carried_by`): the one named, or the first by id
-  when the intent names none. A read's result carries the pages it read,
-  so the reader is told them in the same step.
+  when the intent names none. A page is stamped with the end of the step
+  it was written in, the time its result reports, and holds one line of
+  plain text: line breaks and tabs become single spaces and other control
+  characters are dropped. A read's result carries the pages it read, so
+  the reader is told them in the same step.
+
+  Kindling records who lit the hearth (`lit_by`), so that body can tell
+  the smoke of its own fire from a stranger's (`Avwe.Systems.Smoke`).
   """
 
   alias Avwe.{Calendar, Event, Intent, Region, Space, Terrain, Tick}
@@ -39,6 +45,8 @@ defmodule Avwe.Actions do
   @max_pages 500
   @read_last 10
   @read_most 1..50
+  # Line breaks and tabs, as regex class members: what a page turns into a space.
+  @breaks "\\t\\r\\n\\v\\f\\x{85}\\x{2028}\\x{2029}"
 
   @doc "Applies an intent at the start of a step."
   @spec handle(Region.t(), Intent.t(), Tick.t()) :: {Region.t(), [Event.t()]}
@@ -149,7 +157,8 @@ defmodule Avwe.Actions do
   defp perform(region, %Intent{verb: :kindle} = intent, tick) do
     with {:ok, id, hearth, position} <- hearth_target(region, intent),
          :ok <- kindleable(region, id, hearth) do
-      lit = %{hearth | burning: true, lit_at: tick.time, out_at: nil}
+      lit =
+        Map.merge(hearth, %{burning: true, lit_at: tick.time, out_at: nil, lit_by: intent.body})
 
       event =
         Event.new(:fire_lit,
@@ -189,7 +198,7 @@ defmodule Avwe.Actions do
     case carried_notebook(region, intent) do
       {:ok, id, notebook} ->
         intent = %{intent | target: id}
-        text = intent.params |> param(:text) |> trim()
+        text = intent.params |> param(:text) |> clean() |> trim()
 
         cond do
           text == "" or String.length(text) > @max_page ->
@@ -199,7 +208,7 @@ defmodule Avwe.Actions do
             {region, [result(intent, :blocked, :full)]}
 
           true ->
-            pages = notebook.pages ++ [%{time: tick.time, text: text}]
+            pages = notebook.pages ++ [%{time: Tick.end_time(tick), text: text}]
 
             {Region.put_component(region, id, :notebook, %{notebook | pages: pages}),
              [result(%{intent | params: %{text: text}}, :success, nil)]}
@@ -397,6 +406,22 @@ defmodule Avwe.Actions do
 
   defp trim(text) when is_binary(text), do: String.trim(text)
   defp trim(_other), do: ""
+
+  # What a page may hold: line breaks and tabs become single spaces, and
+  # every other control character (escape codes included) is dropped, so a
+  # page can neither forge the lines a reading is told in nor reach a
+  # terminal as a command.
+  defp clean(text) when is_binary(text) do
+    if String.valid?(text) do
+      text
+      |> String.replace(~r/[ #{@breaks}]*[#{@breaks}][ #{@breaks}]*/u, " ")
+      |> String.replace(~r/[\x{0}-\x{1F}\x{7F}-\x{9F}]/u, "")
+    else
+      ""
+    end
+  end
+
+  defp clean(other), do: other
 
   defp action_base(%Intent{} = intent), do: Map.take(intent, [:ref, :verb, :target, :params])
 

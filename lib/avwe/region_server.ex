@@ -24,6 +24,13 @@ defmodule Avwe.RegionServer do
   (seed, climate, hearths, miracles, characters, the items they carry
   included) that differs from the saved world.
 
+  A body still held when its world stopped is held by nobody once the world
+  starts again (sessions end with their world and do not release it), so
+  on starting the server releases every body whose holder has no live
+  lease in this world: one `:release` intent each, submitted and journaled
+  as a session's would be, so the routine takes the body at the next step
+  and the next player is told what it did meanwhile.
+
   A log is only valid under the systems it was recorded with, and replay
   runs the systems of the snapshot it starts from. So when the systems
   change on a resume, the reconfigured region is snapshotted at once: the
@@ -35,7 +42,7 @@ defmodule Avwe.RegionServer do
 
   require Logger
 
-  alias Avwe.{Region, Store}
+  alias Avwe.{Intent, Region, Store}
 
   @default_snapshot_every 1_000
   @default_snapshot_keep 5
@@ -107,17 +114,19 @@ defmodule Avwe.RegionServer do
         table = :ets.new(__MODULE__, [:set, :protected, read_concurrency: true])
         {:ok, _owner} = Registry.register(Avwe.Registry, {:region, world, region.id}, table)
         :ets.insert(table, {:terrain, region.terrain})
-        publish(table, region)
 
-        {:ok,
-         %{
-           world: world,
-           region: region,
-           table: table,
-           store: store,
-           snapshot_every: Keyword.get(opts, :snapshot_every, @default_snapshot_every),
-           snapshot_keep: keep
-         }}
+        state =
+          release_unheld(%{
+            world: world,
+            region: region,
+            table: table,
+            store: store,
+            snapshot_every: Keyword.get(opts, :snapshot_every, @default_snapshot_every),
+            snapshot_keep: keep
+          })
+
+        publish(table, state.region)
+        {:ok, state}
 
       {:error, reason} ->
         {:stop, {:store, reason}}
@@ -125,11 +134,7 @@ defmodule Avwe.RegionServer do
   end
 
   @impl true
-  def handle_call({:submit, intent}, _from, state) do
-    region = Region.submit(state.region, intent)
-    :ok = journal(state, region.step, region |> Region.pending() |> List.last())
-    {:reply, :ok, %{state | region: region}}
-  end
+  def handle_call({:submit, intent}, _from, state), do: {:reply, :ok, accept(state, intent)}
 
   def handle_call({:advance, steps}, _from, state) do
     before = state.region
@@ -295,6 +300,53 @@ defmodule Avwe.RegionServer do
 
   defp put_carries(declared, nil), do: declared
   defp put_carries(declared, items), do: Map.put(declared, :carries, items)
+
+  # Queues an intent for the next step and journals it.
+  defp accept(state, intent) do
+    region = Region.submit(state.region, intent)
+    :ok = journal(state, region.step, region |> Region.pending() |> List.last())
+    %{state | region: region}
+  end
+
+  # A body is held by a session's lease, and sessions end with their world
+  # without releasing (`Avwe.Session`), so a world that starts again, or a
+  # region that crashed after its world stopped, finds holders written on
+  # bodies that nobody holds any more. Each of them is released at the next
+  # step, by an intent submitted and journaled like a session's own, so
+  # replay gives the same; the routine then takes the body. A body whose
+  # holder is a live session of this world (a region that crashed and came
+  # back while its sessions ran) is left alone.
+  defp release_unheld(state) do
+    world_pid = Avwe.World.whereis(state.world)
+    pending = Region.pending(state.region)
+
+    for body <- Region.with_components(state.region, [:control]),
+        holder = holder_after(Region.get(state.region, body, :control).holder, pending, body),
+        holder != nil,
+        not leased?(state.world, world_pid, body),
+        reduce: state do
+      acc ->
+        ref = "resume-release-#{System.unique_integer([:positive])}"
+        accept(acc, Intent.new(body, :release, ref: ref, controller: holder))
+    end
+  end
+
+  # Who will hold the body once the lease intents already waiting for the
+  # next step (journaled before the world stopped) are applied, in order.
+  defp holder_after(holder, pending, body) do
+    Enum.reduce(pending, holder, fn
+      %Intent{body: ^body, verb: :control, controller: controller}, _held -> controller
+      %Intent{body: ^body, verb: :release}, _held -> nil
+      _other, held -> held
+    end)
+  end
+
+  defp leased?(world, world_pid, body) do
+    match?(
+      [{_session, {_controller, ^world_pid}}],
+      Registry.lookup(Avwe.Registry, {:lease, world, body})
+    )
+  end
 
   defp journal(%{store: nil}, _step, _intent), do: :ok
 

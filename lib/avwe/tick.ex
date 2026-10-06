@@ -5,24 +5,19 @@ defmodule Avwe.Tick do
   A step covers world time after `time`, up to and including `time + dt`.
   Systems must use `dt` and never assume a step is one minute, because history
   mode takes larger steps.
-
-  `emitted` is how many events the region's outbox held when the step began,
-  so `Avwe.Region.step_events/2` can tell this step's events from earlier
-  ones however long the outbox has gone undrained. It is not state.
   """
 
   alias Avwe.Rng
 
   @enforce_keys [:step, :time, :dt, :seed, :region]
-  defstruct [:step, :time, :dt, :seed, :region, emitted: 0]
+  defstruct [:step, :time, :dt, :seed, :region]
 
   @type t :: %__MODULE__{
           step: non_neg_integer(),
           time: Avwe.Calendar.time(),
           dt: pos_integer(),
           seed: integer(),
-          region: term(),
-          emitted: non_neg_integer()
+          region: term()
         }
 
   @doc "World time at the end of the step."

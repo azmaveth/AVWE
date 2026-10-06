@@ -45,7 +45,7 @@ defmodule Avwe.E2E.NotebookTest do
     sync(mira)
     Avwe.step(@world, 1)
     expect(mira, "You read your survey notebook (1 of 1 page):")
-    expect(mira, "  813 AR, day 220, 04:00: The reeds at the bend lean north.")
+    expect(mira, "  813 AR, day 220, 04:01: The reeds at the bend lean north.")
 
     send_line(mira, "look")
     expect(mira, "You carry your survey notebook (1 page).")
@@ -59,12 +59,27 @@ defmodule Avwe.E2E.NotebookTest do
     sync(next)
     Avwe.step(@world, 1)
     expect(next, "You read your survey notebook (1 of 1 page):")
-    expect(next, "  813 AR, day 220, 04:00: The reeds at the bend lean north.")
+    expect(next, "  813 AR, day 220, 04:01: The reeds at the bend lean north.")
 
     send_line(next, "write #{String.duplicate("x", 1_001)}")
     sync(next)
     Avwe.step(@world, 1)
     expect(next, "You can't write that. A page holds 1 to 1000 characters.")
+  end
+
+  test "a page reaches the reader as plain text: no escape codes, no tabs", %{port: port} do
+    mira = join(port, "mira")
+    send_line(mira, "write The bend.\tDry.\e[2J\e[31m Red?\a")
+    sync(mira)
+    Avwe.step(@world, 1)
+    expect(mira, "You write in your survey notebook.")
+
+    send_line(mira, "read")
+    sync(mira)
+    Avwe.step(@world, 1)
+    expect(mira, "You read your survey notebook (1 of 1 page):")
+    [page] = expect(mira, ~r/^  813 AR, day 220, 04:01: /) |> Enum.take(-1)
+    assert page == "  813 AR, day 220, 04:01: The bend. Dry.[2J[31m Red?"
   end
 
   test "joining tells what the body did while nobody held it", %{port: port} do

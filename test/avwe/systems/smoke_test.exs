@@ -2,7 +2,7 @@ defmodule Avwe.Systems.SmokeTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Avwe.{Event, Intent, Region}
+  alias Avwe.{Event, Intent, Perception, Region}
   alias Avwe.Systems.{Fire, Miracles, Smoke}
   alias Avwe.Test.Ember
 
@@ -240,6 +240,37 @@ defmodule Avwe.Systems.SmokeTest do
       {cold, events} = run(region, 1)
       assert smelled(events, @mira) == []
       assert Smoke.level_at(cold, Ember.places().lodge, cold.time) == :none
+    end
+
+    test "the smoke of a fire the body lit, smelled beside it, is its own; not a neighbour's",
+         %{region: region} do
+      {x, y} = Ember.places().lodge
+      region = body(region, "beside", {x + 1, y})
+      {lit, events} = region |> submit(:kindle, target: @lodge) |> run(1)
+
+      assert Region.get(lit, @lodge, :hearth).lit_by == @mira
+      assert [%{own_fire: @lodge}] = smelled(events, @mira)
+      assert [beside] = smelled(events, "beside")
+      refute Map.has_key?(beside, :own_fire)
+
+      # What the body perceives says so too: the source is the hearth.
+      view = lit |> Region.view() |> Map.put(:terrain, lit.terrain)
+      own = Enum.find(Perception.percepts(view, @mira, events), &(&1.type == :smoke_smelled))
+      assert %{data: %{own_fire: true}, source: %{ref: @lodge, distance_m: 0}} = own
+
+      theirs =
+        Enum.find(Perception.percepts(view, "beside", events), &(&1.type == :smoke_smelled))
+
+      assert %{data: nil, source: nil} = theirs
+
+      # A douse and a stranger's kindling: the fire is not hers any more.
+      {out, _events} = lit |> submit(:douse, target: @lodge) |> run(30)
+      stranger = Intent.new("beside", :kindle, ref: "beside-kindle", target: @lodge)
+      {relit, events} = out |> Region.submit(stranger) |> run(1)
+      assert Region.get(relit, @lodge, :hearth).lit_by == "beside"
+      assert [smell] = smelled(events, @mira)
+      refute Map.has_key?(smell, :own_fire)
+      assert [%{own_fire: @lodge}] = smelled(events, "beside")
     end
 
     test "100 m downwind the smell holds steady from minute to minute", %{region: region} do

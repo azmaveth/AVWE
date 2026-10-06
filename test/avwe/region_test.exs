@@ -68,6 +68,32 @@ defmodule Avwe.RegionTest do
     end
   end
 
+  defmodule Ticker do
+    @moduledoc false
+    @behaviour Avwe.System
+
+    # Emits one event a step, then a second that records how many events
+    # `Region.step_events/2` showed it.
+    @impl true
+    def run(region, tick) do
+      tock = Event.new(:tock, data: %{step: tick.step})
+      seen = Region.step_events(%{region | outbox: [tock | region.outbox]}, tick)
+      {region, [tock, Event.new(:seen, data: %{step: tick.step, seen: length(seen)})]}
+    end
+  end
+
+  describe "step_events/2" do
+    test "shows only the step's own events however long the outbox has gone undrained" do
+      region = %{region(1, [Ticker]) | outbox: [Event.new(:old), Event.new(:older)]}
+      {events, _drained} = region |> Region.advance(5) |> Region.drain_events()
+
+      assert [:older, :old | rest] = Enum.map(events, & &1.type)
+      assert rest == List.flatten(List.duplicate([:tock, :seen], 5))
+      assert for(%Event{type: :seen, data: data} <- events, do: data.seen) == [1, 1, 1, 1, 1]
+      assert for(%Event{type: :tock, data: data} <- events, do: data.step) == [0, 1, 2, 3, 4]
+    end
+  end
+
   describe "determinism" do
     property "the same seed and steps always give the same state" do
       check all seed <- integer(), steps <- integer(1..30) do

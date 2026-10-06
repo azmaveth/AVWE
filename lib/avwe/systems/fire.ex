@@ -9,7 +9,8 @@ defmodule Avwe.Systems.Fire do
         power_w: 5_000.0, low_kg: 1.0, last_step: %{...}}
 
   Bodies light and put out hearths with the `:kindle` and `:douse` verbs
-  (`Avwe.Actions`). Every step, each burning hearth burns at its power: dry
+  (`Avwe.Actions`); a hearth that has been kindled records who lit it last
+  (`lit_by`), so a body can tell its own fire's smoke from a stranger's. Every step, each burning hearth burns at its power: dry
   wood gives 16 MJ/kg, so 5 kW is 1.125 kg an hour and 12 kg is a night's
   fire. Consumption is linear and clamped at zero, which is exact at any step
   length: 12 kg at 5 kW goes out at `lit_at + 38_400` whether the world is
@@ -67,6 +68,7 @@ defmodule Avwe.Systems.Fire do
   }
 
   @type hearth :: %{
+          optional(:lit_by) => String.t(),
           fuel_kg: float(),
           burning: boolean(),
           lit_at: Avwe.Calendar.time() | nil,

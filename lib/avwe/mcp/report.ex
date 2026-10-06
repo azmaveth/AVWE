@@ -48,6 +48,11 @@ defmodule Avwe.MCP.Report do
   defp status(:interrupted),
     do: "Interrupted: something needs your attention. Your action goes on."
 
+  defp status(:yielded),
+    do:
+      "Yielded: your routine took the body back while you were away from the keyboard, " <>
+        "and the rest of the plan was dropped. Act again to take it back."
+
   defp status(:still_going), do: "Still going."
   defp status(:idle), do: "Nothing under way."
 
@@ -64,7 +69,7 @@ defmodule Avwe.MCP.Report do
 
   defp describe(%{verb: verb, target: nil}), do: to_string(verb)
   defp describe(%{verb: verb, target: target}), do: "#{verb} #{target}"
-  defp describe({verb, opts}), do: describe(%{verb: verb, target: opts[:target]})
+  defp describe({verb, opts}), do: describe(%{verb: verb, target: step_target(opts)})
 
   @doc "A Mind report as JSON-ready data."
   @spec data(map(), integer()) :: map()
@@ -80,7 +85,14 @@ defmodule Avwe.MCP.Report do
   end
 
   defp step({verb, opts}),
-    do: %{verb: verb, target: opts[:target], params: jsonable(Keyword.get(opts, :params, %{}))}
+    do: %{
+      verb: verb,
+      target: step_target(opts),
+      params: jsonable(Keyword.get(opts, :params, %{}))
+    }
+
+  # A planned step's target as given: an id, or a name not yet resolved.
+  defp step_target(opts), do: opts[:target] || opts[:target_name]
 
   defp percept(percept, now) do
     percept

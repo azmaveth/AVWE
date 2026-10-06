@@ -7,7 +7,7 @@ defmodule Avwe.MindTest do
 
   use ExUnit.Case, async: false
 
-  import Avwe.Test.Fixtures, only: [lantern_hollow: 0, eventually: 1]
+  import Avwe.Test.Fixtures, only: [lantern_hollow: 0, ember_reach_opts: 1, eventually: 1]
 
   alias Avwe.{Mind, Session}
 
@@ -87,6 +87,14 @@ defmodule Avwe.MindTest do
 
   defp say(text), do: {:say, params: %{text: text}}
 
+  # Douses the fire pit through the Mind and lets its smoke clear.
+  defp stopped_fire(mind) do
+    task = acting(mind, {:douse, []})
+    step(mind)
+    {:ok, report} = Task.await(task)
+    report
+  end
+
   describe "act" do
     test "is done when the last step succeeds, and the plan's own results don't interrupt it" do
       wren = mind("wren")
@@ -102,13 +110,41 @@ defmodule Avwe.MindTest do
     test "what the body senses of its own doing doesn't interrupt it either" do
       wren = mind("wren")
       # Lighting the fire is sensed before the kindle's result, in the same
-      # step. (The smoke it gives off is the world's, and may interrupt.)
+      # step, and so is its smoke, which is her own fire's.
       task = acting(wren, {:kindle, []})
       step(wren)
 
       assert {:ok, %{status: :done} = report} = Task.await(task)
-      assert [%{type: :fire_lit, issuer: :controller}, %{kind: :result}] = report.percepts
+
+      assert [
+               %{type: :fire_lit, issuer: :controller},
+               %{kind: :result},
+               %{type: :smoke_smelled, data: %{own_fire: true}, source: %{ref: "fire-pit"}}
+             ] = report.percepts
+
       assert "You light the fire pit." in summaries(report)
+    end
+
+    test "the smoke of the body's own fire doesn't interrupt; a stranger's does" do
+      wren = mind("wren")
+      task = acting(wren, [{:kindle, []}, {:wait, params: %{for: 10 * 60}}])
+      step(wren, 11)
+
+      assert {:ok, %{status: :done} = report} = Task.await(task)
+      assert Enum.any?(report.percepts, &(&1.type == :smoke_smelled and &1.salience >= 0.6))
+      assert List.last(summaries(report)) == "You finish waiting."
+      assert %{status: :done} = stopped_fire(wren)
+
+      # Tamsin lights it this time: the smoke Wren smells is not hers.
+      {:ok, tamsin} = Avwe.connect(@world, body: "tamsin")
+      step(wren, 30)
+      task = acting(wren, {:wait, params: %{for: 60 * 60}})
+      {:ok, _ref} = Session.act(tamsin, :kindle)
+      step(wren)
+
+      assert {:ok, %{status: :interrupted} = report} = Task.await(task)
+      assert %{type: :smoke_smelled, data: nil} = List.last(report.percepts)
+      assert %{verb: :wait} = report.action
     end
 
     test "has failed when a step does not succeed, and the rest of the plan is dropped" do
@@ -159,7 +195,7 @@ defmodule Avwe.MindTest do
 
       assert {:ok, report} = Mind.act(wren, {:wait, params: %{for: 10 * 60}}, max_wait_ms: 50)
       assert report.status == :still_going
-      assert %{verb: :wait, ref: "i-" <> _n} = report.action
+      assert %{verb: :wait, ref: "m-" <> _n} = report.action
 
       step(wren, 10)
       assert {:ok, %{status: :done, action: nil} = report} = Mind.percepts(wren)
@@ -211,6 +247,154 @@ defmodule Avwe.MindTest do
     end
   end
 
+  describe "refs" do
+    test "are the Mind's own: a result for an earlier holder's ref settles nothing" do
+      # A telnet-style session left Wren on a long wait under its first ref.
+      {:ok, before} = Avwe.connect(@world, body: "wren")
+      assert {:ok, "i-1"} = Session.act(before, :wait, params: %{for: 60 * 60})
+      Avwe.step(@world, 1)
+      :ok = Session.close(before)
+
+      wren = mind("wren")
+      task = acting(wren, {:wait, params: %{for: 5 * 60}})
+      # Her new wait replaces the old one, whose result (ref i-1) comes in
+      # the same step.
+      step(wren)
+      assert Task.yield(task, 50) == nil
+      step(wren, 5)
+
+      assert {:ok, %{status: :done, action: nil} = report} = Task.await(task)
+
+      assert [%{intent: "i-1", outcome: :interrupted}, %{intent: "m-" <> _n} = own] =
+               Enum.filter(report.percepts, &(&1.kind == :result))
+
+      assert own.outcome == :success
+    end
+
+    test "a caller's ref is only a label: the same one twice is no collision" do
+      wren = mind("wren")
+      plan = [{:wait, params: %{for: 60}, ref: "x"}, {:say, params: %{text: "hi"}, ref: "x"}]
+      assert {:ok, %{status: :still_going, action: action}} = Mind.act(wren, plan, max_wait_ms: 0)
+      assert %{ref: "m-" <> _n, label: "x", verb: :wait} = action
+
+      step(wren, 3)
+      assert {:ok, %{status: :done} = report} = Mind.percepts(wren)
+      results = Enum.filter(report.percepts, &(&1.kind == :result))
+      assert [%{intent: first}, %{intent: second}] = results
+      assert first != second
+      assert List.last(summaries(report)) == ~s(You say, "hi")
+    end
+  end
+
+  describe "names" do
+    test "a step's target is named and resolved when the step is submitted, not when sent" do
+      {:ok, tamsin} = Avwe.connect(@world, body: "tamsin")
+      {:ok, _ref} = Session.act(tamsin, :say, params: %{text: "Pell!", volume: :shout})
+      Avwe.step(@world, 1)
+
+      # At the Mill Pond, 70 m off, no hearth is in reach of Pell.
+      pell = mind("pell")
+
+      plan = [
+        {:go, target_name: "hollow green"},
+        {:kindle, target_name: "the fire pit"},
+        {:douse, target: "Fire Pit"}
+      ]
+
+      task = acting(pell, plan, max_wait_ms: 5_000)
+
+      report =
+        Enum.reduce_while(1..20, nil, fn _n, nil ->
+          step(pell)
+
+          case Task.yield(task, 20) do
+            {:ok, {:ok, report}} -> {:halt, report}
+            nil -> {:cont, nil}
+          end
+        end)
+
+      assert %{status: :done} = report
+      results = Enum.filter(report.percepts, &(&1.kind == :result))
+      assert ["You arrive at Hollow Green." | _rest] = Enum.map(results, & &1.summary)
+      assert "You light the fire pit." in summaries(report)
+      assert "You douse the fire pit." in summaries(report)
+
+      # Looking for itself kept the first look's news for the program.
+      assert {:ok, %{away: away}} = Mind.look(pell)
+      assert ~s(Tamsin shouts from the west, "Pell!") in Enum.map(away, & &1.summary)
+    end
+
+    test "a name that resolves to nothing is the world's to refuse" do
+      wren = mind("wren")
+      task = acting(wren, {:kindle, target_name: "the moon"})
+      step(wren)
+
+      assert {:ok, %{status: :failed} = report} = Task.await(task)
+      assert [%{kind: :result, outcome: :blocked, reason: :no_such_hearth}] = report.percepts
+    end
+  end
+
+  describe "waiting" do
+    test "a caller that waits is present: the body is not yielded under it" do
+      wren = mind("wren", idle_after: 100)
+      task = acting(wren, {:wait, params: %{for: 60 * 60}}, max_wait_ms: 600)
+
+      assert {:ok, %{status: :still_going} = report} = Task.await(task)
+      refute "You let your routine carry you." in summaries(report)
+      %{session: session} = :sys.get_state(wren)
+      refute :sys.get_state(session).yielded
+
+      step(wren)
+      assert holder("wren") == :mcp
+    end
+
+    test "every step the Mind submitted is followed, not only the plan's current one" do
+      wren = mind("wren")
+
+      assert {:ok, %{status: :still_going}} =
+               Mind.act(wren, {:wait, params: %{for: 60 * 60}}, max_wait_ms: 0)
+
+      # A new plan before the wait has started: the wait is no longer the
+      # plan's, but it is still the Mind's.
+      task = acting(wren, say("hi"))
+      step(wren)
+
+      assert {:ok, %{status: :done, plan: [], action: %{verb: :wait}}} = Task.await(task)
+      assert {:ok, %{status: :still_going, action: %{verb: :wait}}} = Mind.percepts(wren)
+    end
+
+    test "a whole step's percepts are in the answer it ends: a discovery with an arrival" do
+      {:ok, _pid} =
+        Avwe.start_world(:ember_minds, ember_reach_opts(start: {813, day: 220, hour: 8}))
+
+      on_exit(fn -> Avwe.stop_world(:ember_minds) end)
+      {:ok, mira} = Mind.start(:ember_minds, "mira-vale")
+      on_exit(fn -> Mind.close(mira) end)
+
+      plan = [{:go, target: "the-dry-bend"}, {:follow, params: %{direction: :upstream}}]
+      task = Task.async(fn -> Mind.act(mira, plan, max_wait_ms: 20_000) end)
+      eventually(fn -> :sys.get_state(mira).waiter != nil end)
+
+      report =
+        Enum.reduce_while(1..200, nil, fn _n, nil ->
+          Avwe.step(:ember_minds, 1)
+          settle(mira)
+
+          case Task.yield(task, 20) do
+            {:ok, {:ok, report}} -> {:halt, report}
+            nil -> {:cont, nil}
+          end
+        end)
+
+      assert report.status == :done
+      assert [arrived, found] = Enum.take(report.percepts, -2)
+      assert %{kind: :result, outcome: :success} = arrived
+      assert %{type: :discovered, summary: summary} = found
+      assert summary =~ "The Source"
+      assert arrived.time == found.time
+    end
+  end
+
   describe "the body's own doing" do
     test "an instant step during a durative one is done, and the action still shows" do
       wren = mind("wren")
@@ -224,8 +408,8 @@ defmodule Avwe.MindTest do
       step(wren)
 
       assert {:ok, %{status: :done, plan: []} = report} = Task.await(task)
-      assert %{verb: :wait, ref: "i-1"} = report.action
-      assert {:ok, %{action: %{verb: :wait, ref: "i-1"}}} = Mind.look(wren)
+      assert %{verb: :wait, ref: "m-" <> _n = ref} = report.action
+      assert {:ok, %{action: %{verb: :wait, ref: ^ref}}} = Mind.look(wren)
 
       step(wren)
       assert {:ok, %{status: :still_going, action: %{verb: :wait}}} = Mind.percepts(wren)
@@ -343,7 +527,7 @@ defmodule Avwe.MindTest do
       eventually(fn -> not taken?("wren") end)
     end
 
-    test "is the routine's when the session yields it, and the plan ends there" do
+    test "is the routine's when the session yields it; the plan ends there, yielded" do
       wren = mind("wren", idle_after: 100)
       plan = [{:go, target: "far-tower"}, {:wait, params: %{for: 60 * 60}}]
       assert {:ok, %{status: :still_going}} = Mind.act(wren, plan, max_wait_ms: 0)
@@ -351,15 +535,28 @@ defmodule Avwe.MindTest do
 
       %{session: session} = :sys.get_state(wren)
       eventually(fn -> :sys.get_state(session).yielded end)
-      # The journey goes on under the routine and arrives; nothing more is
-      # submitted, so the body stays the routine's.
+      step(wren)
+
+      # Nothing failed: the routine took the body back. The journey is
+      # still the body's doing, and goes on.
+      assert {:ok, %{status: :yielded, plan: [], action: %{verb: :go}} = report} =
+               Mind.percepts(wren)
+
+      assert "You let your routine carry you." in summaries(report)
+      refute Enum.any?(report.percepts, &(&1.kind == :result))
+
+      # It arrives under the routine; nothing more is submitted, so the
+      # body stays the routine's, and the journey's own result is told.
       step(wren, 40)
 
       assert holder("wren") == nil
-      assert %{plan: [], current: nil} = :sys.get_state(wren)
-      assert {:ok, %{status: :failed, plan: [], action: nil} = report} = Mind.percepts(wren)
-      assert "You let your routine carry you." in summaries(report)
-      assert "You arrive at Far Tower." in summaries(report)
+      assert %{plan: [], current: nil, doing: nil, pending: pending} = :sys.get_state(wren)
+      assert pending == %{}
+      assert {:ok, %{status: :idle, plan: [], action: nil} = report} = Mind.percepts(wren)
+
+      assert [%{kind: :result, outcome: :success, summary: "You arrive at Far Tower."}] =
+               Enum.filter(report.percepts, &(&1.kind == :result and &1.issuer == :controller))
+
       refute "You settle in to wait." in summaries(report)
     end
 
@@ -373,6 +570,24 @@ defmodule Avwe.MindTest do
 
       {:ok, _pid} = Avwe.start_world(@world, quire: lantern_hollow(), start: {1, hour: 12})
       assert {:ok, _taken} = Avwe.connect(@world, body: "wren")
+    end
+
+    test "each call re-arms one quit timer, cancelling the one before" do
+      wren = mind("wren")
+      %{quit_timer: first} = :sys.get_state(wren)
+      assert is_integer(Process.read_timer(first))
+
+      assert {:ok, _report} = Mind.percepts(wren)
+      %{quit_timer: second} = :sys.get_state(wren)
+      assert second != first
+      assert Process.read_timer(first) == false
+      assert is_integer(Process.read_timer(second))
+    end
+
+    test "closing a Mind that has already ended is no error" do
+      wren = mind("wren")
+      assert :ok = Mind.close(wren)
+      assert :ok = Mind.close(wren)
     end
 
     test "calls keep it from quitting" do

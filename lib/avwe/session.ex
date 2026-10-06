@@ -52,8 +52,10 @@ defmodule Avwe.Session do
   **The world.** A session lives no longer than its world: when the world
   stops, the session stops too, so its lease and its subscription, both
   keyed by the world's name, are not left behind for a world started again
-  under that name. There is nothing to release then; the world that knew
-  the body is gone.
+  under that name. It does not release the body then: its release would
+  reach whatever world runs under that name by the time it is sent. The
+  body's holder stays written on it, and the world, when it starts again,
+  releases every body that no live lease holds (`Avwe.RegionServer`).
 
   Start sessions with `Avwe.connect/2`.
   """
@@ -70,6 +72,10 @@ defmodule Avwe.Session do
   @announced %{control_released: :yield, control_taken: :retake}
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+  @doc "How long a session waits for a call before it yields the body, by default (real ms)."
+  @spec default_idle_after() :: pos_integer()
+  def default_idle_after, do: @idle_after
 
   @doc "What the body senses right now and what it can do. See `Avwe.Perception.look/2`."
   @spec look(pid()) :: {:ok, map()} | {:error, term()}
@@ -114,7 +120,7 @@ defmodule Avwe.Session do
          {:ok, world_pid} <- whereis(world),
          {:ok, view} <- snapshot(world),
          :ok <- check_body(view, body),
-         :ok <- claim(world, body, controller) do
+         :ok <- claim(world, world_pid, body, controller) do
       sink = Keyword.fetch!(opts, :sink)
       Process.monitor(sink)
       Process.monitor(world_pid)
@@ -327,10 +333,13 @@ defmodule Avwe.Session do
       else: {:error, :no_such_body}
   end
 
-  defp claim(_world, nil, _controller), do: :ok
+  defp claim(_world, _world_pid, nil, _controller), do: :ok
 
-  defp claim(world, body, controller) do
-    case Registry.register(Avwe.Registry, {:lease, world, body}, controller) do
+  # The lease names the world it was taken in, by pid, so a world started
+  # again under the same name can tell a session of its own from one of the
+  # world before that has not ended yet (`Avwe.RegionServer`).
+  defp claim(world, world_pid, body, controller) do
+    case Registry.register(Avwe.Registry, {:lease, world, body}, {controller, world_pid}) do
       {:ok, _owner} -> :ok
       {:error, {:already_registered, _holder}} -> {:error, :body_taken}
     end

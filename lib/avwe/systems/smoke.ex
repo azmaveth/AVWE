@@ -50,8 +50,11 @@ defmodule Avwe.Systems.Smoke do
   too, so the look and the percept agree). Standing miracles do not smoke
   and give nothing. The level (`:faint`, `:clear`, `:thick` or `:none`) lives
   in the body's `:nose` component, and a change emits `:smoke_smelled`
-  (`data: %{level, from}`, the wind's direction) or `:smoke_faded`. Nothing
-  here draws random numbers.
+  (`data: %{level, from}`, the wind's direction) or `:smoke_faded`. When
+  the body stands within reach (`Avwe.Systems.Fire.at_place_cells/0`) of a
+  burning hearth it lit itself (`lit_by`), the smell is its own fire's and
+  `data` names that hearth as `own_fire`. Nothing here draws random
+  numbers.
   """
 
   @behaviour Avwe.System
@@ -260,7 +263,7 @@ defmodule Avwe.Systems.Smoke do
         {acc, events}
       else
         {Region.put_component(acc, body, :nose, %{smoke: level}),
-         events ++ [smell_event(body, level, wind)]}
+         events ++ [smell_event(acc, body, level, wind)]}
       end
     end)
   end
@@ -268,10 +271,32 @@ defmodule Avwe.Systems.Smoke do
   defp nose_level(%{smoke: level}), do: level
   defp nose_level(_no_nose), do: :none
 
-  defp smell_event(body, :none, _wind), do: Event.new(:smoke_faded, entity: body, data: %{})
+  defp smell_event(_region, body, :none, _wind),
+    do: Event.new(:smoke_faded, entity: body, data: %{})
 
-  defp smell_event(body, level, wind) do
-    Event.new(:smoke_smelled, entity: body, data: %{level: level, from: wind.from})
+  defp smell_event(region, body, level, wind) do
+    data =
+      case own_fire(region, body) do
+        nil -> %{level: level, from: wind.from}
+        hearth -> %{level: level, from: wind.from, own_fire: hearth}
+      end
+
+    Event.new(:smoke_smelled, entity: body, data: data)
+  end
+
+  # The burning hearth the body lit, if it stands within reach of it (the
+  # first by id): the smoke it smells there is its own fire's.
+  defp own_fire(region, body) do
+    here = Region.get(region, body, :position)
+
+    region
+    |> Region.with_components([:hearth, :position])
+    |> Enum.find(fn id ->
+      hearth = Region.get(region, id, :hearth)
+
+      hearth.burning and Map.get(hearth, :lit_by) == body and
+        Space.distance(here, Region.get(region, id, :position)) <= Fire.at_place_cells()
+    end)
   end
 
   # Converters

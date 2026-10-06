@@ -93,16 +93,19 @@ defmodule Avwe.NotebookTest do
   end
 
   describe "write" do
-    test "appends a page stamped with the step's start, trimmed", %{world: world} do
+    test "appends a page stamped with the step's end, the time its result reports, trimmed", %{
+      world: world
+    } do
       region = hollow(world)
-      start = region.time
 
       {region, events} = region |> write("wren", "  The pond is low.  ") |> run()
 
-      assert [%{outcome: :success, target: "wren-notebook", params: %{text: "The pond is low."}}] =
-               results(events)
+      assert [%Event{time: written, data: %{outcome: :success} = data}] =
+               Enum.filter(events, &(&1.type == :action_result))
 
-      assert pages(region, "wren-notebook") == [%{time: start, text: "The pond is low."}]
+      assert %{target: "wren-notebook", params: %{text: "The pond is low."}} = data
+      assert written == region.time
+      assert pages(region, "wren-notebook") == [%{time: written, text: "The pond is low."}]
 
       {region, _events} = region |> write("wren", "Second.") |> run()
 
@@ -171,6 +174,38 @@ defmodule Avwe.NotebookTest do
       assert Enum.map(pages(region, "wren-notebook"), & &1.text) == [long, "x"]
     end
 
+    test "holds one line of plain text: breaks and tabs become spaces, control characters go",
+         %{world: world} do
+      forged = "The bend.\n  813 AR, day 1, 00:00: A forged page.\r\n\tEnd."
+      escapes = "\e[2J\e[31mRed\a\b\x7F\u0085done\u2028now"
+
+      {region, events} =
+        world
+        |> hollow()
+        |> write("wren", forged, ref: "a")
+        |> write("wren", escapes, ref: "b")
+        |> write("wren", "\n\t\e\r", ref: "c")
+        |> write("wren", <<0xFF, 0xFE>>, ref: "d")
+        |> run()
+
+      assert Enum.map(results(events), &{&1.ref, &1.outcome}) == [
+               {"a", :success},
+               {"b", :success},
+               {"c", :blocked},
+               {"d", :blocked}
+             ]
+
+      assert Enum.map(pages(region, "wren-notebook"), & &1.text) == [
+               "The bend. 813 AR, day 1, 00:00: A forged page. End.",
+               "[2J[31mRed done now"
+             ]
+
+      {region, events} = region |> submit("wren", :read, []) |> run()
+      [percept] = Perception.percepts(view(region), "wren", events)
+      assert length(String.split(percept.summary, "\n")) == 3
+      refute percept.summary =~ "\e"
+    end
+
     test "is blocked when the notebook holds 500 pages", %{world: world} do
       region = hollow(world)
       full = %{pages: for(n <- 1..500, do: %{time: n, text: "page #{n}"})}
@@ -201,7 +236,7 @@ defmodule Avwe.NotebookTest do
       assert data.total == 12
       assert Enum.map(data.pages, & &1.text) == Enum.map(3..12, &"note #{&1}")
       assert [first | _rest] = data.pages
-      assert first.time == Calendar.at(1, hour: 12, minute: 2)
+      assert first.time == Calendar.at(1, hour: 12, minute: 3)
     end
 
     test "returns as many as asked, 1 to 50", %{region: region} do
@@ -235,8 +270,8 @@ defmodule Avwe.NotebookTest do
       assert percept.summary ==
                """
                You read your field notebook (2 of 12 pages):
-                 1 AR, day 1, 12:10: note 11
-                 1 AR, day 1, 12:11: note 12\
+                 1 AR, day 1, 12:11: note 11
+                 1 AR, day 1, 12:12: note 12\
                """
     end
   end

@@ -29,7 +29,10 @@ defmodule Avwe.Perception do
   is at it. `fires` lists only the fires beyond the spot a body is at (more
   than 20 m off): a burning hearth within 20 m is what is here, and shows in
   `hearths`, not in `fires`. Only the body's own nose smells smoke
-  (`Avwe.Systems.Smoke.level_at/3`, the rule the smell percepts follow); the
+  (`Avwe.Systems.Smoke.level_at/3`, the rule the smell percepts follow), and
+  the smell of a fire the body lit and stands beside is its own: the
+  percept's `source` is that hearth and its `data` is `%{own_fire: true}`;
+  the
   snapshot's `fields` carry the heat and smoke, and without them `warmth`
   and `smoke` are `nil`. Steam has one rule, the reach's flag
   (`Avwe.Systems.Heat.steaming?/2`): `warmth.steam?` on a wet cell and
@@ -495,9 +498,11 @@ defmodule Avwe.Perception do
 
   defp own_issuer(_body, _data), do: nil
 
-  # Only the body's own nose smells smoke.
-  defp smell(_view, body, %Event{entity: body, data: data} = event) when body != nil do
+  # Only the body's own nose smells smoke. The smoke of a fire it lit and
+  # stands beside says so: its source is that hearth, and `own_fire` is set.
+  defp smell(view, body, %Event{entity: body, data: data} = event) when body != nil do
     level = Map.get(data, :level)
+    hearth = Map.get(data, :own_fire)
 
     [
       %Percept{
@@ -506,13 +511,26 @@ defmodule Avwe.Perception do
         time: event.time,
         body: body,
         modality: :smell,
+        source: hearth && fire_source(view, body, hearth),
         salience: Map.get(@smell_salience, level, 0.5),
-        summary: Prose.smell(event.type, level, Map.get(data, :from))
+        summary: Prose.smell(event.type, level, Map.get(data, :from)),
+        data: hearth && %{own_fire: true}
       }
     ]
   end
 
   defp smell(_view, _body, _event), do: []
+
+  defp fire_source(view, body, hearth) do
+    observer = position(view, body)
+    at = position(view, hearth)
+
+    %{
+      ref: hearth,
+      distance_m: Space.meters(Space.distance(observer, at)),
+      direction: Space.direction(observer, at)
+    }
+  end
 
   defp see_spring(view, body, event) do
     observer = body && position(view, body)

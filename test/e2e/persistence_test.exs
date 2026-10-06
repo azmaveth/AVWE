@@ -20,6 +20,7 @@ defmodule Avwe.E2E.PersistenceTest do
   import ExUnit.CaptureLog
 
   alias Avwe.{Region, RegionServer, Session, Store}
+  alias Avwe.Test.TelnetClient
 
   @moduletag :tmp_dir
   @world :ember_persist
@@ -636,6 +637,125 @@ defmodule Avwe.E2E.PersistenceTest do
     _sessions = play()
 
     assert File.ls!(tmp_dir) == []
+  end
+
+  describe "a body held when its world stops" do
+    defp journaled_releases(tmp_dir) do
+      for {:avwe, 2, {:submit, _step, %{verb: :release} = intent}} <- records(tmp_dir),
+          do: intent
+    end
+
+    defp mira_holder do
+      {:ok, snapshot} = Avwe.snapshot(@world)
+      snapshot.components.control["mira-vale"].holder
+    end
+
+    defp replays_exactly(tmp_dir) do
+      {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+      assert {:ok, rebuilt} = Store.rebuild_from_start(store)
+      assert Region.state_hash(rebuilt) == live_hash()
+      :ok = Store.close(store)
+    end
+
+    test "is released when the world starts again: the routine has her, and the next player is told",
+         %{tmp_dir: tmp_dir} do
+      :ok = start(tmp_dir)
+      {:ok, mira} = Avwe.connect(@world, body: "mira-vale")
+      monitor = Process.monitor(mira)
+      Avwe.step(@world, 1)
+      assert mira_holder() == :human
+
+      :ok = Avwe.stop_world(@world)
+      assert_receive {:DOWN, ^monitor, :process, ^mira, :normal}
+      # Her session ended with its world and released nothing.
+      assert journaled_releases(tmp_dir) == []
+
+      :ok = start(tmp_dir)
+      # The world released her itself, through the journal.
+      assert [%{body: "mira-vale", controller: :human, ref: "resume-release-" <> _n}] =
+               journaled_releases(tmp_dir)
+
+      Avwe.step(@world, 1)
+      assert mira_holder() == nil
+      # Her routine walks her to the Dry Bend at 04:30.
+      Avwe.step(@world, 60)
+      assert %{ref: "auto-" <> _n} = mira_action()
+
+      telnet = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0}))
+      next = TelnetClient.join(telnet, "mira", "While you were away:")
+      away = TelnetClient.expect(next, ~r/^You are Mira Vale/)
+      assert "  04:02 You let your routine carry you." in away
+      assert Enum.any?(away, &(&1 =~ ~r/^  04:\d\d You arrive at The Dry Bend\.$/))
+
+      replays_exactly(tmp_dir)
+    end
+
+    test "is released when it was held by a Mind, which ends with the world", %{
+      tmp_dir: tmp_dir
+    } do
+      :ok = start(tmp_dir)
+      {:ok, mind} = Avwe.Mind.start(@world, "mira-vale")
+      monitor = Process.monitor(mind)
+
+      assert {:ok, %{status: :still_going}} =
+               Avwe.Mind.act(mind, {:say, params: %{text: "Hold on."}}, max_wait_ms: 0)
+
+      Avwe.step(@world, 1)
+      assert mira_holder() == :mcp
+
+      :ok = Avwe.stop_world(@world)
+      assert_receive {:DOWN, ^monitor, :process, ^mind, :normal}, 1_000
+
+      :ok = start(tmp_dir)
+      Avwe.step(@world, 61)
+      assert mira_holder() == nil
+      assert %{ref: "auto-" <> _n} = mira_action()
+
+      {:ok, mind} = Avwe.Mind.start(@world, "mira-vale")
+      on_exit(fn -> Avwe.Mind.close(mind) end)
+      assert {:ok, %{away: away}} = Avwe.Mind.look(mind)
+      assert "You arrive at The Dry Bend." in Enum.map(away, & &1.summary)
+
+      replays_exactly(tmp_dir)
+    end
+
+    test "is not released by a session of the world before, even one still ending", %{
+      tmp_dir: tmp_dir
+    } do
+      :ok = start(tmp_dir)
+      {:ok, mira} = Avwe.connect(@world, body: "mira-vale")
+      Avwe.step(@world, 1)
+
+      # Her session is slow to hear that its world stopped: the world starts
+      # again before it does, and its lease is still registered.
+      on_exit(fn -> Process.exit(mira, :kill) end)
+      :ok = :sys.suspend(mira)
+      :ok = Avwe.stop_world(@world)
+      :ok = start(tmp_dir)
+      assert [%{ref: "resume-release-" <> _n}] = journaled_releases(tmp_dir)
+
+      monitor = Process.monitor(mira)
+      :ok = :sys.resume(mira)
+      assert_receive {:DOWN, ^monitor, :process, ^mira, :normal}
+
+      # It ended without sending its release to the new world.
+      assert {:ok, _state} = Avwe.step(@world, 1)
+      assert [%{ref: "resume-release-" <> _n}] = journaled_releases(tmp_dir)
+      assert mira_holder() == nil
+    end
+
+    test "but a region that crashes while its world runs leaves its live sessions' bodies held",
+         %{tmp_dir: tmp_dir} do
+      :ok = start(tmp_dir)
+      {:ok, mira} = Avwe.connect(@world, body: "mira-vale")
+      Avwe.step(@world, 1)
+      crash_region()
+
+      assert journaled_releases(tmp_dir) == []
+      Avwe.step(@world, 1)
+      assert mira_holder() == :human
+      assert Process.alive?(mira)
+    end
   end
 
   describe "autopilot" do

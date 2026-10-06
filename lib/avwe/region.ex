@@ -165,20 +165,25 @@ defmodule Avwe.Region do
     Enum.reduce(List.duplicate(dt, steps), region, &step(&2, &1))
   end
 
-  defp step(region, dt) do
+  # A step starts with an empty outbox, so `step_events/2` reads only its
+  # own events, and puts the earlier ones back behind them when it ends:
+  # that costs the step's own events, not the whole undrained outbox.
+  defp step(%__MODULE__{outbox: earlier} = region, dt) do
     tick = %Tick{
       step: region.step,
       time: region.time,
       dt: dt,
       seed: region.seed,
-      region: region.id,
-      emitted: length(region.outbox)
+      region: region.id
     }
 
-    region
-    |> apply_intents(tick)
-    |> run_systems(tick)
-    |> finish_step(tick)
+    stepped =
+      %{region | outbox: []}
+      |> apply_intents(tick)
+      |> run_systems(tick)
+      |> finish_step(tick)
+
+    %{stepped | outbox: stepped.outbox ++ earlier}
   end
 
   defp apply_intents(%__MODULE__{inbox: []} = region, _tick), do: region
@@ -245,15 +250,14 @@ defmodule Avwe.Region do
   @doc """
   The events emitted so far in the step `tick` describes, oldest first: the
   intents' and those of the systems that ran before the caller. For a
-  system that reacts to what happened earlier in the same step. It counts
-  from the outbox's length when the step began (`tick.emitted`), so it is
-  the same whether the region is advanced one step at a time and drained,
-  as `Avwe.RegionServer` does, or many steps at once, as replay does.
+  system that reacts to what happened earlier in the same step. A step
+  runs on an outbox of its own (earlier events wait aside until it ends),
+  so this is the same whether the region is advanced one step at a time
+  and drained, as `Avwe.RegionServer` does, or many steps at once, as
+  replay does, and it costs this step's events only.
   """
   @spec step_events(t(), Tick.t()) :: [Event.t()]
-  def step_events(%__MODULE__{outbox: outbox}, %Tick{emitted: emitted}) do
-    outbox |> Enum.take(length(outbox) - emitted) |> Enum.reverse()
-  end
+  def step_events(%__MODULE__{outbox: outbox}, %Tick{}), do: Enum.reverse(outbox)
 
   @doc "Takes the events emitted since the last drain, oldest first."
   @spec drain_events(t()) :: {[Event.t()], t()}

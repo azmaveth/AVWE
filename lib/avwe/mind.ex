@@ -26,16 +26,32 @@ defmodule Avwe.Mind do
     * `close/1` ends the Mind and gives the body back.
 
   A step is `{verb, opts}` (or `{verb}`), with the opts of
-  `Avwe.Session.act/3`: `:target`, `:params` and, rarely, `:ref`. The verbs
-  `:control` and `:release`, and refs starting with `auto-`, are refused
-  with `{:error, :reserved}`, before anything is submitted.
+  `Avwe.Session.act/3`, `:target` and `:params`, and two of the Mind's own:
+
+    * `:target_name` - the target by name, such as `"the kiln-house
+      hearth"`. A `:target` that is not the id of anything the body can
+      name is taken as a name too. Names are resolved when the Mind submits
+      the step, against a fresh look (the places the body knows for `:go`,
+      the hearths in reach for `:kindle` and `:douse`, the notebooks it
+      carries for `:write` and `:read`), so a plan can name a hearth it
+      will only reach on the way. A name that matches nothing, or more
+      than one thing, is passed to the world as given, and the world
+      refuses it in its own words.
+    * `:ref` - a label of the caller's own, kept on the step's `action` in
+      reports. The Mind chooses every intent's ref itself (`"m-"` and a
+      number unique to the runtime), so a result is only ever its own
+      step's: not a ref an earlier session of the body used, nor one the
+      caller used twice.
+
+  The verbs `:control` and `:release`, and labels starting with `auto-`,
+  are refused with `{:error, :reserved}`, before anything is submitted.
 
   ## Replies
 
   `act/3`, `stop/2` and `percepts/1` reply `{:ok, report}`:
 
       %{
-        status: :done | :failed | :interrupted | :still_going | :idle,
+        status: :done | :failed | :interrupted | :still_going | :yielded | :idle,
         percepts: [%Avwe.Percept{}],   # since the previous call returned, in order
         plan: [{verb, opts}],          # steps not yet submitted
         action: %{ref, verb, target} | nil,  # the step under way, or the body's own doing
@@ -43,24 +59,41 @@ defmodule Avwe.Mind do
       }
 
   `action` is the plan's step under way or, when there is none, the
-  durative action an earlier step started that the body is still doing (a
-  wait that an instant step, such as speaking, did not end). It is `nil`
-  only when the body is doing nothing the Mind asked for.
+  durative action a step of the Mind's started that the body is still
+  doing (a wait that an instant step, such as speaking, did not end, or a
+  step under way when the routine took the body back). It is `nil` only
+  when the body is doing nothing the Mind asked for. It carries `label`
+  when the step had a `:ref`.
 
   The buffer holds at most 500 percepts; when it overflows the oldest are
   dropped and counted in the next reply's `dropped`.
 
+  Percepts arrive from the session a step's worth at a time, and the Mind
+  takes each batch whole before it answers a waiting caller, so whatever
+  the body perceived in the step that ended the wait (a discovery in the
+  step a journey arrives) is in that answer. When a step's batch both ends
+  the plan and holds something that would interrupt, the plan's end is the
+  status.
+
   Between calls the Mind keeps going: as each step succeeds it submits the
   next, so a plan runs while the program thinks, and a failed step drops
   the rest. Only one call waits at a time: a call made while another waits
-  answers the waiting one first, as if its wait had run out. A caller that
-  dies while it waits (a cancelled request) is forgotten, and what it would
-  have been told waits for the next call.
+  answers the waiting one first, as if its wait had run out. A caller
+  whose process dies while it waits (its connection dropped) is
+  forgotten, and what it would have been told waits for the next call.
+  The Mind does not see an MCP client's `notifications/cancelled`: such a
+  call waits out its course and its answer goes nowhere.
+
+  A waiting caller is present: the Mind marks the session present
+  (`Avwe.Session.touch/1`) when a wait starts and every half `:idle_after`
+  while it lasts, so a long wait does not hand the body to its routine.
 
   When the session yields the body to its routine (its idle rule: no call
-  for `:idle_after`), the plan ends there, as `:failed`, and the Mind
-  forgets what it was doing: the routine has the body now, and only the
-  program's next act takes it back.
+  for `:idle_after`), the plan ends there, as `:yielded`: the routine took
+  the body back while the program was away from the keyboard, and only the
+  program's next act takes it back. The step under way stays the
+  `action` until its result arrives, and that result is told in the next
+  reply.
 
   With no call for `:quit_after` real milliseconds (default 30 minutes) the
   Mind stops and the body is released.
@@ -69,17 +102,20 @@ defmodule Avwe.Mind do
   use GenServer, restart: :temporary
 
   alias Avwe.Session
+  alias Avwe.Telnet.Command
 
   @controllers [:mcp, :arbor]
   @reserved_verbs [:control, :release]
+  @named_verbs [:go, :kindle, :douse, :write, :read]
   @buffer 500
   @quit_after 30 * 60 * 1_000
   @interrupt_at 0.6
   @max_wait_ms 25_000
 
   @type step :: {atom(), keyword()} | {atom()}
+  @type status :: :done | :failed | :interrupted | :still_going | :yielded | :idle
   @type report :: %{
-          status: :done | :failed | :interrupted | :still_going | :idle,
+          status: status(),
           percepts: [Avwe.Percept.t()],
           plan: [{atom(), keyword()}],
           action: %{ref: String.t(), verb: atom(), target: String.t() | nil} | nil,
@@ -124,7 +160,11 @@ defmodule Avwe.Mind do
       dropped.
     * `:interrupted` - a sensed percept at or above `:interrupt_at` arrives
       that is not about the plan's own doing (being spoken to, the river
-      falling silent, a discovery). The action and the plan keep going.
+      falling silent, a discovery, a stranger's smoke; not the smoke of a
+      fire the body lit and stands beside). The action and the plan keep
+      going.
+    * `:yielded` - the session handed the body to its routine (see the
+      moduledoc); the plan is dropped.
     * `:still_going` - `:max_wait_ms` passes. The action and the plan keep
       going.
 
@@ -154,9 +194,10 @@ defmodule Avwe.Mind do
 
   @doc """
   Returns and clears what was perceived since the last call, without
-  acting. `status` is `:still_going` while a plan runs, how the last plan
-  ended (`:done` or `:failed`) if it ended since the previous call
-  returned, and `:idle` otherwise.
+  acting. `status` is `:still_going` while a plan runs or a durative action
+  a step of the Mind's started is still under way; how the last plan ended
+  (`:done`, `:failed` or `:yielded`) if it ended since the previous call
+  returned; and `:idle` otherwise.
   """
   @spec percepts(pid()) :: {:ok, report()}
   def percepts(mind), do: GenServer.call(mind, :percepts)
@@ -165,9 +206,16 @@ defmodule Avwe.Mind do
   @spec body(pid()) :: String.t()
   def body(mind), do: GenServer.call(mind, :body)
 
-  @doc "Ends the Mind; its session closes and the body goes back to its routine."
+  @doc """
+  Ends the Mind; its session closes and the body goes back to its routine.
+  A Mind that has already ended is no error.
+  """
   @spec close(pid()) :: :ok
-  def close(mind), do: GenServer.stop(mind)
+  def close(mind) do
+    GenServer.stop(mind)
+  catch
+    :exit, _gone -> :ok
+  end
 
   @impl true
   def init(opts) do
@@ -181,21 +229,26 @@ defmodule Avwe.Mind do
     with :ok <- check_controller(controller),
          {:ok, session} <- Avwe.connect(Keyword.fetch!(opts, :world), connect) do
       Process.monitor(session)
+      idle_after = Keyword.get(opts, :idle_after, Session.default_idle_after())
 
       state = %{
         session: session,
         body: body,
         looked: false,
+        away: nil,
         buffer: :queue.new(),
         buffered: 0,
         dropped: 0,
         plan: [],
         current: nil,
         doing: nil,
+        pending: %{},
         ended: nil,
         waiter: nil,
+        presence_every: max(div(idle_after, 2), 1),
         quit_after: Keyword.get(opts, :quit_after, @quit_after),
-        quit_tag: nil
+        quit_tag: nil,
+        quit_timer: nil
       }
 
       {:ok, arm_quit(state)}
@@ -206,20 +259,20 @@ defmodule Avwe.Mind do
 
   @impl true
   def handle_call(:look, _from, state) do
-    reply =
-      case Session.look(state.session) do
-        {:ok, look} when state.looked -> {:ok, Map.put(look, :away, [])}
-        other -> other
+    {reply, state} =
+      case session_look(state) do
+        {{:ok, look}, state} -> {{:ok, first_away(look, state)}, state}
+        {error, state} -> {error, state}
       end
 
-    {:reply, reply, arm_quit(%{state | looked: true})}
+    {:reply, reply, arm_quit(%{state | looked: true, away: nil})}
   end
 
   def handle_call(:body, _from, state), do: {:reply, state.body, state}
 
   def handle_call(:percepts, _from, state) do
     state = answer_waiter(state)
-    :ok = Session.touch(state.session)
+    touch(state)
 
     status =
       cond do
@@ -239,12 +292,7 @@ defmodule Avwe.Mind do
 
       case submit_next(state) do
         {:ok, state} ->
-          tag = make_ref()
-          Process.send_after(self(), {:max_wait, tag}, max_wait)
-          {caller, _tag} = from
-          monitor = Process.monitor(caller)
-          waiter = %{from: from, interrupt_at: interrupt_at, tag: tag, monitor: monitor}
-          {:noreply, arm_quit(%{state | waiter: waiter})}
+          {:noreply, state |> wait(from, interrupt_at, max_wait) |> arm_quit()}
 
         {:error, reason, state} ->
           {:reply, {:error, reason}, arm_quit(state)}
@@ -256,7 +304,10 @@ defmodule Avwe.Mind do
 
   @impl true
   def handle_info({:avwe_percepts, session, percepts}, %{session: session} = state) do
-    {:noreply, Enum.reduce(percepts, state, &take/2)}
+    state = Enum.reduce(percepts, state, &buffer_percept(&2, &1))
+    {state, interrupted} = Enum.reduce(percepts, {state, false}, &take/2)
+    if state.waiter, do: touch(state)
+    {:noreply, wake(state, interrupted)}
   end
 
   def handle_info({:max_wait, tag}, %{waiter: %{tag: tag}} = state),
@@ -264,13 +315,20 @@ defmodule Avwe.Mind do
 
   def handle_info({:max_wait, _stale}, state), do: {:noreply, state}
 
+  def handle_info({:presence, tag}, %{waiter: %{tag: tag}} = state) do
+    touch(state)
+    {:noreply, present(state, tag)}
+  end
+
+  def handle_info({:presence, _stale}, state), do: {:noreply, state}
+
   def handle_info({:quit, tag}, %{quit_tag: tag, waiter: nil} = state),
     do: {:stop, :normal, state}
 
   def handle_info({:quit, _stale_or_waiting}, state), do: {:noreply, state}
 
-  # The waiting caller is gone (its request was cancelled or dropped): what
-  # it would have been told stays buffered for the next call.
+  # The waiting caller is gone (its connection dropped): what it would have
+  # been told stays buffered for the next call.
   def handle_info(
         {:DOWN, monitor, :process, _caller, _reason},
         %{waiter: %{monitor: monitor}} = state
@@ -282,28 +340,54 @@ defmodule Avwe.Mind do
     {:stop, :normal, %{state | waiter: nil}}
   end
 
+  # Waiting
+
+  defp wait(state, from, interrupt_at, max_wait) do
+    tag = make_ref()
+    Process.send_after(self(), {:max_wait, tag}, max_wait)
+    {caller, _tag} = from
+    monitor = Process.monitor(caller)
+    touch(state)
+
+    present(
+      %{state | waiter: %{from: from, interrupt_at: interrupt_at, tag: tag, monitor: monitor}},
+      tag
+    )
+  end
+
+  defp present(state, tag) do
+    Process.send_after(self(), {:presence, tag}, state.presence_every)
+    state
+  end
+
+  # After a whole batch: the plan's end answers a waiting caller before an
+  # interruption does.
+  defp wake(%{waiter: nil} = state, _interrupted), do: state
+  defp wake(%{ended: ended} = state, _interrupted) when ended != nil, do: reply(state, ended)
+  defp wake(state, true), do: reply(state, :interrupted)
+  defp wake(state, false), do: state
+
   # Percepts
 
-  # Each percept is buffered, then may settle the plan's current step or
-  # interrupt a waiting caller. A caller is answered at the first percept
-  # that ends its wait; the rest of the batch waits for the next call.
-  defp take(percept, state) do
-    state = percept |> buffer(state) |> follow(percept)
+  # Each percept of a batch, already buffered, may move what the Mind
+  # follows, settle the plan's current step or interrupt a waiting caller.
+  defp take(percept, {state, interrupted}) do
+    state = follow(state, percept)
     current = state.current
 
-    cond do
-      percept.type == :control_released ->
-        yielded(state)
+    state =
+      cond do
+        percept.type == :control_released ->
+          yielded(state)
 
-      current != nil and percept.kind == :result and percept.intent == current.ref ->
-        settle(state, percept.outcome)
+        current != nil and percept.kind == :result and percept.intent == current.ref ->
+          settle(state, percept.outcome)
 
-      state.waiter != nil and interrupts?(percept, state.waiter.interrupt_at) ->
-        reply(state, :interrupted)
+        true ->
+          state
+      end
 
-      true ->
-        state
-    end
+    {state, interrupted or interrupts?(percept, state)}
   end
 
   defp settle(%{plan: []} = state, :success), do: finish(state, :done)
@@ -318,28 +402,44 @@ defmodule Avwe.Mind do
   defp settle(state, _not_success), do: finish(state, :failed)
 
   # Only what the body senses of the world can interrupt: not the plan's
-  # results or progress, and not the body's own doings that it senses (its
-  # fires carry an issuer).
-  defp interrupts?(percept, interrupt_at) do
-    percept.kind == :sensed and percept.issuer == nil and percept.salience >= interrupt_at
+  # results or progress, not the body's own doings that it senses (its
+  # fires carry an issuer), and not the smoke of a fire it lit and stands
+  # beside.
+  defp interrupts?(_percept, %{waiter: nil}), do: false
+
+  defp interrupts?(percept, %{waiter: %{interrupt_at: interrupt_at}}) do
+    percept.kind == :sensed and percept.issuer == nil and not own_fire?(percept) and
+      percept.salience >= interrupt_at
   end
 
-  # What the body is doing for the Mind: a step's durative action from its
-  # start until its result, which may outlive the plan that asked for it.
-  defp follow(%{current: %{ref: ref} = current} = state, %{type: :action_started, intent: ref}),
-    do: %{state | doing: current}
+  defp own_fire?(%{data: %{own_fire: true}}), do: true
+  defp own_fire?(_percept), do: false
 
-  defp follow(%{doing: %{ref: ref}} = state, %{kind: :result, intent: ref}),
-    do: %{state | doing: nil}
+  # What the body is doing for the Mind: the durative action of any step it
+  # submitted, from its start until its result, which may outlive the plan
+  # that asked for it. Every ref submitted is pending until its result.
+  defp follow(%{pending: pending} = state, %{type: :action_started, intent: ref})
+       when is_map_key(pending, ref),
+       do: %{state | doing: pending[ref]}
+
+  defp follow(%{pending: pending} = state, %{kind: :result, intent: ref})
+       when is_map_key(pending, ref) do
+    doing = if match?(%{ref: ^ref}, state.doing), do: nil, else: state.doing
+    %{state | pending: Map.delete(pending, ref), doing: doing}
+  end
 
   defp follow(state, _percept), do: state
 
   # The session yielded the body to its routine: the plan ends, and the
   # routine, not the Mind, decides what the body does until the next act.
-  defp yielded(%{current: nil} = state), do: %{state | plan: [], doing: nil}
-  defp yielded(state), do: finish(%{state | doing: nil}, :failed)
+  # The step under way is still the body's doing until its result says
+  # otherwise.
+  defp yielded(%{current: nil} = state), do: %{state | plan: []}
 
-  defp buffer(percept, state), do: buffer_percept(state, percept)
+  defp yielded(%{current: current} = state) do
+    doing = if Map.has_key?(state.pending, current.ref), do: current, else: state.doing
+    finish(%{state | doing: doing}, :yielded)
+  end
 
   defp buffer_percept(%{buffered: @buffer} = state, percept) do
     {_oldest, queue} = :queue.out(state.buffer)
@@ -354,19 +454,61 @@ defmodule Avwe.Mind do
   # The plan
 
   defp submit_next(%{plan: [{verb, opts} | rest]} = state) do
-    case Session.act(state.session, verb, opts) do
-      {:ok, ref} ->
-        {:ok, %{state | plan: rest, current: %{ref: ref, verb: verb, target: opts[:target]}}}
+    {target, state} = target(state, verb, opts)
+    ref = "m-#{System.unique_integer([:positive])}"
+
+    act_opts =
+      [ref: ref, target: target] ++
+        if Keyword.has_key?(opts, :params), do: [params: opts[:params]], else: []
+
+    case Session.act(state.session, verb, act_opts) do
+      {:ok, ^ref} ->
+        action = labelled(%{ref: ref, verb: verb, target: target}, opts[:ref])
+
+        {:ok,
+         %{state | plan: rest, current: action, pending: Map.put(state.pending, ref, action)}}
 
       {:error, reason} ->
         {:error, reason, %{state | plan: [], current: nil}}
     end
   end
 
-  defp finish(state, status) do
-    state = %{state | plan: [], current: nil}
-    if state.waiter, do: reply(state, status), else: %{state | ended: status}
+  defp labelled(action, nil), do: action
+  defp labelled(action, label), do: Map.put(action, :label, label)
+
+  # A step's target, a name resolved against a fresh look when it is one.
+  defp target(state, verb, opts) do
+    case opts[:target_name] || opts[:target] do
+      query when verb in @named_verbs and is_binary(query) ->
+        case session_look(state) do
+          {{:ok, look}, state} -> {resolve(query, candidates(verb, look)), state}
+          {_error, state} -> {query, state}
+        end
+
+      _no_name ->
+        {opts[:target], state}
+    end
   end
+
+  defp resolve(query, candidates) do
+    case Command.resolve(query, candidates) do
+      {:ok, id} -> id
+      _none_or_ambiguous -> query
+    end
+  end
+
+  defp candidates(:go, look) do
+    here = if look[:here], do: [{look.here.id, look.here.name}], else: []
+    Enum.map(look[:places] || [], &{&1.id, &1.name}) ++ here
+  end
+
+  defp candidates(verb, look) when verb in [:kindle, :douse],
+    do: Enum.map(look[:hearths] || [], &{&1.id, &1.name})
+
+  defp candidates(_notebook_verb, look),
+    do: for(%{kind: :notebook} = item <- look[:carried] || [], do: {item.id, item.name})
+
+  defp finish(state, status), do: %{state | plan: [], current: nil, ended: status}
 
   defp reply(%{waiter: waiter} = state, status) do
     Process.demonitor(waiter.monitor, [:flush])
@@ -395,18 +537,29 @@ defmodule Avwe.Mind do
   defp step({verb}), do: step({verb, []})
 
   defp step({verb, opts}) when is_atom(verb) and is_list(opts) do
-    ref = opts[:ref]
-
     cond do
-      not Keyword.keyword?(opts) -> {:error, :invalid_plan}
-      verb in @reserved_verbs -> {:error, :reserved}
-      ref != nil and not is_binary(ref) -> {:error, :invalid_ref}
-      is_binary(ref) and String.starts_with?(ref, "auto-") -> {:error, :reserved}
-      true -> {:ok, {verb, Keyword.take(opts, [:target, :params, :ref])}}
+      not Keyword.keyword?(opts) ->
+        {:error, :invalid_plan}
+
+      verb in @reserved_verbs ->
+        {:error, :reserved}
+
+      not string_or_nil?(opts[:target_name]) ->
+        {:error, :invalid_plan}
+
+      true ->
+        label(opts[:ref], {verb, Keyword.take(opts, [:target, :target_name, :params, :ref])})
     end
   end
 
   defp step(_other), do: {:error, :invalid_plan}
+
+  defp label(nil, step), do: {:ok, step}
+  defp label("auto-" <> _rest, _step), do: {:error, :reserved}
+  defp label(label, step) when is_binary(label), do: {:ok, step}
+  defp label(_label, _step), do: {:error, :invalid_ref}
+
+  defp string_or_nil?(value), do: value == nil or is_binary(value)
 
   defp all_steps(checked) do
     case Enum.find(checked, &match?({:error, _reason}, &1)) do
@@ -427,9 +580,35 @@ defmodule Avwe.Mind do
   defp check_controller(controller) when controller in @controllers, do: :ok
   defp check_controller(_controller), do: {:error, :invalid_controller}
 
+  # The session's look. Its first one carries what the body did before the
+  # session took it; if the Mind looks for itself (to resolve a name)
+  # before the program's first look, that is kept for the program.
+  defp session_look(state) do
+    case Session.look(state.session) do
+      {:ok, look} when not state.looked and state.away == nil ->
+        {{:ok, look}, %{state | away: look.away}}
+
+      reply ->
+        {reply, state}
+    end
+  end
+
+  defp first_away(look, %{looked: true}), do: %{look | away: []}
+  defp first_away(look, %{away: away}) when away != nil, do: %{look | away: away}
+  defp first_away(look, _state), do: look
+
+  # Marks the controller present. A session that has just gone is no error
+  # here: its DOWN ends the Mind.
+  defp touch(state) do
+    Session.touch(state.session)
+  catch
+    :exit, _gone -> :ok
+  end
+
   defp arm_quit(state) do
+    if state.quit_timer, do: Process.cancel_timer(state.quit_timer)
     tag = make_ref()
-    Process.send_after(self(), {:quit, tag}, state.quit_after)
-    %{state | quit_tag: tag}
+    timer = Process.send_after(self(), {:quit, tag}, state.quit_after)
+    %{state | quit_tag: tag, quit_timer: timer}
   end
 end

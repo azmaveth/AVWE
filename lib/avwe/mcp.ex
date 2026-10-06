@@ -313,8 +313,7 @@ defmodule Avwe.MCP do
   end
 
   defp act(mind, world, args) do
-    with {:ok, look} <- Mind.look(mind),
-         {:ok, steps} <- Steps.parse(args, look),
+    with {:ok, steps} <- Steps.parse(args),
          {:ok, opts} <- act_opts(args),
          {:ok, report} <- Mind.act(mind, steps, opts) do
       report(report, world)
