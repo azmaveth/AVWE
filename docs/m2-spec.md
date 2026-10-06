@@ -114,15 +114,23 @@ M2a: places come from Quire pins and carry only a label, and a hearth's glyph
 follows whether it burns. Quire has no glyph fields; glyphs in articles are a
 Quire matter and not part of M2.
 
-### 2.3 The ground map
+### 2.3 The ground map (built)
 
-`Terrain.ground_map/1` (pure) returns every cell's ground kind in one
-compact binary (a byte a cell, plus the width), built from `ground/2`. It
-is derived data: not part of the region, not snapshotted, not hashed. The
-region server builds it lazily the first time a scene is asked for (never
-at world start; the tests start hundreds of worlds) and keeps it with the
-snapshot, and the view a session works on carries it as `:ground` beside
-`:terrain`. A world with no terrain has none, and its scenes have no ground.
+`Terrain.ground_map/1` (pure) returns every cell's ground kind as an
+`Avwe.GroundMap`: one binary, a byte a cell, row by row, with `at/2` and
+`slice/4` to read it. It is derived data: not part of the region, not
+snapshotted, not hashed, and the same terrain always gives the same map. It
+agrees with `ground/2` on every cell (tested on the Ember Reach and on a small
+land with every kind of ground).
+
+Building it is about a second for the 256 by 256 Ember Reach, so it is built
+once. `Avwe.GroundCache` (runtime) keeps each in `:persistent_term`, keyed by
+the terrain's content, so every session and world with the same terrain shares
+one (about 64 KB), and concurrent first requests take a lock instead of each
+doing the work. It is lazy: nothing is built at world start (the tests start
+hundreds of worlds), only when a session first asks for a scene (2.5), which
+adds the map to the view it works on, as it already adds `:terrain`. A world
+with no terrain has none, and its scenes have no ground.
 
 ### 2.4 The scene
 
