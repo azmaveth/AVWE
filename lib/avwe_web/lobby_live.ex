@@ -2,8 +2,9 @@ defmodule AvweWeb.LobbyLive do
   @moduledoc """
   The lobby: the running worlds, and the bodies in each, free or being played.
 
-  Each body is shown as telnet lists it, free or "(being played)". Bodies are
-  taken and freed and worlds start and stop without
+  A free body is a link to its page (`AvweWeb.PlayLive`). One that somebody
+  holds is shown and cannot be chosen. As telnet lists them, only the words
+  differ: bodies are taken and freed and worlds start and stop without
   telling anyone, so the page looks again every two real seconds while it is
   open (`config :avwe, :lobby_refresh_ms`; `nil` for never, which the tests
   use, as they send the refresh themselves).
@@ -42,7 +43,9 @@ defmodule AvweWeb.LobbyLive do
           <li :for={body <- world.bodies} class={["body", body.taken && "taken"]}>
             <span :if={body.taken} class="name">{body.name}</span>
             <span :if={body.taken} class="state">(being played)</span>
-            <span :if={!body.taken} class="name">{body.name}</span>
+            <.link :if={!body.taken} class="name" navigate={~p"/play/#{world.id}/#{body.id}"}>
+              {body.name}
+            </.link>
             <span :if={body.description} class="description">{body.description}</span>
           </li>
         </ul>

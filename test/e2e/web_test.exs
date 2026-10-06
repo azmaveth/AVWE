@@ -50,6 +50,7 @@ defmodule Avwe.E2E.WebTest do
       assert policy =~ "script-src 'self';"
       assert header(response, "x-content-type-options") == ["nosniff"]
       assert response.body =~ "Lantern Hollow"
+      assert response.body =~ ~s(href="/play/hollow_web/wren")
     end
 
     test "serves what is built under assets, and nothing else of priv/static", %{port: port} do
@@ -212,6 +213,41 @@ defmodule Avwe.E2E.WebTest do
 
       assert Jason.encode!(rendered) =~ "Lantern Hollow"
       WebSocketClient.close(socket)
+    end
+
+    test "takes a body when the page's socket joins, and frees it when the socket closes",
+         %{port: port} do
+      refute taken?("wren")
+
+      {socket, topic, reply} = open_page(port, "/play/hollow_web/wren")
+
+      assert [
+               "4",
+               "4",
+               ^topic,
+               "phx_reply",
+               %{"status" => "ok", "response" => %{"rendered" => rendered}}
+             ] = reply
+
+      assert Jason.encode!(rendered) =~ "You are Wren, at Hollow Green."
+      assert taken?("wren")
+
+      WebSocketClient.close(socket)
+
+      assert eventually(fn -> not taken?("wren") end)
+    end
+
+    test "turns away a second page for a body that is held", %{port: port} do
+      {first, _topic, _reply} = open_page(port, "/play/hollow_web/wren")
+
+      plain = HTTPClient.request(port, "GET", "/play/hollow_web/wren")
+      assert plain.status == 302
+      assert header(plain, "location") == ["/"]
+
+      WebSocketClient.close(first)
+      assert eventually(fn -> not taken?("wren") end)
+
+      assert %{status: 200} = HTTPClient.request(port, "GET", "/play/hollow_web/wren")
     end
   end
 end

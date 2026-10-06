@@ -1,6 +1,6 @@
 defmodule AvweWeb.Router do
   @moduledoc """
-  The pages: the lobby.
+  The pages: the lobby, and a page for each body that can be played.
 
   Browser pages get the secure headers and a content security policy that
   lets scripts and styles come from the page's own origin only: the bundle is
@@ -30,5 +30,6 @@ defmodule AvweWeb.Router do
     pipe_through :browser
 
     live "/", LobbyLive
+    live "/play/:world/:body", PlayLive
   end
 end

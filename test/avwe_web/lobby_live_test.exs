@@ -29,13 +29,25 @@ defmodule AvweWeb.LobbyLiveTest do
       end
     end
 
-    test "shows a body somebody holds as being played", %{conn: conn} do
+    test "offers a free body as a link to its page, which a click opens", %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      assert has_element?(view, ~s(a[href="/play/hollow_lobby/wren"]), "Wren")
+
+      {:ok, _page, html} =
+        view |> element("a", "Wren") |> render_click() |> follow_redirect(conn)
+
+      assert html =~ "You are Wren, at Hollow Green."
+    end
+
+    test "shows a body somebody holds, and does not offer it", %{conn: conn} do
       {:ok, _session} = Avwe.connect(@world, body: "wren", controller: :arbor)
       {:ok, view, _html} = live(conn, ~p"/")
 
       assert has_element?(view, "li.taken", "Wren")
       assert has_element?(view, "li.taken .state", "(being played)")
-      refute has_element?(view, "li.taken", "Tamsin")
+      refute has_element?(view, "a", "Wren")
+      assert has_element?(view, "a", "Tamsin")
     end
 
     test "looks again when it is told to, as bodies are taken and freed", %{conn: conn} do
@@ -51,6 +63,7 @@ defmodule AvweWeb.LobbyLiveTest do
       Avwe.Session.close(session)
       send(view.pid, :refresh)
       refute has_element?(view, "li.taken")
+      assert has_element?(view, "a", "Pell")
     end
 
     test "looks again by itself while it is open", %{conn: conn} do
@@ -76,7 +89,7 @@ defmodule AvweWeb.LobbyLiveTest do
 
       assert has_element?(view, "h2", "The Ember Reach")
       assert has_element?(view, "h2", "Lantern Hollow")
-      assert has_element?(view, "li.body", "Mira Vale")
+      assert has_element?(view, ~s(a[href="/play/ember_lobby/mira-vale"]), "Mira Vale")
 
       Avwe.stop_world(:ember_lobby)
       send(view.pid, :refresh)
