@@ -10,3 +10,12 @@ config :avwe, :mcp, port: 4041, world: :ember_reach
 
 # Worlds keep their logs and snapshots under worlds/<id>, relative to the project root.
 config :avwe, data_dir: "worlds"
+
+# The web client: http://127.0.0.1:4042. Loopback only; there are no accounts,
+# so anyone who can reach the port can take a free body.
+config :avwe, AvweWeb.Endpoint,
+  http: [ip: {127, 0, 0, 1}, port: 4042],
+  server: true,
+  # Not a secret: this is the development key.
+  secret_key_base: "dev-only-key-for-the-avwe-web-client-not-a-secret-0123456789abcdef0123456789",
+  watchers: [esbuild: {Esbuild, :install_and_run, [:avwe, ~w(--sourcemap=inline --watch)]}]

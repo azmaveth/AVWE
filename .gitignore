@@ -31,3 +31,6 @@ avwe-*.tar
 
 # Dialyzer's persistent lookup tables (cached in CI).
 /priv/plts/
+
+# What esbuild builds for the web client (mix assets.build).
+/priv/static/assets/

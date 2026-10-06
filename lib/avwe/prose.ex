@@ -12,6 +12,10 @@ defmodule Avwe.Prose do
   @cool_air_c 15
   @warm_air_c 22
 
+  @doc "Somebody asked for a body that another controller already holds."
+  @spec body_taken(String.t()) :: String.t()
+  def body_taken(name), do: "#{name} is already being played."
+
   @doc "A body has started an action of its own."
   @spec started(atom(), String.t() | nil, map()) :: String.t()
   def started(:go, target, _params), do: "You set off toward #{target}."

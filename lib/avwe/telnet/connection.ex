@@ -185,7 +185,7 @@ defmodule Avwe.Telnet.Connection do
         run(state, :look)
 
       {:error, :body_taken} ->
-        write(state, "#{body.name} is already being played. Choose someone else, or watch.")
+        write(state, Prose.body_taken(body.name) <> " Choose someone else, or watch.")
         state
     end
   end

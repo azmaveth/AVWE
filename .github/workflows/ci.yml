@@ -50,6 +50,11 @@ jobs:
         with:
           mix-env: test
 
+      # The tests do not need the web client's script and stylesheet, but
+      # this is where a bundle that no longer builds is found.
+      - name: Build the web client's assets
+        run: mix assets.setup && mix assets.build
+
       - name: Tests
         run: mix test --warnings-as-errors
 
