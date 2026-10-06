@@ -24,7 +24,8 @@ changing anything structural; it records the decisions and the reasons.
   (ExMCP's client; `test/e2e/mcp_*_test.exs`), the web client over a real
   socket with `Avwe.Test.HTTPClient` and `Avwe.Test.WebSocketClient`
   (`test/e2e/web_*_test.exs`; the pages' own logic is in `test/avwe_web/`,
-  through `Avwe.Test.WebCase`), and later Arbor. Before
+  through `Avwe.Test.WebCase`; `three_controllers_test.exs` is M2's done
+  criterion), and later Arbor. Before
   stepping the world after a telnet command, call `TelnetClient.sync/1`; a
   tool call that waits on world time is started with `MCPClient.calling/5`
   and stepped with `step_until_done/4`.
@@ -51,6 +52,8 @@ changing anything structural; it records the decisions and the reasons.
 mix test
 mix test --include perf     # also runs the per-step cost bound (< 10 ms)
 mix setup                   # once: deps, esbuild, and the web client's bundle
+npm test --prefix assets    # the page's drawing arithmetic, with Node's own runner
+                            # (CI runs it; nothing to install, Node 20 or later)
 mix assets.build            # the bundle again, after changing assets/ (the dev server
                             # rebuilds it by itself)
 mix format

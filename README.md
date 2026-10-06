@@ -50,10 +50,13 @@ M0 and M1 are built:
   HTTP. Claude has played Mira across two sessions and found the notes from
   the first.
 
-M2 is under way: a web client, so a telnet player, a web player and Claude can
-be in the world at once. So far there is a lobby and a plain page to play a
-body in a browser (see "Playing in a browser"); its map and its command line
-come next ([docs/m2-spec.md](docs/m2-spec.md)).
+M2a is built: a web client, so a telnet player, a web player and Claude can be
+in the world at once. A lobby lists the worlds and their bodies, and a page
+plays one: a map of what the body can see, drawn in glyphs on a canvas, the
+description of where you are, a log of what happens, buttons for what the body
+can do, and a command line that takes telnet's words (see "Playing in a
+browser"). The spectator view and the overlays for heat, water and smoke are
+next, as M2b ([docs/m2-spec.md](docs/m2-spec.md)).
 
 ## Playing
 
@@ -97,10 +100,24 @@ mix run --no-halt
 ```
 
 Then open <http://127.0.0.1:4042>. The lobby lists the running worlds and the
-bodies in each; choose one that is free, and the page shows where you are and
-what happens, as lines. Someone else can be in the same world on telnet, or
-Claude over MCP, at the same time. The page only listens on 127.0.0.1 and has
-no accounts, so anyone who can reach the port can take a free body.
+bodies in each; choose one that is free. The page shows:
+
+- **The map**: what your body can see, in glyphs (you are `@`, `#` is a place,
+  `*` a hearth that burns). It shows the 41 cells around you; "Wider view" shows
+  all that is in sight, which at noon is 500 m. At night you see 50 m, and a
+  fire shows from far off. Click a place to walk there; click anything else to
+  be told what it is.
+- **The look**, in words, which says what the map says; **the log** of what
+  happens, with what your routine does while you are not acting in grey; and
+  **buttons** for what you can do now (go to a place you know, light or put out a
+  hearth, stop, wait, read your notebook).
+- **The command line**, which takes what telnet takes (`help` lists it).
+
+Typing, pressing and clicking keep your body in your hand; if you do none of them
+for ten minutes it goes back to its routine, and a banner says so until you act.
+Someone else can be in the same world on telnet, or Claude over MCP, at the same
+time. The page only listens on 127.0.0.1 and has no accounts, so anyone who can
+reach the port can take a free body.
 
 ## Playing with Claude
 
@@ -150,6 +167,7 @@ mix test                  # about two minutes
 mix lint                  # format, unused deps, compiler warnings, credo: about a second
 mix dialyzer              # types; the first run builds the PLTs, about a minute
 scripts/sobelow           # security scan
+npm test --prefix assets  # the page's drawing arithmetic, with Node (nothing to install)
 mix hex.audit             # known advisories in the dependencies; needs the network
 ```
 
@@ -164,7 +182,9 @@ git config core.hooksPath .githooks
 `git commit --no-verify` skips a hook once; CI does not skip.
 
 End-to-end tests in `test/e2e/` play through the real transports: telnet over
-TCP, sessions as agents use them, and MCP over real HTTP.
+TCP, sessions as agents use them, MCP over real HTTP, and the web client over a
+real socket. `three_controllers_test.exs` has a telnet player, a web player and
+an MCP player in one world, each perceiving the others.
 
 ## License
 

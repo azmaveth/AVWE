@@ -134,14 +134,23 @@ avwe/
     autopilot.ex         the brain: candidates, routine plans, the invited rule
     actions.ex           what each verb does, notebook pages included
     perception.ex prose.ex  what a body senses, and how it reads
+    command.ex           what a player types and what it means (telnet, web)
+    scene.ex repr.ex ground_map.ex  what a body can see, as something a
+                         client draws: the scene, the glyph layers, and the
+                         ground as one binary (M2)
     protocol/            intent and percept structs, JSON codecs (to come)
   lib/avwe/session.ex    controller sessions and leases
+  lib/avwe/ground_cache.ex  keeps each terrain's ground map, built once (runtime)
   lib/avwe/mind.ex       the controller side for programs: plans, waits (M1)
   lib/avwe/quire/        importer, compiled sidecars, chronicle writer
   lib/avwe/telnet/       text client (M0)
   lib/avwe/mcp.ex, mcp/  MCP adapter on ExMCP: endpoint, players, steps,
                          reports (M1)
-  lib/avwe_web/          Phoenix channels and LiveView (M2)
+  lib/avwe_web/          Phoenix on Bandit (M2): the endpoint and the guards
+                         that keep a page that is not ours out, the lobby, the
+                         play page (LiveView, with a canvas hook) and its HUD
+  assets/                the page's one script and one stylesheet (esbuild
+                         bundles them) and Node tests of the drawing arithmetic
   worlds/<world>/<region>/   log and snapshots (dev and prod; not in git)
 ```
 
@@ -656,12 +665,34 @@ so a client that has never heard of a new kind of entity can still show it
 somehow. This is what lets very different clients share a world without being
 updated in lockstep.
 
+**As built (M2a).** `Avwe.Repr` holds the name, description and glyph (one
+character and a `#rrggbb` colour) of every kind of thing a client can be shown:
+the six grounds and water, bodies, cold and burning hearths, places, and the
+smoke and glow of a fire seen from afar. A body has its own glyph, or an `@` in
+a colour taken from its id, and a world's configuration may give a character
+`glyph:` and `color:` (checked when the world is built). A sprite will be a
+`sprite:` key beside `glyph:` in the same maps, and a client that does not know
+it ignores it. Nothing needs a model yet.
+
+A client that draws is given a **scene** (`Avwe.Scene`, built from the same
+view as the percepts, so the two arrive in step): the viewer, how far it sees,
+a window of ground as run-length-coded rows, what is in sight, and a legend of
+the kinds it uses, which is where a client learns what to draw. The scene is
+derived and never stored, so the journal, the snapshots and the state hash do
+not know it exists. It holds only what the body can see (the cells outside the
+circle of sight are blank), and its things are built from the look's own lists,
+so the page and the prose cannot disagree about who is there. A session sends
+scenes when it is opened with `scenes: true` (`Avwe.Session`), after the
+percepts of the step that changed one, and never before the first it was asked
+for. `Avwe.Scene.to_map/1` is its form as plain data.
+
 ### 8.5 Transports
 
 | Transport | Used by | Notes |
 |---|---|---|
 | TCP line protocol (telnet) | Text client | Percepts rendered as prose on the server, MUD-style commands parsed into intents |
-| Phoenix Channels (WebSocket) | Web client, Arbor | JSON messages as above |
+| Phoenix LiveView (WebSocket) | Web client | The page's own socket. Percepts are rendered as lines, and the scene goes to the canvas as JSON (`Avwe.Scene.to_map/1`) in an attribute. A click on the map comes back as a cell, and a button or a typed line as a command line |
+| Phoenix Channels (WebSocket) | Arbor | JSON messages as above |
 | MCP (ExMCP, streamable HTTP) | Claude | Tools described in section 12 |
 
 ## 9. Clients
@@ -670,7 +701,7 @@ updated in lockstep.
 |---|---|---|
 | Text (telnet) | M0 | `look`, `go dry bend`, `go north 200`, `follow upstream`, `say ...`, `whisper`, `shout`, `wait until dusk`, `light the fire`, `douse the coal`, `write ...`, `read [n]`, `stop`, `time`, `help`. Joining tells what the body did while nobody held it. A body you leave idle for ten minutes goes back to its routine, and its doings show as "- " lines until you act again. The quickest way to be in the world |
 | MCP | M1 | Claude plays a body over streamable HTTP (built; section 12): join, look, act with plans, say, wait, write, read, listen, leave |
-| Web | M2 | LiveView page with a canvas hook. **Embodied view** shows what your body perceives. **Spectator view** shows everything, with overlays for heat, water and smoke |
+| Web | M2 | LiveView pages on Phoenix and Bandit, at `127.0.0.1:4042`. A lobby lists the worlds and bodies, free or being played. The **embodied view** (built, M2a) plays a body: a canvas map of what it sees, drawn in glyphs by one hook (the 41 cells around you, or all that is in sight); the description of where you are, which is the map in words; its log, with the routine's lines in a grey of their own; buttons for what the body can do; and a command line that takes telnet's words. A button and a click are command lines, so the page can do no more than a player typing. The **spectator view**, with overlays for heat, water and smoke, is M2b |
 | Arbor | M3 | Agents control villagers through a `world` capability |
 | Narrator | M4 | Reads chronicle events and writes prose: "while you were away..." |
 
@@ -880,14 +911,16 @@ the map as an item.
 
 **Testing rule:** every user- or agent-facing feature has an end-to-end test
 through its real transport: telnet over TCP, sessions as agents use them, MCP
-over its transport, Arbor through its capability. Unit tests are for the pure
+over its transport, the web client over a real socket (and, in a browser job,
+a real browser), Arbor through its capability. Unit tests are for the pure
 core. A feature isn't done until its end-to-end test exists.
 
 | | Name | Scope | Done when |
 |---|---|---|---|
 | **M0** | The valley breathes | Mix project. Read-only Quire import. One region holding the whole valley. Terrain from pins, including the river's source (built). Heat, water and fire systems (built, with weather and smoke). Places for the lodge and kiln-houses (the lodge and town are places; kiln-houses as interiors still to come). Mira on autopilot (built; other bodies as they are added, with the same brain). Day and night (built). Telnet client (built). Log and snapshots (built: 6.7) | Two telnet sessions see the same events (built). Replaying the log reproduces the same state hash, with autopilot and fires (built). Conservation property tests pass for water, heat and smoke (built). A watcher sees Mira keep her routine unattended, and she lights her hearth in 812 but not in 813 (built) |
 | **M1** | Claude walks the banks | MCP adapter (built: section 12). Plans for controllers, interrupts and salience (built: `Avwe.Mind`, 7.3 and 7.4; `until` conditions beyond a wait's still to come). Notebook item and body memory (built) | Claude plays Mira across two sessions and finds the notes from the first (met: end to end in `mcp_journey_test.exs`, and live on 2026-10-06, when Claude followed the channel to The Source, wrote it down, and read the page back in a new session) |
-| **M2** | Many lenses | Phoenix and a LiveView canvas. Representation layers. Embodied and spectator views with field overlays | A telnet player, a web player and Claude are in the world at once and each perceives the others |
+| **M2a** | A window onto the world | Representation layers (glyphs), the scene, Phoenix on Bandit with a lobby, and the embodied view on a LiveView canvas (all built: 8.4 and 9) | A telnet player, a web player and Claude are in the world at once and each perceives the others (met: end to end in `three_controllers_test.exs`, with the page, telnet and MCP; and played by hand in a browser) |
+| **M2b** | Many lenses | The spectator view with field overlays (heat, water, smoke). Sprites through the same layers. A remembered map | A watcher in a browser sees the river's reaches fall silent one after another, and the silt cool, as the telnet watcher is told of them |
 | **M3** | Agents move in | Arbor `world` capability over Channels. `world-player` trust profile. Percept mapping. Earshot engagements. Taint | Two Arbor agents live in the Reach for a world week unattended. Conversation engagements are scoped correctly. An injection attempt through in-world speech stays contained |
 | **M4** | Legends | History mode. Chronicle written to Quire. Canon-agreement check from 780 to 813 AR. Narrator | The 780–813 run produces a chronicle visible in Quire and a canon-agreement report |
 
@@ -957,6 +990,16 @@ core. A feature isn't done until its end-to-end test exists.
     world is an event-sourced simulation whose journal, snapshots and tick
     pipeline need exact replay and a per-step budget of a few milliseconds,
     which a resource and action layer would only get in the way of.
+
+12. **Who a page is.** A page that loses its connection and comes back (a
+    laptop that slept, a network that changed) joins as a new page, and the
+    body is still held by the old one until the server notices the old
+    connection is gone, which can take up to a minute. The new page is told
+    the body is being played, and it was the same player. The fix needs a
+    controller identity the lease understands (a token in the page's session,
+    so that the same player may take the body back from their own old page),
+    and that is the start of the accounts the web client does not have
+    (question 11).
 
 ## 15. Prior art
 
