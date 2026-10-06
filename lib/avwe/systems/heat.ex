@@ -425,7 +425,7 @@ defmodule Avwe.Systems.Heat do
   # evaluated at the time-mean temperature so they sum to the storage change.
   defp relax(static, energy, {hearth_j, miracle_j}, forcing, reaches, dt, t_ref) do
     %{area_m2: a, cap_j_k: cap, absorb_m2: absorb} = static
-    %{air_c: air, sky_c: sky, light: light} = forcing
+    %{light: light} = forcing
     t0 = t_ref + energy / cap
     {k_riv, t_w} = coupling(static.river, reaches, a)
     k = @k_air + @k_rad + k_riv
@@ -433,13 +433,18 @@ defmodule Avwe.Systems.Heat do
     t_eq = equilibrium(a, k, k_riv, t_w, sun_w + (hearth_j + miracle_j) / dt, forcing)
     t_bar = t_eq + (t0 - t_eq) * mean_factor(dt * k * a / cap)
 
-    q_air = a * @k_air * (air - t_bar) * dt
-    q_sky = a * @k_rad * (sky - t_bar) * dt
-    q_riv = a * k_riv * (t_w - t_bar) * dt
-    q_sun = sun_w * dt
+    {q_air, q_sky, q_riv, q_sun} = exchanges(a, k_riv, t_w, t_bar, sun_w, forcing, dt)
     delta = q_air + q_sky + q_riv + q_sun + hearth_j + miracle_j
 
     {energy + delta, delta, q_air, q_sky, q_riv, q_sun}
+  end
+
+  # The heat each exchange moved over the step, at the time-mean temperature
+  # `t_bar`: the air, the sky and the river through their couplings, and the
+  # sun's input.
+  defp exchanges(a, k_riv, t_w, t_bar, sun_w, %{air_c: air, sky_c: sky}, dt) do
+    {a * @k_air * (air - t_bar) * dt, a * @k_rad * (sky - t_bar) * dt,
+     a * k_riv * (t_w - t_bar) * dt, sun_w * dt}
   end
 
   # The temperature a cell settles at under constant forcing and a source of
@@ -668,32 +673,38 @@ defmodule Avwe.Systems.Heat do
   # The active set and the static cell data
 
   defp active_cells(region, terrain) do
-    near_channel =
-      for {cx, cy} = point <- Terrain.channel(terrain),
-          dx <- -@window..@window,
-          dy <- -@window..@window,
-          cell = {cx + dx, cy + dy},
-          inside?(terrain, cell),
-          Space.distance(cell, point) <= @near_channel_cells,
-          do: cell
-
-    clay =
-      for %{center: {cx, cy} = center, radius_cells: radius} <- terrain.clay,
-          reach = trunc(Float.ceil(radius * 1.0)),
-          dx <- -reach..reach,
-          dy <- -reach..reach,
-          cell = {cx + dx, cy + dy},
-          inside?(terrain, cell),
-          Space.distance(cell, center) <= radius,
-          do: cell
-
-    hearths =
-      for id <- Region.with_components(region, [:hearth, :position]),
-          do: Region.get(region, id, :position)
-
-    (near_channel ++ clay ++ hearths)
+    (channel_cells(terrain) ++ clay_cells(terrain) ++ hearth_cells(region))
     |> Enum.uniq()
     |> Enum.sort_by(fn {x, y} -> {y, x} end)
+  end
+
+  # The cells near enough to the channel to take part.
+  defp channel_cells(terrain) do
+    for {cx, cy} = point <- Terrain.channel(terrain),
+        dx <- -@window..@window,
+        dy <- -@window..@window,
+        cell = {cx + dx, cy + dy},
+        inside?(terrain, cell),
+        Space.distance(cell, point) <= @near_channel_cells,
+        do: cell
+  end
+
+  # The cells of every clay patch.
+  defp clay_cells(terrain) do
+    for %{center: {cx, cy} = center, radius_cells: radius} <- terrain.clay,
+        reach = trunc(Float.ceil(radius * 1.0)),
+        dx <- -reach..reach,
+        dy <- -reach..reach,
+        cell = {cx + dx, cy + dy},
+        inside?(terrain, cell),
+        Space.distance(cell, center) <= radius,
+        do: cell
+  end
+
+  # The cells the hearths stand on.
+  defp hearth_cells(region) do
+    for id <- Region.with_components(region, [:hearth, :position]),
+        do: Region.get(region, id, :position)
   end
 
   defp inside?(%Terrain{width: width, height: height}, {x, y}),
