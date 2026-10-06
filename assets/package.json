@@ -4,7 +4,7 @@
   "type": "module",
   "description": "The web client's script. esbuild bundles it (mix assets.build); there is nothing to install to build it. Its drawing arithmetic is tested with Node's own runner: npm test.",
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"
