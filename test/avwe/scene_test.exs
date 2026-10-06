@@ -367,6 +367,36 @@ defmodule Avwe.SceneTest do
     end
   end
 
+  # The browser's tests (assets/test) read scenes the server really builds, so
+  # that what they check is the format it sends. These keep them honest: if the
+  # scene changes, this fails, and the files are written again with
+  # `AVWE_UPDATE_FIXTURES=1 mix test test/avwe/scene_test.exs`.
+  describe "the scenes the browser's tests read" do
+    @fixtures Path.expand("../../assets/test/fixtures", __DIR__)
+
+    for {name, description} <- [
+          {:night, "Mira in the town at night, the kiln-house hearth lit"},
+          {:noon, "Mira in the town at noon"}
+        ] do
+      test "#{name}: #{description}" do
+        region =
+          case unquote(name) do
+            :night -> light_up(at_night(), "town-hearth")
+            :noon -> at_noon()
+          end
+
+        map = region |> view() |> Scene.build(@mira) |> Scene.to_map()
+        path = Path.join(@fixtures, "#{unquote(name)}.json")
+
+        if System.get_env("AVWE_UPDATE_FIXTURES") == "1" do
+          File.write!(path, Jason.encode!(map, pretty: true) <> "\n")
+        end
+
+        assert path |> File.read!() |> Jason.decode!() == map
+      end
+    end
+  end
+
   describe "nothing is drawn that the look does not say" do
     property "the bodies, hearths, fires and places of a scene are those of the look" do
       check all(
