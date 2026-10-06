@@ -47,10 +47,12 @@ defmodule Avwe.RegionServer do
   @default_snapshot_every 1_000
   @default_snapshot_keep 5
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
 
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
     region = Keyword.fetch!(opts, :region)
     %{id: {__MODULE__, region.id}, start: {__MODULE__, :start_link, [opts]}}

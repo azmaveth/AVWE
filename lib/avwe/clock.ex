@@ -16,6 +16,7 @@ defmodule Avwe.Clock do
 
   alias Avwe.RegionServer
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     world = Keyword.fetch!(opts, :world)
     GenServer.start_link(__MODULE__, opts, name: via(world))

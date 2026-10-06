@@ -45,6 +45,7 @@ defmodule Avwe.Telnet.Connection do
   Lines starting with "- " are what your routine does with you while you stop acting; any command you type keeps you in hand a while longer, and any command that acts (go, say, wait, light...) takes you back if the routine had you.\
   """
 
+  @spec start_link({:gen_tcp.socket(), keyword()}) :: GenServer.on_start()
   def start_link({socket, opts}), do: GenServer.start_link(__MODULE__, {socket, opts})
 
   @impl GenServer

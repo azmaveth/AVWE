@@ -130,6 +130,7 @@ defmodule Avwe.MCP do
   defp real_seconds(seconds), do: "#{Float.round(seconds * 1.0, 2)} real seconds"
 
   @doc "Starts the server under a supervisor: `port`, `world`, `ref`."
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
     ref = Keyword.get(opts, :ref, __MODULE__)
 
@@ -181,6 +182,7 @@ defmodule Avwe.MCP do
   # Called by ExMCP.HttpPlug for every request: the handler's init argument.
   # A session-era request names its MCP session; a modern one (MCP
   # 2026-07-28, told the way ExMCP tells it) has none, whatever its headers.
+  @spec handler_opts(Plug.Conn.t(), term(), map()) :: map()
   def handler_opts(conn, request, config) do
     session =
       case {modern?(conn, request), session_header(conn)} do

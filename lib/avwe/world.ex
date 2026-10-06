@@ -22,6 +22,7 @@ defmodule Avwe.World do
   `:snapshot_every` (steps between snapshots) and `:snapshot_keep` (how many
   of the newest snapshots to keep). See `Avwe.RegionServer`.
   """
+  @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts) do
     id = Keyword.fetch!(opts, :id)
     info = Keyword.get(opts, :info, %{name: to_string(id), tagline: nil})
@@ -45,6 +46,7 @@ defmodule Avwe.World do
 
   defp via(id), do: {:via, Registry, {Avwe.Registry, {:world, id}}}
 
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
   def child_spec(opts) do
     %{
       id: {__MODULE__, Keyword.fetch!(opts, :id)},

@@ -73,9 +73,11 @@ defmodule Avwe.Systems.River do
   @zero_step %{inflow_m3: 0.0, outflow_m3: 0.0, lost_m3: 0.0}
 
   @doc "The river entity's id."
+  @spec id() :: String.t()
   def id, do: @river
 
   @doc "Water depth below which a reach counts as silent, in metres."
+  @spec silent_depth_m() :: float()
   def silent_depth_m, do: @silent_depth_m
 
   @doc "A reach's depth in metres."

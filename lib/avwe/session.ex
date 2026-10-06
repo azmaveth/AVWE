@@ -71,6 +71,7 @@ defmodule Avwe.Session do
   @reserved_ref "auto-"
   @announced %{control_released: :yield, control_taken: :retake}
 
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
 
   @doc "How long a session waits for a call before it yields the body, by default (real ms)."
