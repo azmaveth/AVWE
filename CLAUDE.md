@@ -21,7 +21,10 @@ changing anything structural; it records the decisions and the reasons.
 - **Every user- or agent-facing feature gets an end-to-end test** through its
   real transport (`test/e2e/`): telnet over TCP with `Avwe.Test.TelnetClient`,
   sessions as agents use them, MCP over real HTTP with `Avwe.Test.MCPClient`
-  (ExMCP's client; `test/e2e/mcp_*_test.exs`), and later Arbor. Before
+  (ExMCP's client; `test/e2e/mcp_*_test.exs`), the web client over a real
+  socket with `Avwe.Test.HTTPClient` and `Avwe.Test.WebSocketClient`
+  (`test/e2e/web_*_test.exs`; the pages' own logic is in `test/avwe_web/`,
+  through `Avwe.Test.WebCase`), and later Arbor. Before
   stepping the world after a telnet command, call `TelnetClient.sync/1`; a
   tool call that waits on world time is started with `MCPClient.calling/5`
   and stepped with `step_until_done/4`.
@@ -47,6 +50,9 @@ changing anything structural; it records the decisions and the reasons.
 ```bash
 mix test
 mix test --include perf     # also runs the per-step cost bound (< 10 ms)
+mix setup                   # once: deps, esbuild, and the web client's bundle
+mix assets.build            # the bundle again, after changing assets/ (the dev server
+                            # rebuilds it by itself)
 mix format
 mix lint                    # format check, unused deps, compile with warnings as
                             # errors, credo --strict: about a second warm
@@ -75,7 +81,8 @@ finding of that kind still fails:
 
 - **Sobelow:** a `# sobelow_skip ["Module"]` comment above the function (see
   `lib/avwe/store.ex`). Ignoring a whole check goes in `.sobelow-conf`, only
-  for one that cannot apply (`Config.HTTPS`: there is no Phoenix endpoint yet).
+  for one that cannot apply (`Config.HTTPS`: nothing here terminates TLS; every
+  listener is on loopback, and whatever exposes one puts TLS in front).
 - **Dialyzer:** fix the spec or the code. There is no ignore file; if one is
   ever needed, it is `.dialyzer_ignore.exs` with a comment per entry.
 - **Advisories:** update the dependency; if no fixed release exists and the
@@ -96,7 +103,8 @@ and smoke tests add hearths and a wind to it through start options).
 settings (terrain, river, the 812 miracle) from the fixture copy, and
 `Avwe.Test.Ember.region/2` builds its region directly for unit tests.
 `mix run --no-halt` in dev runs the Ember Reach live (one world minute per
-second) with telnet on port 4040 and MCP at `http://127.0.0.1:4041/mcp`,
+second) with telnet on port 4040, MCP at `http://127.0.0.1:4041/mcp` and the web
+client at `http://127.0.0.1:4042` (after `mix setup`),
 reading Quire from `../quire/data/worlds` or `AVWE_QUIRE_ROOT`. `.mcp.json`
 points a Claude Code session in this folder at that server, and
 `scripts/mcp_call.py <tool> '<json>'` plays it by hand (stdlib Python; the

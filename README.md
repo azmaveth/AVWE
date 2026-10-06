@@ -50,8 +50,10 @@ M0 and M1 are built:
   HTTP. Claude has played Mira across two sessions and found the notes from
   the first.
 
-Next is M2: a web client, so a telnet player, a web player and Claude can be
-in the world at once.
+M2 is under way: a web client, so a telnet player, a web player and Claude can
+be in the world at once. So far there is a lobby and a plain page to play a
+body in a browser (see "Playing in a browser"); its map and its command line
+come next ([docs/m2-spec.md](docs/m2-spec.md)).
 
 ## Playing
 
@@ -86,6 +88,19 @@ goes back to its routine, shown as "- " lines, until your next command.
 If you ran the Ember Reach before M1, delete `worlds/ember_reach` once: a
 world resumed from its saved state keeps its saved characters, so Mira would
 have no notebook.
+
+## Playing in a browser
+
+```bash
+mix setup          # once: dependencies, esbuild, and the page's script and stylesheet
+mix run --no-halt
+```
+
+Then open <http://127.0.0.1:4042>. The lobby lists the running worlds and the
+bodies in each; choose one that is free, and the page shows where you are and
+what happens, as lines. Someone else can be in the same world on telnet, or
+Claude over MCP, at the same time. The page only listens on 127.0.0.1 and has
+no accounts, so anyone who can reach the port can take a free body.
 
 ## Playing with Claude
 

@@ -245,42 +245,79 @@ at most.
 
 ## 3. The web layer
 
-### 3.1 Phoenix, minimally
+### 3.1 Phoenix, minimally (built)
 
 Dependencies: `phoenix ~> 1.8`, `phoenix_live_view ~> 1.2`,
-`phoenix_html ~> 4.3`, `esbuild` (dev, to bundle one JavaScript file) and, in
-test, `phoenix_test` (which brings `lazy_html`) and `phoenix_test_playwright`
-(open question 2). No Ecto, mailer, gettext or Tailwind: the app has no
+`phoenix_html ~> 4.3`, `bandit`, `esbuild` (dev: it bundles one JavaScript file
+and one stylesheet) and, in test, `lazy_html` (what `Phoenix.LiveViewTest` reads
+HTML with). `phoenix_test` and `phoenix_test_playwright` come with the Browser
+job (open question 2). No Ecto, mailer, gettext or Tailwind: the app has no
 database and the pages are simple, so styling is one plain stylesheet. The
 modules are hand-written under `lib/avwe_web/` rather than generated, so
-nothing is imported that is not used.
+nothing is imported that is not used, and the endpoint has only what it
+serves: no body parsers (no form is ever posted; the page speaks over its
+socket), no long polling (a browser that has no websocket cannot play), and
+no telemetry dashboard.
 
-The HTTP adapter is Bandit, Phoenix's default, declared in `mix.exs` by
-name rather than arriving through another dependency (open question 1,
-settled).
+The HTTP adapter is Bandit, Phoenix's default, declared in `mix.exs` by name
+rather than arriving through another dependency (open question 1, settled).
 Cowboy is here today only because ExMCP 1.5 needs it. ArborMCP 2
 (`arbor_mcp`, `Arbor.MCP.*`, now a release candidate) makes its HTTP
 backends optional and pins Bandit 1.12.5, Thousand Island 1.5.0 and, for
 Cowboy, Ranch 1.8.1 (we run 2.3.0). A web on Cowboy would be pushed back a
 Ranch major version when the MCP adapter moves to v2; a web on Bandit
-already sits on the stack v2 and Phoenix both lean toward. Until the MCP
-adapter moves (a separate task: four files in `lib/`), the app runs two HTTP
-servers, one for each. Nothing in `AvweWeb` touches the adapter, so changing
-it is a config line.
+already sits on the stack v2 and Phoenix both lean toward (1.12.5 is what we
+run). Until the MCP adapter moves (a separate task: four files in `lib/`),
+the app runs two HTTP servers, one for each. Nothing in `AvweWeb` touches the
+adapter, so changing it is a config line.
 
-The endpoint listens on `127.0.0.1:4042` (telnet 4040, MCP 4041), allows only
-its own origin, and takes its secret key base from `AVWE_SECRET_KEY_BASE` in
-prod. It is started by the application when `config :avwe, AvweWeb.Endpoint`
-is set (dev and prod), as telnet and MCP are; tests start their own.
+**One endpoint, always started.** The application starts `AvweWeb.Endpoint`
+and the `Phoenix.PubSub` LiveView needs (`AvweWeb.PubSub`; AVWE's own
+`Avwe.PubSub` is a plain registry) as it starts everything else. The draft
+said "when configured, as telnet and MCP are; tests start their own", which
+does not work: Phoenix lets the application's configuration win over the
+options an endpoint is started with, so a test cannot start a differently
+configured one. So the configuration says: dev and prod listen on
+`127.0.0.1:4042` (telnet 4040, MCP 4041) with `server: true`, and tests listen
+on a port the system chooses (`AvweWeb.Endpoint.server_info/1`), so that the
+end-to-end tests reach the one endpoint over a real socket. The secret key
+base is a fixed development key in dev and test, and
+`AVWE_SECRET_KEY_BASE` in prod (the application does not start without it).
 
-### 3.2 Pages
+**Assets.** `assets/js/app.js` connects the page to its LiveView and
+`assets/css/app.css` is the stylesheet; `mix assets.build` (esbuild 0.28.2,
+pinned in `config/config.exs`) writes them to `priv/static/assets/` as
+`app.js` and `app.css` (git-ignored), `mix setup` does it with the
+dependencies, and the dev endpoint's watcher rebuilds on change. CI builds them
+in the Test job, which is where a bundle that no longer builds is found; the
+tests themselves do not need them.
 
-- **`/` the lobby** (`LobbyLive`): the running worlds (name, tagline) and
-  their bodies (name, description, free or being played). Choosing a free
-  body opens its page. A body someone holds is shown and cannot be chosen; a
-  race for it is refused at the page with the same words as telnet's. No
-  "watch" yet (M2b).
-- **`/play/:world/:body`** (`PlayLive`), described below.
+### 3.2 Pages (built)
+
+- **`/` the lobby** (`LobbyLive`): the running worlds (name, tagline, the
+  world's time) and their bodies (name, description, free or being played).
+  A free body is a link to its page. A body someone holds is shown as
+  "(being played)" and is not a link. Bodies are taken and freed, and worlds
+  start and stop, without telling the page, so it looks again every two real
+  seconds while it is open (`config :avwe, :lobby_refresh_ms`; the tests turn
+  the timer off and send the refresh themselves, and one turns it on to see
+  that each look arranges the next). No "watch" yet (M2b).
+- **`/play/:world/:body`** (`PlayLive`). Its shell is built, the rest is 3.3.
+  A page mounts twice, as a plain request and then over its socket. The
+  plain request only checks that the body is free, and turns a held one away
+  with a redirect to the lobby; the socket's mount starts the session
+  (`Avwe.connect/2`, controller `:human`) with the LiveView as its sink, so the
+  lease is released when the page closes, as for any sink. A race for a free
+  body is settled by the lease, and the one who is late is sent to the lobby
+  with the same words telnet uses: `Avwe.Prose.body_taken/1`, which telnet now
+  uses as well, followed by "Choose someone else." (telnet adds "or watch").
+  A world or a body that is not there is a notice in the lobby too. The page
+  shows who you are and where (the first look, as telnet shows it, with
+  "While you were away" for a body someone else left), then what happens, as
+  plain lines (percepts, `summary` only, the last two hundred, as text and
+  never markup), and a link back to the lobby. When the session ends (its
+  world stopped) the page says so, with a way back. It sends no commands yet,
+  asks for no scenes yet, and marks nothing for the routine yet: those are 3.3.
 
 ### 3.3 The play page
 
@@ -334,6 +371,32 @@ Sobelow starts to matter. `.sobelow-conf` loses `router: :none`, and the
 whatever fronts the endpoint, which only listens on loopback. The router
 checks (CSRF, headers, CSP) are met, not ignored.
 
+**As built.** A request is refused with 403 unless its `Host` is `localhost`,
+`127.0.0.1` or `[::1]` (or one the endpoint's `:allowed_hosts` lists):
+`AvweWeb.LoopbackHost`, the first plug of the endpoint, so not a page and not a
+built file can be read through a name that is not ours. That is the defence
+against DNS rebinding (a page at another name that resolves to 127.0.0.1),
+and the MCP server has the same. A socket opens only from the origin its page
+came from (`check_origin: :conn`: the same scheme, host and port as the
+request), which turns away another site, another service on this machine
+(another port) and a page reached under the other loopback name. Endpoint
+plugs do not run for a socket's upgrade, so the Host guard does not cover it,
+and under rebinding a socket does open (the attacker's Origin is the Host it
+sent). It still joins nothing: a LiveView joins only with the signed token in
+a page this server rendered, even to navigate, and the page cannot be read.
+The tests check each of these over a real socket, including a join with a
+forged token.
+
+The policy is `default-src 'self'; script-src 'self'; style-src 'self';
+img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self';
+form-action 'self'; frame-ancestors 'none'`, written as a literal in the
+router because Sobelow reads it there (a module attribute makes its check
+"missing, low confidence"). The root layout has no inline script or style, and
+a test holds that. The one cookie, the session's, is `HttpOnly; SameSite=Lax`
+and carries only the CSRF secret. `.sobelow-conf` no longer says
+`router: :none`; `Config.HTTPS` stays ignored, now with its reason. Sobelow
+finds nothing else.
+
 ## 4. Tests
 
 CLAUDE.md applies: every user-facing feature has an end-to-end test through
@@ -364,6 +427,18 @@ its real transport.
   walk and later scenes move the body; the yielded banner appears after the
   idle time; the page says so when its world stops; a speech of
   `<script>alert(1)</script>` shows as text.
+  *Built with the skeleton:* `test/avwe_web/` has the lobby (lists, offers a
+  free body, shows a held one, looks again, follows worlds), the play page
+  (takes the body at the socket and not before, refuses a held one at the
+  plain request and at the socket, a missing world or body, shows percepts as
+  lines and as text, keeps two hundred, frees the body when the page closes or
+  is left, says so when the world stops) and the endpoint's security (headers,
+  policy, no inline script, cookie, the Host guard). `test/e2e/web_test.exs`
+  does it over a real socket: HTTP with any Host, what is served and what is
+  not, a websocket from each origin that may and may not open one, a join with
+  a forged token, and a LiveView joined with the tokens of its page, which
+  takes a body and frees it when the socket closes. Twenty deliberate breaks of
+  the web layer, one at a time, were each caught.
 - **The done criterion** (`test/e2e/three_controllers_test.exs`), in Lantern
   Hollow: a telnet player, a web player and an MCP player. Each hears the
   others speak within earshot; the web scene shows the other two at their
@@ -407,7 +482,11 @@ first:
    MCP tests are the proof that nothing moved.
 2. **The skeleton** (3.1, 3.2, 3.4): Phoenix on Bandit, the endpoint, the
    router, the lobby, headers and Sobelow's new settings, the assets build.
-3. **The play page** (3.3), the Browser job, the done-criterion test, and the
+   It also has the play page's shell (3.2), because the lobby needs somewhere
+   to go and the refusal of a held body belongs to the page: the session's
+   life, and what happens as plain lines. Nothing in it uses scenes.
+3. **The play page** (3.3: the map, the HUD, the command line and the marking
+   of the routine's lines), the Browser job, the done-criterion test, and the
    DESIGN.md updates: 5 (layout), 8.4 (layers as built), 9 (the web row), 13 (M2
    split into M2a and M2b), 14.
 
