@@ -19,6 +19,7 @@ import {
   inside,
   mirror,
   NEAR,
+  nearCells,
   ordered,
   paint,
   shade,
@@ -104,6 +105,30 @@ describe("viewport", () => {
   })
 })
 
+describe("nearCells", () => {
+  test("is as many cells as fit at a readable size, up to the most", () => {
+    assert.equal(nearCells(820), NEAR)
+    assert.equal(nearCells(2000), NEAR)
+    assert.equal(nearCells(328), 27)
+    assert.equal(nearCells(300), 25)
+  })
+
+  test("is odd, so the viewer is in the middle", () => {
+    for (const width of [250, 300, 312, 336, 400, 500, 600]) assert.equal(nearCells(width) % 2, 1, width)
+  })
+
+  test("is never fewer than a few, however narrow", () => {
+    assert.equal(nearCells(100), 21)
+    assert.equal(nearCells(0), 21)
+  })
+
+  test("takes the limits it is given", () => {
+    assert.equal(nearCells(328, {readable: 8}), 41)
+    assert.equal(nearCells(328, {readable: 20, least: 5}), 15)
+    assert.equal(nearCells(2000, {most: 31}), 31)
+  })
+})
+
 describe("geometry", () => {
   test("shows the near view, at a size that can be read", () => {
     const geo = geometry(noon, 820)
@@ -123,6 +148,15 @@ describe("geometry", () => {
     assert.equal(geo.size, 101)
     assert.equal(geo.cell, 8)
     assert.deepEqual(geo.origin, noon.origin)
+  })
+
+  test("shows fewer cells, bigger, on a narrow screen", () => {
+    const geo = geometry(noon, 328)
+
+    assert.equal(geo.size, 27)
+    assert.equal(geo.cell, 12)
+    assert.equal(geo.width, 324)
+    assert.deepEqual(geo.origin, [noon.center[0] - 13, noon.center[1] - 13])
   })
 
   test("shows all of a window that is small, large, as at night", () => {

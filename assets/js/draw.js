@@ -40,8 +40,18 @@ export function decodeRow(row) {
   return letters
 }
 
-// How many cells across the near view shows, with the viewer in the middle.
+// How many cells across the near view shows at most, with the viewer in the
+// middle.
 export const NEAR = 41
+
+// How many it shows in a width: as many as fit at a size that can be read, an
+// odd number so the viewer is in the middle, and between a few and NEAR. A
+// phone shows fewer cells, bigger, than a desk does.
+export function nearCells(width, {readable = 12, least = 21, most = NEAR} = {}) {
+  const fit = Math.floor(width / readable)
+  const odd = fit % 2 === 0 ? fit - 1 : fit
+  return Math.max(least, Math.min(most, odd))
+}
 
 // The part of the window that is shown: all of it, or, when it is wider than
 // `limit`, the cells around the viewer. The size is odd, so the viewer is in
@@ -57,7 +67,7 @@ export function viewport(scene, limit = Infinity) {
 // the cells close around the viewer, big enough to read; the far one is the
 // whole of what is in sight, at the size that fits. Either is fitted to the
 // width there is, between a cell too small to read and one too big to need.
-export function geometry(scene, width, {min = 4, max = 40, zoom = "near", near = NEAR} = {}) {
+export function geometry(scene, width, {min = 4, max = 40, zoom = "near", near = nearCells(width)} = {}) {
   const view = viewport(scene, zoom === "near" ? near : Infinity)
   const cell = Math.max(min, Math.min(max, Math.floor(width / view.size)))
   const side = cell * view.size
