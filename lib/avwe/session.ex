@@ -40,6 +40,9 @@ defmodule Avwe.Session do
   `:autopilot`, except its waits, which `Avwe.Perception` keeps quiet
   unless the controller stops one.
 
+  `peek/1` is a look that is not presence, for a client that redraws as the
+  world moves and would otherwise keep the body in hand for ever.
+
   **While you were away.** A body's look carries `away`, what it perceived
   while nobody held it (`Avwe.Perception.away/2`), which is empty once a
   controller holds it. The session takes the body only at the next step,
@@ -109,6 +112,15 @@ defmodule Avwe.Session do
   @doc "What the body senses right now and what it can do. See `Avwe.Perception.look/2`."
   @spec look(pid()) :: {:ok, map()} | {:error, term()}
   def look(session), do: GenServer.call(session, :look)
+
+  @doc """
+  The look, for a client that keeps its view of the body fresh by itself, as a
+  page does while the world moves. Unlike `look/1` it does not mark the
+  controller present, so it does not keep the body in hand, and it carries no
+  `away`: only `look/1` tells that, once.
+  """
+  @spec peek(pid()) :: {:ok, map()} | {:error, term()}
+  def peek(session), do: GenServer.call(session, :peek)
 
   @doc """
   What the body can see now, as an `Avwe.Scene`: the first draw of a session
@@ -199,6 +211,15 @@ defmodule Avwe.Session do
       end
 
     {:reply, reply, arm_idle(%{state | away: nil})}
+  end
+
+  def handle_call(:peek, _from, state) do
+    reply =
+      with {:ok, view} <- snapshot(state.world) do
+        {:ok, view |> Perception.look(state.body) |> Map.replace(:away, [])}
+      end
+
+    {:reply, reply, state}
   end
 
   def handle_call(:scene, _from, %{scenes: false} = state),

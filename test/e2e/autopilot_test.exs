@@ -292,6 +292,40 @@ defmodule Avwe.E2E.AutopilotTest do
     assert mira_action() == nil
   end
 
+  test "a session that only peeks is yielded, and a peek neither tells nor takes the time away" do
+    Avwe.step(@world, 120)
+    {:ok, session} = Avwe.connect(@world, body: "mira-vale", idle_after: 300)
+
+    # Nobody held her while she walked the banks, but a peek does not say so.
+    assert {:ok, %{spectator: false, away: []}} = Session.peek(session)
+
+    for _n <- 1..5 do
+      Process.sleep(100)
+      assert {:ok, %{spectator: false, away: []}} = Session.peek(session)
+    end
+
+    Avwe.step(@world, 1)
+    assert %{controller: :autopilot, taken: true} = mira()
+    assert Enum.any?(percepts(session), &(&1.type == :control_released))
+  end
+
+  test "a peek does not spend the first look's account of the time away" do
+    Avwe.step(@world, 120)
+    {:ok, session} = Avwe.connect(@world, body: "mira-vale")
+    assert {:ok, _look} = Session.peek(session)
+
+    # In hand now, so the world's own account is empty: what the first look
+    # tells is what the session found when it connected.
+    Avwe.step(@world, 1)
+    assert {:ok, %{away: [_ | _]}} = Session.look(session)
+    assert {:ok, %{away: []}} = Session.look(session)
+  end
+
+  test "a peek at a world as a spectator is a look with nobody in it" do
+    {:ok, watcher} = Avwe.connect(@world)
+    assert {:ok, %{spectator: true}} = Session.peek(watcher)
+  end
+
   test "a session that keeps touching is not yielded" do
     {:ok, session} = Avwe.connect(@world, body: "mira-vale", idle_after: 300)
 
