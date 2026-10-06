@@ -1,0 +1,42 @@
+name: Audit
+
+# Advisories and retirements in the locked dependencies. They appear without
+# any change here, so this also runs every Monday, not only for pull requests.
+# An advisory that does not affect AVWE is acknowledged in mix.exs (`hex:`),
+# with the reason beside it.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hex-audit:
+    name: Dependency advisories
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      # hex.audit reads the locked packages, so they must be fetched; there is
+      # nothing to compile.
+      - name: Fetch dependencies
+        run: mix deps.get
+      - name: mix hex.audit
+        run: mix hex.audit

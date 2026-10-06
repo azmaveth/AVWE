@@ -1,0 +1,25 @@
+# Sobelow's settings: `mix sobelow` (or scripts/sobelow, which CI and the
+# pre-push hook use) reads this file.
+#
+# A finding that was looked at and is fine carries a `# sobelow_skip [...]`
+# comment above its function, with the reason beside it (see lib/avwe/store.ex),
+# so a new one still fails the scan. Ignoring a whole check here is only for
+# what cannot apply.
+[
+  exit: :low,
+  format: "txt",
+  # No Phoenix endpoint yet: the MCP and telnet servers listen on 127.0.0.1
+  # only. Take this out when the web client (M2) adds a real endpoint.
+  ignore: ["Config.HTTPS"],
+  ignore_files: [],
+  include_mix_tasks: false,
+  include_scripts: false,
+  out: nil,
+  private: true,
+  # There is no Phoenix router to find.
+  router: :none,
+  skip: true,
+  summary: false,
+  threshold: :low,
+  verbose: false
+]

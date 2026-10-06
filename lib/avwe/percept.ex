@@ -1,0 +1,83 @@
+defmodule Avwe.Percept do
+  @moduledoc """
+  Something a body perceives, ready for any client.
+
+  `summary` is plain prose every client can show as it is. The other fields
+  let richer clients and agents use the percept without parsing prose.
+
+  Kinds:
+
+    * `:sensed` - something the body noticed without asking: speech, someone
+      arriving, the sun rising.
+    * `:progress` - an action of the body's own is under way.
+    * `:result` - an intent has finished. `intent` is its ref and `outcome`
+      uses Arbor's vocabulary: `:success`, `:failure`, `:blocked`,
+      `:interrupted`. Every intent gets exactly one.
+
+  `type` is the world event the percept came from. `source` describes where a
+  sensed percept came from: `%{ref, distance_m, direction}`.
+
+  `data` carries what a percept says beyond its summary, for clients that
+  want it as data; it is `nil` on most percepts. A successful `:read`
+  result carries the pages read, `%{pages: [%{time, text}], total: n}`
+  (the last pages asked for, oldest first, and how many the notebook
+  holds), and the smell of a fire the body lit and stands beside carries
+  `%{own_fire: true}` (its `source` is that hearth), so a controller can
+  tell its own smoke from a stranger's.
+
+  `issuer` says, on a `:progress` or `:result` percept, who asked for the
+  action: `:controller` for the body's controller, `:autopilot` for the
+  body's own routine (its refs start with `auto-`), so a controller that
+  yielded the body can tell its own doings from what the routine did with
+  it. A body's own session also senses the hand-over itself:
+  `:control_released` when it yielded and `:control_taken` when it took
+  the body back.
+  """
+
+  @enforce_keys [:kind, :type, :time]
+  defstruct [
+    :id,
+    :kind,
+    :type,
+    :time,
+    :body,
+    :modality,
+    :source,
+    :intent,
+    :issuer,
+    :outcome,
+    :reason,
+    :progress,
+    :summary,
+    :data,
+    confidence: 1.0,
+    salience: 0.5
+  ]
+
+  @type kind :: :sensed | :progress | :result
+  @type issuer :: :controller | :autopilot
+
+  @type t :: %__MODULE__{
+          id: String.t() | nil,
+          kind: kind(),
+          type: atom(),
+          time: Avwe.Calendar.time(),
+          body: String.t() | nil,
+          modality: :sight | :hearing | :smell | nil,
+          source: map() | nil,
+          intent: String.t() | nil,
+          issuer: issuer() | nil,
+          outcome: :success | :failure | :blocked | :interrupted | nil,
+          reason: atom() | nil,
+          progress: float() | nil,
+          summary: String.t() | nil,
+          data: map() | nil,
+          confidence: float(),
+          salience: float()
+        }
+
+  @doc "Who issued the intent with this ref: autopilot's refs start with `auto-`."
+  @spec issuer(String.t()) :: issuer()
+  def issuer("auto-" <> _rest), do: :autopilot
+  def issuer(_ref), do: :controller
+end

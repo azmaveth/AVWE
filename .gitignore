@@ -1,35 +1,33 @@
-# Prerequisites
-*.d
+# The directory Mix will write compiled artifacts to.
+/_build/
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# If you run "mix test --cover", coverage assets end up here.
+/cover/
 
-# Precompiled Headers
-*.gch
-*.pch
+# The directory Mix downloads your dependencies sources to.
+/deps/
 
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
+# Where third-party dependencies like ExDoc output generated docs.
+/doc/
 
-# Fortran module files
-*.mod
-*.smod
+# Temporary files, for example, from tests.
+/tmp/
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+# If the VM crashes, it generates a dump, let's ignore it too.
+erl_crash.dump
 
-# Executables
-*.exe
-*.out
-*.app
+# Also ignore archive artifacts (built via "mix archive.build").
+*.ez
 
-.vs
-.idea
+# Ignore package tarball (built via "mix hex.build").
+avwe-*.tar
+
+
+# Worlds' logs and snapshots (config :avwe, :data_dir).
+/worlds/
+
+# Worktrees the Claude app makes for parallel agents
+/.claude/worktrees/
+
+# Dialyzer's persistent lookup tables (cached in CI).
+/priv/plts/
