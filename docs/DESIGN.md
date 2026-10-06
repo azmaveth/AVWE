@@ -129,8 +129,9 @@ avwe/
   lib/avwe/              simulation core, no I/O
     world.ex region.ex tick.ex system.ex
     systems/             daylight, miracles, weather, river, fire, heat,
-                         movement, waiting, discovery, smoke (built);
-                         needs and autopilot to come
+                         movement, waiting, discovery, autopilot, smoke
+                         (built); needs to come
+    autopilot.ex         the brain: candidates, routine plans, the invited rule
     perception/          senses, salience, representation layers
     protocol/            intent and percept structs, JSON codecs
   lib/avwe/session.ex    controller sessions and leases
@@ -248,12 +249,13 @@ Each tick, in order:
 2. Validate each one against the body's affordances. Reject with a `blocked`
    result, or start or continue the action.
 3. Run systems in a fixed order. Built: daylight → miracles → weather →
-   river → fire → heat → movement → waiting → discovery → smoke. The order
-   is load-bearing: weather before the river so water cools toward the real
-   air; river and fire before heat so the ground sees this step's reach
-   state and burn; smoke last so smell is judged at bodies' end-of-step
-   positions. Needs and autopilot will go after movement (autopilot queues
-   intents for the next tick, the same way any controller does).
+   river → fire → heat → movement → waiting → discovery → autopilot →
+   smoke. The order is load-bearing: weather before the river so water
+   cools toward the real air; river and fire before heat so the ground sees
+   this step's reach state and burn; autopilot after movement and waiting
+   so it sees this step's results and arrivals, and queues its intents for
+   the next step the same way any controller does; smoke last so smell is
+   judged at bodies' end-of-step positions. Needs are still to come.
 4. Swap the halo cells along borders with neighbouring regions, and send
    entities that crossed a border to the region that now owns them.
 5. Publish the snapshot. Append inputs and significant events to the log.
@@ -338,7 +340,7 @@ the same declaration mechanism, so the conservation checks keep working.
 |---|---|---|
 | Heat | Built. Energy per cell relative to 15 °C on a sparse active set; each step relaxes every cell exactly toward an equilibrium of air exchange, sky radiation, sun (by the step's mean light), river seepage where a reach flows, and hearth or miracle heat; no lateral conduction by design. Materials from the terrain: silt holds heat about 16 times longer than stone. A diurnal air curve from `Avwe.Systems.Weather` | The town "sits where the silt used to steam at dusk". The river's water was warm and heated the silt banks; with the model's 40 °C spring the banks beside a flowing reach steam from late afternoon through the night (12 K above the air). Once the river is gone, the silt cools through ordinary heat physics, with no second miracle: a year later the banks are as cold as dry silt |
 | Water | Built. The river as a chain of 100 m reaches, each draining at volume / τ (τ is the time to cross it at 0.6 m/s), losing a little to seepage. Each reach is solved exactly, and long steps are sub-stepped at 60 s inside the river system so the drain front moves at the right speed at hour and day steps. Warm inflow (40 °C, 10 m³/s) at the spring; water cools toward the real mean air of each step | The river running dry: the 812 AR miracle event stops the source and the river drains from upstream down. In the simulation the Dry Bend goes quiet about 30 minutes after the failure, the town after an hour, and the docks after 70 minutes |
-| Fire | Built. Hearths are entities with fuel in kg and a power; `kindle` lights the one you stand at, `douse` puts it out; burning consumes fuel linearly (exact at any step), 30 % of the heat enters the ground cell, the rest is vented, and 10 g of smoke per kg burned becomes puffs that drift with the wind, decay, and are smelt (faint, clear, thick). The Last Coal is a standing miracle: a hearth that burns without fuel, gives no smoke, and cannot be doused | "When the river still ran, heat was easy to invite. After the River Runs Dry, many chimneys went cold." The Hearth Compact rule (only light a fire that is invited, meaning one that would catch easily; fewer are invited as the silt cools) is behaviour and waits for autopilot. Fires are seen from afar by their smoke by day and their glow by night |
+| Fire | Built. Hearths are entities with fuel in kg and a power; `kindle` lights the one you stand at, `douse` puts it out; burning consumes fuel linearly (exact at any step), 30 % of the heat enters the ground cell, the rest is vented, and 10 g of smoke per kg burned becomes puffs that drift with the wind, decay, and are smelt (faint, clear, thick). The Last Coal is a standing miracle: a hearth that burns without fuel, gives no smoke, and cannot be doused | "When the river still ran, heat was easy to invite. After the River Runs Dry, many chimneys went cold." The Hearth Compact rule is built as autopilot behaviour (7.2): a hearth is *invited* when the river bed within 80 m of it is at least 25 °C by the heat field, and a body with the `:invited_fire` norm kindles only invited hearths. The same Mira, the same wood, the same cold night: she lights her hearth on 812/199 and leaves it cold on 813/220, which is "many chimneys went cold" emerging from the model. Fires are seen from afar by their smoke by day and their glow by night |
 
 **Conservation invariants as tests:** every step, the river reports inflow,
 outflow and loss; the heat field reports sun, air and sky exchange in and
@@ -360,7 +362,9 @@ Built. All file I/O lives in `Avwe.Store`; the core stays pure.
   and every advance is journaled with its step, time, the `dt` it used and
   the events it emitted. Journaling at acceptance is what keeps "every intent
   ends in exactly one result" true across a crash: an intent accepted just
-  before the region dies is replayed and still gets its result.
+  before the region dies is replayed and still gets its result. Autopilot's
+  own intents are derived state, never journaled: replay regenerates them,
+  and a snapshot keeps the ones still pending.
 - **Snapshots** are the whole region (`term_to_binary`, written to a temp
   file, fsynced, then renamed) taken when an advance crosses a multiple of
   `snapshot_every` steps (default 1000), keeping the newest few plus step 0.
@@ -425,23 +429,60 @@ coupling is ever relaxed to exchange every N ticks.
 
 ### 7.1 Leases
 
+Built.
+
 - Each body has at most one **active controller**. Others can watch as
-  spectators.
-- Controller kinds: `:autopilot`, `:human`, `:arbor`, `:mcp`.
-- When a controller disconnects or stays idle past a timeout, autopilot takes
-  the body back. The body keeps living either way.
-- Autopilot is a controller like any other. It uses the same intent API, just
-  running inside AVWE.
+  spectators. The runtime `Registry` lease is the exclusivity check; who
+  holds the body is also state, a `control` component (`holder`, `since`)
+  set by two instant verbs, `control` and `release`, which a session submits
+  on connect and on close, so the simulation knows it and replay reproduces
+  it.
+- Controller kinds: `:human`, `:arbor`, `:mcp`; a body with no holder is on
+  its own (autopilot).
+- **Idle:** a session that has not acted for `idle_after` (real time, ten
+  minutes by default) releases the body, which goes back to its routine
+  while the player reads; `look`, `time` and `help` count as presence and
+  keep the body; the next act takes it back. A body a controller left
+  mid-journey keeps walking; the player sees "Your routine has you on your
+  way to ..." and their first command replaces it.
+- Autopilot acts only through intents, like any controller, but it runs
+  inside the tick as a system, so its intents are derived state: not
+  journaled, regenerated on replay.
 
 ### 7.2 Autopilot
 
-A utility AI over needs (rest, warmth, food, water, social) plus **routines**
-compiled from the body's Quire article (section 10.3). Mira Vale's routines:
-walk the banks before dawn, survey, stop at the lodge on the way home to warm
-her hands. Beliefs adjust utilities. An Ashwarden will not let the Last Coal
-go cold and will stop anyone carrying it down the hill. A household that keeps
-the Compact won't force a fire that hasn't been invited. Autopilot doesn't need
-to be clever, only believable over long stretches of history mode.
+Built as a first brain (`Avwe.Autopilot`, whose moduledoc is the reference;
+`docs/autopilot-spec.md` records the intent and its errata). Each step, for
+every body nobody holds, it picks the best of a few candidates and submits
+one intent:
+
+- **Routine entries** (0.6): the body's `routine`, from `config/config.exs`
+  under `characters:` (the shape a compiled Quire sidecar, section 10.3,
+  would one day produce). An entry is a *plan*, a list of steps run in
+  sequence (go to the bend, wait 40 minutes, come home). Entries are due
+  from their time until the next entry's, jittered a few minutes per body
+  per day, fire once a day, and are missed (announced to the game master)
+  if their window closes. A plan resists needs; only an urgent kindle cuts
+  it, and the next entry cuts a plan's wait. A takeover keeps the plan: on
+  release the body serves what is left of the pending step, or skips it when
+  the controller moved it off course.
+- **Warmth:** kindle the hearth at home when the air is cool (below 15 °C),
+  the hearth has fuel, and it is *invited* (the Hearth Compact rule, 6.6):
+  urgent, 0.8. Stay by a fire felt where the body stands on a cold, dark
+  night (0.6); go to a burning hearth in sight (0.7).
+- **Rest:** at home when dark, wait until dawn (0.5); away and dark, go home
+  (0.55).
+- **Idle:** wait until the next entry or an hour (0.1); away from home by day
+  with nothing due, go home (0.3).
+
+Mira's routine: walk the banks before dawn, survey the bend through the
+morning, warm her hands at the lodge on the way home, rest. Over thirty
+unattended days at hour steps and ten at minute steps she keeps it every
+day; forty takeover trials across the day all end with her home and
+resting. Still to come: needs with meters (food, water, social), beliefs
+that adjust utilities, the Ashwarden rule about the coal, and the compiler
+from Quire prose. Autopilot doesn't need to be clever, only believable over
+long stretches of history mode, and perfectly repeatable.
 
 ### 7.3 Intents that take time
 
@@ -469,7 +510,11 @@ compass direction), `wait` (for a duration, or until dawn or dusk), `say`
 one you name within 20 m) and `douse`. `kindle` and `douse` are instant;
 their refusals are `blocked` (no hearth, too far, no fuel, already lit, not
 lit), and dousing the Last Coal is the first `failure`: you try, and it does
-not go out. Plans and `until` conditions on other verbs come with M1.
+not go out. `control` and `release` are the session's own (7.1). A result
+reaches whoever holds the body when it arrives, so a player who takes a body
+mid-journey gets the routine's result when they override it. The results of
+autopilot's own quiet waits are events without percepts, by design. Plans
+for controllers and `until` conditions on other verbs come with M1.
 
 **Discovery:** a body that comes within 30 m of a place it doesn't know
 learns the way there and perceives it ("You find The Source."). That's how
@@ -585,7 +630,7 @@ updated in lockstep.
 
 | Client | Milestone | Description |
 |---|---|---|
-| Text (telnet) | M0 | `look`, `go dry bend`, `go north 200`, `follow upstream`, `say ...`, `whisper`, `shout`, `wait until dusk`, `light the fire`, `douse the coal`, `stop`, `time`, `help`. The quickest way to be in the world |
+| Text (telnet) | M0 | `look`, `go dry bend`, `go north 200`, `follow upstream`, `say ...`, `whisper`, `shout`, `wait until dusk`, `light the fire`, `douse the coal`, `stop`, `time`, `help`. A body you leave idle for ten minutes goes back to its routine, and its doings show as "- " lines until you act again. The quickest way to be in the world |
 | MCP | M1 | Claude plays a body |
 | Web | M2 | LiveView page with a canvas hook. **Embodied view** shows what your body perceives. **Spectator view** shows everything, with overlays for heat, water and smoke |
 | Arbor | M3 | Agents control villagers through a `world` capability |
@@ -774,8 +819,8 @@ core. A feature isn't done until its end-to-end test exists.
 
 | | Name | Scope | Done when |
 |---|---|---|---|
-| **M0** | The valley breathes | Mix project. Read-only Quire import. One region holding the whole valley. Terrain from pins, including the river's source (built). Heat, water and fire systems (built, with weather and smoke). Places for the lodge and kiln-houses (the lodge and town are places; kiln-houses as interiors still to come). Mira and a few riverfolk on autopilot (to come). Day and night (built). Telnet client (built). Log and snapshots (built: 6.7) | Two telnet sessions see the same events (built). Replaying the log reproduces the same state hash (built). Conservation property tests pass for water, heat and smoke (built) |
-| **M1** | Claude walks the banks | MCP adapter. Leases. Intents that take time, interrupts and salience. Notebook item | Claude plays Mira across two sessions and finds the notes from the first |
+| **M0** | The valley breathes | Mix project. Read-only Quire import. One region holding the whole valley. Terrain from pins, including the river's source (built). Heat, water and fire systems (built, with weather and smoke). Places for the lodge and kiln-houses (the lodge and town are places; kiln-houses as interiors still to come). Mira on autopilot (built; other bodies as they are added, with the same brain). Day and night (built). Telnet client (built). Log and snapshots (built: 6.7) | Two telnet sessions see the same events (built). Replaying the log reproduces the same state hash, with autopilot and fires (built). Conservation property tests pass for water, heat and smoke (built). A watcher sees Mira keep her routine unattended, and she lights her hearth in 812 but not in 813 (built) |
+| **M1** | Claude walks the banks | MCP adapter (leases and the idle rule exist; MCP needs its own session kind). Plans for controllers, `until` conditions, interrupts and salience. Notebook item | Claude plays Mira across two sessions and finds the notes from the first |
 | **M2** | Many lenses | Phoenix and a LiveView canvas. Representation layers. Embodied and spectator views with field overlays | A telnet player, a web player and Claude are in the world at once and each perceives the others |
 | **M3** | Agents move in | Arbor `world` capability over Channels. `world-player` trust profile. Percept mapping. Earshot engagements. Taint | Two Arbor agents live in the Reach for a world week unattended. Conversation engagements are scoped correctly. An injection attempt through in-world speech stays contained |
 | **M4** | Legends | History mode. Chronicle written to Quire. Canon-agreement check from 780 to 813 AR. Narrator | The 780–813 run produces a chronicle visible in Quire and a canon-agreement report |
@@ -804,7 +849,9 @@ core. A feature isn't done until its end-to-end test exists.
    run keeps its terrain; but there is no way yet to review or hand-edit the
    generated land before a world starts. When is that worth building?
 3. **Time scale.** Is one tick per world minute at 1 Hz right for both play and
-   LLM pacing? What step size does history mode use (section 6.5)?
+   LLM pacing? History mode at hour steps now runs the river, the heat field
+   and the routine correctly (plans round to whole hours); a day step is
+   bounded but coarse.
 4. **Resolution.** Are 10 m outdoor cells plus places for interiors enough?
 5. **Fiction domain.** Does the disclosure proposal in 11.4 fit Arbor's memory
    model?
@@ -813,8 +860,9 @@ core. A feature isn't done until its end-to-end test exists.
    Should articles that the chronicle contradicts get flagged in Quire?
 7. **Persistence.** Files to start, but when does SQLite or Postgres become
    worth it?
-8. **Autopilot.** Is a utility AI enough, or will history mode need
-   goal-oriented planning to produce interesting chronicles?
+8. **Autopilot.** The first brain (7.2) is a utility pick with routine plans.
+   Is that enough, or will history mode need goal-oriented planning to
+   produce interesting chronicles? Needs with meters come first.
 
 ## 15. Prior art
 

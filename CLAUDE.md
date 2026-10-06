@@ -22,8 +22,14 @@ changing anything structural; it records the decisions and the reasons.
   real transport (`test/e2e/`): telnet over TCP with `Avwe.Test.TelnetClient`,
   sessions as agents use them, and later MCP and Arbor. Before stepping the
   world after a telnet command, call `TelnetClient.sync/1`.
-- **Every intent ends in exactly one result percept.** New verbs must keep
-  this; the property test in `test/avwe/actions_test.exs` checks it.
+- **Every intent ends in exactly one result event.** New verbs must keep
+  this; the property tests in `test/avwe/actions_test.exs` and
+  `test/avwe/journeys_test.exs` check it, autopilot's intents included. The
+  only results without a percept are autopilot's own quiet waits.
+- **Autopilot's intents are derived state.** They are submitted inside the
+  tick with `Region.submit/2`, never journaled, and regenerated on replay;
+  the brain (`Avwe.Autopilot`) must stay a pure function of the region and
+  the tick.
 - **Replay must be exact.** `Avwe.Store.rebuild_from_start/1` has to reproduce
   `Region.state_hash/1`; anything that would make live and replay differ
   (reading map order, the wall clock, `:rand` without `Tick.rng`) is a bug.

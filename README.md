@@ -35,8 +35,14 @@ M0 in progress. Built so far:
 - Fire and smoke: hearths at the town and the lodge that you can `kindle` and
   `douse`, which burn their fuel, warm the ground, and send smoke downwind
   that bodies smell; the Last Coal burns without fuel and cannot be put out.
+- Autopilot: a body nobody holds lives its routine. Mira walks the banks
+  before dawn, surveys the bend, warms her hands at the lodge on the way
+  home and rests, every day, unattended; on a cold night she lights her
+  hearth only while the river's warmth still invites a fire, so her chimney
+  goes cold the year after the river does. Take her over mid-journey and give
+  her back, and she carries on.
 
-Next: autopilot for bodies nobody is controlling.
+That completes M0. Next is M1: an MCP adapter so Claude can play Mira.
 
 ## Playing
 
@@ -62,7 +68,9 @@ Choose Mira Vale (or `watch`), then try `look`, `go to the dry bend`,
 `follow the channel upstream`, `go north 200`, `say hello`,
 `light the fire`, `douse`, `wait until dawn`, `stop` and `help`. Go to the
 lodge to feel the Last Coal; stand by the kiln-house hearth, light it, and
-watch it burn low and out over eight world hours.
+watch it burn low and out over eight world hours. Or choose `watch` and see
+Mira keep her day on her own. If you stop acting for ten minutes your body
+goes back to its routine, shown as "- " lines, until your next command.
 
 To see the river run, and hear it fall silent, start the Ember Reach in 812,
 an hour before its source fails:

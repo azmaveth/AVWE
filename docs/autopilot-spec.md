@@ -10,6 +10,38 @@ back door into world state, and it hands the body over the moment a human,
 an Arbor agent or Claude takes it. It does not need to be clever, only
 believable over long stretches of history mode, and perfectly repeatable.
 
+## As built: errata
+
+Five review rounds reshaped sections 3 to 5; `Avwe.Autopilot`'s moduledoc
+is now the reference. The differences, with their reasons:
+
+- **Cold is 15 °C**, not 12: the air never falls below 13 °C in late summer.
+- **Invited** reads the nearest river-bed cell within 80 m at 25 °C by
+  `Heat.ground_c/3`, not the hearth's own cell at 18 °C: the town is clay,
+  which the heat model does not couple to the river, so the hearth cell
+  reads the same in 812 and 813; the bed beside the town holds the river's
+  warmth (33 °C at night in 812, 17 °C in 813).
+- **Routine entries are plans** (lists of steps), with windows until the next
+  entry, a start margin, per-body jitter, "missed" announcements, and
+  resumption after a takeover (remainder of a wait, skipped if off course).
+  Mira's survey is a wait at the bend, not `follow upstream`, so no routine
+  leads to the forgotten source (DESIGN 10.2 holds).
+- **Candidates:** stay by a felt fire (0.6), go to a fire in sight (0.7, not
+  urgent), rest away goes home (0.55), idle waits until the next entry or an
+  hour and goes home by day when away (0.3). Plans resist needs; the next
+  entry cuts a plan's wait.
+- **Hand-over percepts exist** ("You let your routine carry you." / "You take
+  yourself in hand."), autopilot's own quiet waits produce no percepts, and
+  own-action percepts carry `issuer`; the telnet client prefixes the
+  routine's doings with "- " while the player is yielded. `look`, `time` and
+  `help` count as presence.
+- **Sessions refuse** `:control`, `:release` and `auto-` refs through `act`,
+  and accept only `:human`, `:mcp`, `:arbor` as controller kinds.
+- **Snapshots keep autopilot's pending intents** (by ref prefix), since they
+  are derived state the journal does not carry.
+
+---
+
 ## 1. Control is state, and it is journaled
 
 Who controls a body must be part of the region's state, because the
