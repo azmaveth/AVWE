@@ -4,9 +4,10 @@ defmodule Avwe.RegionServer do
 
   After every advance it publishes a snapshot to an ETS table it owns, so
   readers never block the tick and never call this process. Events go to
-  subscribers registered with `Avwe.subscribe/1`, together with a view of the
-  state they happened in (`Avwe.Region.view/1`). Intents queue in the region's
-  inbox until the next step.
+  subscribers registered with `Avwe.subscribe/2`, together with a view of the
+  state they happened in (`Avwe.Region.view/1`); a step with no events is told
+  only to those that asked to hear of every step. Intents queue in the
+  region's inbox until the next step.
 
   With a `:store` dir the region persists itself through `Avwe.Store`: every
   intent is journaled as it is accepted, every advance is appended to the log
@@ -372,11 +373,15 @@ defmodule Avwe.RegionServer do
     :ets.insert(table, {:snapshot, Region.snapshot(region)})
   end
 
-  defp broadcast(_world, [], _view), do: :ok
-
+  # A step that produced events is told to every subscriber. One that
+  # produced none is told only to those that asked to hear of every step
+  # (`Avwe.subscribe/2`): a session that draws a scene follows the world step
+  # by step, not event by event, and the rest are not woken for nothing.
   defp broadcast(world, events, view) do
     Registry.dispatch(Avwe.PubSub, {:events, world}, fn subscribers ->
-      for {pid, _value} <- subscribers, do: send(pid, {:avwe_events, world, events, view})
+      for {pid, every_step?} <- subscribers, events != [] or every_step? == true do
+        send(pid, {:avwe_events, world, events, view})
+      end
     end)
   end
 end

@@ -194,20 +194,54 @@ A spectator has no scene (that is M2b), and neither has a body that is nowhere.
 A world with no terrain has things and no rows. Cost: about 1 ms at noon and
 0.1 ms at night, with the ground map built (the perf test bounds it at 10 ms).
 
-### 2.5 Sessions produce scenes
+### 2.5 Sessions produce scenes (built)
 
-`Avwe.connect/2` takes `scenes: true`. Such a session sends its sink
-`{:avwe_scene, session, scene}` after a step that changed the scene (the
-body moved, sight changed by half a cell or more, something in sight moved
-or changed, a reach started or stopped running), and never when nothing
-changed. `Session.scene/1` returns the current scene, for the first draw.
-A session without the option behaves exactly as today, so telnet and MCP
-are not touched. Scenes are built from the same view a step's percepts are,
-so the two arrive in step with each other.
+`Avwe.connect/2` takes `scenes: true`. `Session.scene/1` returns the current
+scene, for the first draw, and from then on the session sends its sink
+`{:avwe_scene, session, scene}` after a step that changed it (the body moved,
+sight changed by half a cell or more, something in sight moved or changed, a
+reach started or stopped running), and never when nothing did. Whoever holds the
+body is part of a scene, so a yield or a retake is a change too. A session
+without the option behaves exactly as before, so telnet and MCP are not
+touched; a spectator has none (`scene/1` gives `nil`; M2b).
+
+**A scene is built from the same view as the step's percepts**, in the
+session's own process, and sent after them, so a client never draws a world
+ahead of the words about it. The simulation does no extra work: the region
+server sends the same 14 KiB view it always sent (the Ember Reach's; its fields
+are not in it), and a step costs the same with a scene session connected (2.09
+ms against 2.12 ms, measured).
+
+**Every step, not every event.** The region server told a subscriber only of
+steps that produced events. A body walks, and the light changes, between
+events, and a client that waited for an event would see Odo's kilometre-and-a-half
+walk as a few jumps and miss the dusk. So `Avwe.subscribe/2` takes `steps:
+true` (default `false`), and the session asks for it when it has scenes. Every
+other subscriber is woken exactly as before, and a test counts the wake-ups
+(only the scene session hears a quiet step).
+
+**Order and staleness.** A client's first scene is the one it asks for.
+Nothing is sent before that, because a scene already on its way could be
+older than the answer and overwrite it, and the quiet body that never changes
+again would stay wrong. After that the session sends a scene when it differs
+(`Scene.same_view?/2`, which ignores the time) from the last the client was
+given, pushed or asked for. A client that asks again while scenes wait in its
+mailbox keeps the one with the later `time`. The session never waits on its
+sink, so a client that falls behind draws only the newest scene it has.
+
+**The ground is built in the background.** The ground map is cached per
+terrain (`Avwe.GroundCache`) and takes about a second for the Ember Reach the
+first time. A session finds it cached or starts the build in a task and goes
+on: its scenes show what is in sight and no ground (`rows` is `nil`, as in a
+world with no terrain) until the map arrives, and the first scene with the
+ground follows at once. Connecting is never held up, and a larger map would not
+change that. (Warming the cache when a world starts, so that nobody sees the
+bare scene, is a one-line addition for the application's own worlds, left for
+the web layer.)
 
 **Budget.** With the ground map built, a scene costs under 1 ms warm; the
-perf test (`--include perf`) gains a bound for it. A web session adds one
-scene per step at most; a slow sink is never waited on.
+perf test (`--include perf`) bounds it. A web session adds one scene per step
+at most.
 
 ## 3. The web layer
 
