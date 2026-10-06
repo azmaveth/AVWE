@@ -19,7 +19,7 @@ tests; it must not implement Fire.
 
 **Slice B (fire and smoke):** `Avwe.Systems.Fire` (§6) including the verbs in
 `Avwe.Actions` and `Avwe.Intent`, `Avwe.Systems.Smoke` (§7), telnet commands
-(§6.4, in `Avwe.Telnet.Command` and `Connection`), `Worldgen.add_hearths` and
+(§6.4, in `Avwe.Command` (then `Avwe.Telnet.Command`) and `Connection`), `Worldgen.add_hearths` and
 standing miracles plus the `hearths:` config key and the Last Coal entry (§8),
 the fire/smoke tests (§13 items 17-23). Owns: fire.ex, smoke.ex, actions.ex,
 intent.ex, telnet/*, and their tests. Slice B must not implement Heat; it may
@@ -342,7 +342,7 @@ Linear consumption clamped at zero is exact at any dt: 12 kg at 5 kW goes out at
 - `:kindle`, `target` nil or a hearth id. Checks in order: target nil → nearest from `hearth_near`, none → `:no_hearth`; target given → exists with `:hearth` (`:no_such_hearth`), within 2 cells (`:too_far`); then `:already_burning`; then `fuel_kg > 0` or standing miracle (`:no_fuel`). Success: `burning: true, lit_at: tick.time, out_at: nil`; events `:fire_lit` (`entity: hearth, data: %{position, by: body}`) then the `:action_result` (with `target` filled in). Fire runs later in the same step, so the fire burns from `tick.time`.
 - `:douse`, same target resolution; then `:not_burning`; then `:unquenchable`. Success: `burning: false, out_at: tick.time`; events `:fire_out` (`reason: :doused, by: body`) then the result.
 
-Telnet (`Avwe.Telnet.Command`): `kindle`, `light`, `light [the] fire`, `light [the] hearth` → `:kindle`; `douse`, `put out [the] fire` → `:douse`; both with `target: nil`. `help` lists them. `Connection.run/2` maps `:kindle`/`:douse` to `Session.act/3`.
+Telnet (`Avwe.Command` (then `Avwe.Telnet.Command`)): `kindle`, `light`, `light [the] fire`, `light [the] hearth` → `:kindle`; `douse`, `put out [the] fire` → `:douse`; both with `target: nil`. `help` lists them. `Connection.run/2` maps `:kindle`/`:douse` to `Session.act/3`.
 
 ### 6.5 Felt warmth: `Fire.felt(view, position)`
 

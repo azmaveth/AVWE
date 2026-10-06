@@ -117,8 +117,7 @@ defmodule Avwe.Mind do
 
   use GenServer, restart: :temporary
 
-  alias Avwe.Session
-  alias Avwe.Telnet.Command
+  alias Avwe.{Command, Session}
 
   @controllers [:mcp, :arbor]
   @reserved_verbs [:control, :release]

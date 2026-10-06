@@ -42,6 +42,58 @@ defmodule AvweTest do
     assert view.time == sunrise
   end
 
+  test "a subscriber hears of a step with no events only if it asked to hear of every step" do
+    # Only the daylight runs here, so nothing happens between now and sunrise.
+    hushed = :hushed_reach
+
+    {:ok, _pid} =
+      Avwe.start_world(hushed,
+        quire: Fixtures.ember_reach(),
+        start: {813, day: 220, hour: 4},
+        systems: [Avwe.Systems.Daylight]
+      )
+
+    on_exit(fn -> Avwe.stop_world(hushed) end)
+
+    parent = self()
+    quiet = spawn_link(fn -> relay(parent, hushed, :quiet, false) end)
+    steady = spawn_link(fn -> relay(parent, hushed, :steady, true) end)
+    assert_receive {:subscribed, :quiet}
+    assert_receive {:subscribed, :steady}
+
+    Avwe.step(hushed, 1)
+    Avwe.step(hushed, 1)
+
+    assert_receive {:heard, :steady, [], %{step: 1}}
+    assert_receive {:heard, :steady, [], %{step: 2}}
+    refute_received {:heard, :quiet, _events, _view}
+
+    # A step with events is told to both.
+    Avwe.step(hushed, 120)
+    assert_receive {:heard, :quiet, [%Event{type: :sunrise}], _view}
+    assert_receive {:heard, :steady, [%Event{type: :sunrise}], _view}
+
+    for pid <- [quiet, steady], do: send(pid, :stop)
+  end
+
+  # A process that subscribes as asked and passes on what it hears, tagged.
+  defp relay(parent, world, tag, steps?) do
+    {:ok, _owner} = Avwe.subscribe(world, steps: steps?)
+    send(parent, {:subscribed, tag})
+    relay_loop(parent, world, tag)
+  end
+
+  defp relay_loop(parent, world, tag) do
+    receive do
+      {:avwe_events, ^world, events, view} ->
+        send(parent, {:heard, tag, events, view})
+        relay_loop(parent, world, tag)
+
+      :stop ->
+        :ok
+    end
+  end
+
   defp batches do
     receive do
       {:avwe_events, _world, _events, _view} = batch -> [batch | batches()]

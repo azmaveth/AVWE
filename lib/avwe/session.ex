@@ -57,12 +57,40 @@ defmodule Avwe.Session do
   body's holder stays written on it, and the world, when it starts again,
   releases every body that no live lease holds (`Avwe.RegionServer`).
 
+  ## Scenes
+
+  A session opened with `scenes: true` also tells its controller what its
+  body can see, as `Avwe.Scene`s, for a client that draws. `scene/1` returns
+  the current one, for the first draw, and from then on the session sends its
+  sink `{:avwe_scene, session, scene}` after a step that changed it (the body
+  moved, sight changed by half a cell or more, something in sight moved or
+  changed, a reach started or stopped running), and never when nothing did.
+  Whoever holds the body is part of a scene, so a hand-over changes it.
+
+  Each scene is whole, and replaces the one before. Nothing is sent before
+  the first `scene/1`, so a client's first scene is the one it asked for and
+  never an older one already on its way; after that a client that asks again
+  keeps whichever has the later `time`. A scene follows the percepts of its
+  step, so a client never draws a world ahead of the words about it. The
+  session never waits on its sink, so a client that falls behind should draw
+  only the newest scene it has.
+
+  Scenes draw the ground from a map that is built once for each terrain and
+  kept (`Avwe.GroundCache`). The session asks for it as it starts. The first
+  time anyone does, it takes about a second for the Ember Reach, and the
+  session does not wait: its scenes show what is in sight and no ground
+  (`rows` is `nil`) until the map is built, and the first with the ground
+  follows at once.
+
+  A session without `scenes: true`, and a spectator (whose scene is for
+  later), has none, and `scene/1` gives `nil`. They behave as they always have.
+
   Start sessions with `Avwe.connect/2`.
   """
 
   use GenServer, restart: :temporary
 
-  alias Avwe.{Event, Intent, Perception, RegionServer}
+  alias Avwe.{Event, GroundCache, Intent, Perception, RegionServer, Scene, Terrain}
 
   @region {0, 0}
   @idle_after 10 * 60 * 1_000
@@ -81,6 +109,16 @@ defmodule Avwe.Session do
   @doc "What the body senses right now and what it can do. See `Avwe.Perception.look/2`."
   @spec look(pid()) :: {:ok, map()} | {:error, term()}
   def look(session), do: GenServer.call(session, :look)
+
+  @doc """
+  What the body can see now, as an `Avwe.Scene`: the first draw of a session
+  opened with `scenes: true`, and a fresh one whenever a client wants it.
+  Later scenes are sent when they change (see "Scenes" above). `nil` for a
+  session without scenes, a spectator, and a body that is nowhere. Marks the
+  controller present, like `look/1`.
+  """
+  @spec scene(pid()) :: {:ok, Scene.t() | nil} | {:error, term()}
+  def scene(session), do: GenServer.call(session, :scene)
 
   @doc """
   Asks the body to do something. Returns the intent's ref; its result arrives
@@ -125,7 +163,8 @@ defmodule Avwe.Session do
       sink = Keyword.fetch!(opts, :sink)
       Process.monitor(sink)
       Process.monitor(world_pid)
-      {:ok, _owner} = Avwe.subscribe(world)
+      scenes = opts[:scenes] == true and body != nil
+      {:ok, _owner} = Avwe.subscribe(world, steps: scenes)
 
       state = %{
         world: world,
@@ -140,10 +179,13 @@ defmodule Avwe.Session do
         idle_tag: nil,
         yielded: false,
         lease_refs: %{},
-        away: body && Perception.away(view, body)
+        away: body && Perception.away(view, body),
+        scenes: scenes,
+        ground: nil,
+        last_scene: nil
       }
 
-      {:ok, state |> take_control(:take) |> arm_idle()}
+      {:ok, state |> load_ground() |> take_control(:take) |> arm_idle()}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -157,6 +199,20 @@ defmodule Avwe.Session do
       end
 
     {:reply, reply, arm_idle(%{state | away: nil})}
+  end
+
+  def handle_call(:scene, _from, %{scenes: false} = state),
+    do: {:reply, {:ok, nil}, arm_idle(state)}
+
+  def handle_call(:scene, _from, state) do
+    case snapshot(state.world) do
+      {:ok, view} ->
+        scene = build_scene(state, view)
+        {:reply, {:ok, scene}, arm_idle(%{state | last_scene: scene || state.last_scene})}
+
+      {:error, _gone} = error ->
+        {:reply, error, arm_idle(state)}
+    end
   end
 
   def handle_call(:touch, _from, state), do: {:reply, :ok, arm_idle(state)}
@@ -200,26 +256,24 @@ defmodule Avwe.Session do
 
   @impl GenServer
   def handle_info({:avwe_events, world, events, view}, %{world: world} = state) do
+    view = Map.put(view, :terrain, state.terrain)
     events = Enum.reject(events, &foreign_lease?(&1, state.lease_refs))
-    percepts = Perception.percepts(Map.put(view, :terrain, state.terrain), state.body, events)
+    percepts = Perception.percepts(view, state.body, events)
     {own, percepts} = Enum.split_with(percepts, &Map.has_key?(state.lease_refs, &1.intent))
     settled = Enum.map(own, &Map.fetch!(state.lease_refs, &1.intent))
     percepts = Enum.filter(percepts, &announced?(&1, settled))
     state = %{state | lease_refs: Map.drop(state.lease_refs, Enum.map(own, & &1.intent))}
 
-    case percepts do
-      [] ->
-        {:noreply, state}
+    {:noreply, state |> deliver(percepts) |> push_scene(view)}
+  end
 
-      percepts ->
-        numbered = Enum.with_index(percepts, state.next_percept)
+  # The ground map is built: the first scene with ground follows.
+  def handle_info({:ground, ground}, state) do
+    state = %{state | ground: ground}
 
-        send(
-          state.sink,
-          {:avwe_percepts, self(), Enum.map(numbered, fn {p, n} -> %{p | id: "p-#{n}"} end)}
-        )
-
-        {:noreply, %{state | next_percept: state.next_percept + length(percepts)}}
+    case snapshot(state.world) do
+      {:ok, view} -> {:noreply, push_scene(state, view)}
+      {:error, _gone} -> {:noreply, state}
     end
   end
 
@@ -251,6 +305,53 @@ defmodule Avwe.Session do
   # The first look tells what happened before the session took the body.
   defp arrival(look, nil), do: look
   defp arrival(look, away), do: %{look | away: away}
+
+  defp deliver(state, []), do: state
+
+  defp deliver(state, percepts) do
+    numbered = Enum.with_index(percepts, state.next_percept)
+
+    send(
+      state.sink,
+      {:avwe_percepts, self(), Enum.map(numbered, fn {p, n} -> %{p | id: "p-#{n}"} end)}
+    )
+
+    %{state | next_percept: state.next_percept + length(percepts)}
+  end
+
+  # Scenes
+
+  # The ground map, at once if it is built already, and otherwise in the
+  # background so that connecting never waits on the first build of a big map.
+  defp load_ground(%{scenes: true, terrain: %Terrain{} = terrain} = state) do
+    if GroundCache.cached?(terrain) do
+      %{state | ground: GroundCache.fetch(terrain)}
+    else
+      session = self()
+      Task.start(fn -> send(session, {:ground, GroundCache.fetch(terrain)}) end)
+      state
+    end
+  end
+
+  defp load_ground(state), do: state
+
+  defp build_scene(state, view),
+    do: view |> Map.put(:ground, state.ground) |> Scene.build(state.body)
+
+  # The controller is sent a scene only once it has been given one
+  # (`scene/1`), and only when this one differs from the last it was given.
+  defp push_scene(%{last_scene: nil} = state, _view), do: state
+
+  defp push_scene(state, view) do
+    scene = build_scene(state, view)
+
+    if scene != nil and not Scene.same_view?(scene, state.last_scene) do
+      send(state.sink, {:avwe_scene, self(), scene})
+      %{state | last_scene: scene}
+    else
+      state
+    end
+  end
 
   # Control
 

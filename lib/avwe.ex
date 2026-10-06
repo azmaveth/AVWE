@@ -142,9 +142,15 @@ defmodule Avwe do
   Subscribes the calling process to a world's events. They arrive as
   `{:avwe_events, world, [%Avwe.Event{}], view}`, where `view` is the region's
   state just after the events (`Avwe.Region.view/1`).
+
+  A step that produced no events sends nothing, unless the subscriber asked
+  for `steps: true`: then it hears of every step, with an empty list of events
+  when there were none. A client that draws what a body sees needs that, since
+  a body walks, and the light changes, between events.
   """
-  @spec subscribe(atom()) :: {:ok, pid()} | {:error, term()}
-  def subscribe(world), do: Registry.register(Avwe.PubSub, {:events, world}, nil)
+  @spec subscribe(atom(), keyword()) :: {:ok, pid()} | {:error, term()}
+  def subscribe(world, opts \\ []),
+    do: Registry.register(Avwe.PubSub, {:events, world}, Keyword.get(opts, :steps, false))
 
   @doc """
   Every running world as `{id, info}`: its `name` and `tagline`, and how
@@ -194,6 +200,10 @@ defmodule Avwe do
     * `:idle_after` - real milliseconds without a call on the session
       (`Avwe.Session.act/3` or `Avwe.Session.look/1`) after which it yields
       the body to autopilot until its next act. Default: ten minutes.
+    * `:scenes` - `true` for a client that draws what the body sees: it asks
+      for the first `Avwe.Scene` with `Avwe.Session.scene/1`, and is sent each
+      one that follows as `{:avwe_scene, session, scene}`. Default: `false`.
+      A spectator has no scenes.
 
   Fails with `:no_such_world`, `:no_such_body`, `:body_taken` or
   `:invalid_controller`.

@@ -44,12 +44,16 @@ defmodule Avwe.Worldgen do
       `carried_by: body`, `repr` and, for a notebook, `notebook: %{pages:
       []}` (`Avwe.Actions`, `:write` and `:read`). An id already in use, an
       unknown kind or a missing name raises `ArgumentError` here.
+      A body named here may also have its own `:glyph` (one printable
+      character) and `:color` (`#rrggbb`), how a scene draws it
+      (`Avwe.Repr`); either alone is enough, and a bad one raises
+      `ArgumentError` here too.
 
   Finally each system prepares the region for its starting time
   (`Avwe.Region.prepare/1`).
   """
 
-  alias Avwe.{Autopilot, Calendar, Quire, Region, Space, Terrain}
+  alias Avwe.{Autopilot, Calendar, Quire, Region, Repr, Space, Terrain}
   alias Avwe.Systems.{Fire, River}
   alias Avwe.Terrain.Generator
 
@@ -95,8 +99,22 @@ defmodule Avwe.Worldgen do
       acc
       |> put_unless_nil(id, :routine, spec[:routine] && routine!(id, spec[:routine]))
       |> put_unless_nil(id, :norms, spec[:norms] && norms!(id, spec[:norms]))
+      |> add_glyph(id, spec)
       |> add_items(id, spec[:carries] || [])
     end)
+  end
+
+  # A body's own glyph is part of its `repr`; without one a scene draws it
+  # from `Avwe.Repr.body_glyph/2`.
+  defp add_glyph(region, id, spec) do
+    case Repr.override!(spec, Repr.glyph(:body), "character #{inspect(id)}") do
+      nil ->
+        region
+
+      glyph ->
+        repr = Region.get(region, id, :repr) || %{}
+        Region.put_component(region, id, :repr, Map.put(repr, :glyph, glyph))
+    end
   end
 
   @item_kinds [:notebook]

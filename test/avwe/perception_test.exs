@@ -60,6 +60,20 @@ defmodule Avwe.PerceptionTest do
       refute Enum.any?(look.affordances, &(&1.verb == :stop))
     end
 
+    test "says where everything it names is, for a client that draws", %{world: world} do
+      view = view(world, 12)
+      position = fn id -> view.components.position[id] end
+      look = Perception.look(view, "wren")
+
+      assert look.cell == position.("wren")
+      assert look.here.cell == position.(look.here.id)
+
+      for body <- look.bodies, do: assert(body.cell == position.(body.id))
+      for place <- look.places, do: assert(place.cell == position.(place.id))
+      assert [_pell, _tamsin] = look.bodies
+      assert [_tower, _pond] = look.places
+    end
+
     test "at night, sight shrinks to 50 m", %{world: world} do
       look = Perception.look(view(world, 2), "wren")
       assert Enum.map(look.bodies, & &1.name) == ["Tamsin"]
@@ -418,6 +432,28 @@ defmodule Avwe.PerceptionTest do
 
       assert [%{ref: @lodge, sign: :smoke, distance_m: 150}] = look.fires
       assert Prose.look(look) =~ "Smoke rises from the lodge hearth, 150 m to the south."
+    end
+
+    test "says where its hearths and the fires it sees from afar are" do
+      {x, y} = lodge = Ember.places().lodge
+
+      by_day =
+        {813, day: 220, hour: 12}
+        |> ember_snapshot()
+        |> lit(@lodge)
+        |> at(@mira, {x, y - 15})
+        |> Perception.look(@mira)
+
+      assert [%{ref: @lodge, cell: ^lodge}] = by_day.fires
+      assert by_day.hearths == []
+
+      at_the_lodge =
+        {813, day: 220, hour: 12}
+        |> ember_snapshot()
+        |> at(@mira, {x, y + 1})
+        |> Perception.look(@mira)
+
+      assert [%{id: @lodge, cell: ^lodge} | _coal] = at_the_lodge.hearths
     end
 
     test "a burning hearth within 20 m is what is here, not a fire in sight" do

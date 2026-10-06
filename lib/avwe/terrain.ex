@@ -27,7 +27,7 @@ defmodule Avwe.Terrain do
   system simulates.
   """
 
-  alias Avwe.Space
+  alias Avwe.{GroundMap, Space}
 
   @bucket 8
   @bed_half_width 1.0
@@ -164,6 +164,23 @@ defmodule Avwe.Terrain do
       elevation(terrain, cell) >= @stone_elevation_m -> :stone
       true -> :grass
     end
+  end
+
+  @doc """
+  The ground of every cell of the map, as an `Avwe.GroundMap`: what a client
+  that draws reads from, since `ground/2` for a whole window every step is far
+  too slow (about 16 microseconds a cell, so about a second for the whole
+  256 by 256 map, which is why it is built once). The same terrain always gives
+  the same map.
+  """
+  @spec ground_map(t()) :: GroundMap.t()
+  def ground_map(%__MODULE__{width: width, height: height} = terrain) do
+    cells =
+      for y <- 0..(height - 1), x <- 0..(width - 1), into: <<>> do
+        <<GroundMap.code(ground(terrain, {x, y}))>>
+      end
+
+    GroundMap.new(width, height, cells)
   end
 
   @doc "The reach a channel cell belongs to."

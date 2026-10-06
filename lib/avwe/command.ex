@@ -1,7 +1,13 @@
-defmodule Avwe.Telnet.Command do
+defmodule Avwe.Command do
   @moduledoc """
-  Parses what a telnet player types, and matches names they type against
-  places, bodies and worlds. Pure.
+  What a player types, and what it means. Pure, and no client's own: telnet
+  uses it, and so will the web page.
+
+    * `parse/1` reads one line of input.
+    * `resolve/2` matches a name typed against places, bodies, hearths and
+      worlds.
+    * `interpret/2` says what a parsed command asks for, given the player's
+      look: an act with its names resolved, or a refusal in words.
   """
 
   @default_wait_minutes 10
@@ -51,13 +57,27 @@ defmodule Avwe.Telnet.Command do
           | {:invalid, String.t()}
           | {:unknown, String.t()}
 
+  @typedoc """
+  What `interpret/2` says to do: an act for `Avwe.Session.act/3`; one of the
+  answers a client gives in its own way (`:look`, `:time`, `:help`, `:quit`);
+  nothing at all (`:noop`); or a refusal, in the words a player is shown.
+  """
+  @type outcome ::
+          {:act, atom(), keyword()}
+          | :look
+          | :time
+          | :help
+          | :quit
+          | :noop
+          | {:error, String.t()}
+
   @doc """
   Parses one line of input.
 
-      iex> Avwe.Telnet.Command.parse("go to the dry bend")
+      iex> Avwe.Command.parse("go to the dry bend")
       {:go, "the dry bend"}
 
-      iex> Avwe.Telnet.Command.parse("wait until dawn")
+      iex> Avwe.Command.parse("wait until dawn")
       {:wait, %{until: :dawn}}
 
   Kindling and dousing take an optional hearth name: `kindle`, `light the
@@ -65,19 +85,19 @@ defmodule Avwe.Telnet.Command do
   coal`, `light the lodge hearth` and `put out the fire in the kiln-house
   hearth` name one.
 
-      iex> Avwe.Telnet.Command.parse("light the fire")
+      iex> Avwe.Command.parse("light the fire")
       {:kindle, nil}
 
-      iex> Avwe.Telnet.Command.parse("put out the fire in the kiln-house hearth")
+      iex> Avwe.Command.parse("put out the fire in the kiln-house hearth")
       {:douse, "kiln-house hearth"}
 
   Writing keeps the text as typed; reading takes an optional number of
   pages (`nil` for the world's default), and `notes` is reading.
 
-      iex> Avwe.Telnet.Command.parse("write The reeds lean North.")
+      iex> Avwe.Command.parse("write The reeds lean North.")
       {:write, "The reeds lean North."}
 
-      iex> Avwe.Telnet.Command.parse("read 3")
+      iex> Avwe.Command.parse("read 3")
       {:read, 3}
   """
   @spec parse(String.t()) :: t()
@@ -223,10 +243,97 @@ defmodule Avwe.Telnet.Command do
   end
 
   @doc """
+  Whether `interpret/2` reads the player's look for this command: `go`, whose
+  places are the ones the body knows, and `kindle` or `douse` with a hearth
+  named, whose hearths are the ones within reach. For any other command the
+  look may be `nil`.
+  """
+  @spec needs_look?(t()) :: boolean()
+  def needs_look?({:go, _query}), do: true
+  def needs_look?({verb, query}) when verb in [:kindle, :douse] and is_binary(query), do: true
+  def needs_look?(_command), do: false
+
+  @doc """
+  What a parsed command asks for, given the player's `look` (`Avwe.Session.look/1`).
+
+    * `{:act, verb, opts}` is for `Avwe.Session.act/3`, with a place or hearth
+      already resolved to its id.
+    * `:look`, `:time`, `:help` and `:quit` are answered by the client in its
+      own way. `:time` and `:help` are the player's presence rather than an
+      act: the client touches the session (`Avwe.Session.touch/1`) for them.
+    * `:noop` is an empty line.
+    * `{:error, message}` is a refusal in the words to show: a name that
+      matches nothing or several things, a command that was not understood, a
+      spectator who tried to light a fire. A spectator's other acts are
+      refused by the session itself (`{:error, :spectator}`).
+
+      iex> look = %{places: [%{id: "the-dry-bend", name: "The Dry Bend"}]}
+      iex> Avwe.Command.interpret({:go, "dry bend"}, look)
+      {:act, :go, [target: "the-dry-bend"]}
+      iex> Avwe.Command.interpret({:go, "atlantis"}, look)
+      {:error, ~s(You don't know a place called "atlantis".)}
+  """
+  @spec interpret(t(), map() | nil) :: outcome()
+  def interpret(:look, _look), do: :look
+  def interpret(:time, _look), do: :time
+  def interpret(:help, _look), do: :help
+  def interpret(:quit, _look), do: :quit
+  def interpret(:empty, _look), do: :noop
+  def interpret(:stop, _look), do: {:act, :stop, []}
+  def interpret({:invalid, message}, _look), do: {:error, message}
+
+  def interpret({:unknown, line}, _look),
+    do: {:error, "I don't understand \"#{line}\". Type help for a list of commands."}
+
+  def interpret({:follow, direction}, _look), do: {:act, :follow, params: %{direction: direction}}
+
+  def interpret({:walk, direction, meters}, _look),
+    do: {:act, :walk, params: %{direction: direction, distance_m: meters}}
+
+  def interpret({:say, volume, text}, _look),
+    do: {:act, :say, params: %{text: text, volume: volume}}
+
+  def interpret({:wait, params}, _look), do: {:act, :wait, params: params}
+  def interpret({:write, text}, _look), do: {:act, :write, params: %{text: text}}
+  def interpret({:read, nil}, _look), do: {:act, :read, params: %{}}
+  def interpret({:read, pages}, _look), do: {:act, :read, params: %{last: pages}}
+
+  def interpret({:go, query}, look) do
+    places = Enum.map(look[:places] || [], &{&1.id, &1.name}) ++ here(look)
+
+    case resolve(query, places) do
+      {:ok, place} -> {:act, :go, target: place}
+      {:ambiguous, names} -> {:error, which(names)}
+      :none -> {:error, ~s(You don't know a place called "#{query}".)}
+    end
+  end
+
+  def interpret({verb, nil}, _look) when verb in [:kindle, :douse], do: {:act, verb, []}
+
+  # A named hearth is one of those within reach: the world answers for the
+  # nearest when none is named, never when a name matches nothing.
+  def interpret({verb, query}, look) when verb in [:kindle, :douse] do
+    hearths = Enum.map(look[:hearths] || [], &{&1.id, &1.name})
+
+    if look[:spectator],
+      do: {:error, "You're only watching."},
+      else: hearth(resolve(query, hearths), verb, query)
+  end
+
+  defp hearth({:ok, id}, verb, _query), do: {:act, verb, target: id}
+  defp hearth({:ambiguous, names}, _verb, _query), do: {:error, which(names)}
+  defp hearth(:none, _verb, query), do: {:error, ~s(There is no hearth called "#{query}" here.)}
+
+  defp which(names), do: "Which do you mean: #{Enum.join(names, ", ")}?"
+
+  defp here(%{here: %{id: id, name: name}}), do: [{id, name}]
+  defp here(_look), do: []
+
+  @doc """
   Matches a name someone typed against `{id, name}` candidates. Case, spacing
   and a leading "the" don't matter, and any part of a name will do.
 
-      iex> Avwe.Telnet.Command.resolve("dry bend", [{"the-dry-bend", "The Dry Bend"}, {"willow-docks", "Willow Docks"}])
+      iex> Avwe.Command.resolve("dry bend", [{"the-dry-bend", "The Dry Bend"}, {"willow-docks", "Willow Docks"}])
       {:ok, "the-dry-bend"}
   """
   @spec resolve(String.t(), [{String.t(), String.t()}]) ::

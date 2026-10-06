@@ -59,6 +59,10 @@ defmodule Avwe.Perception do
   (`:control_released`, `:control_taken`) is a percept of the body's own
   and nobody else's; `:decided` stays the game master's.
 
+  Where each thing the look names is, as a `cell`, is there for a client that
+  draws (`Avwe.Scene`): the body's own, and those of the bodies, hearths, fires
+  and places it lists. Prose never reads them.
+
   A body's look also lists what it `carried` (a notebook with its page
   count, and the `write` and `read` affordances that go with it) and,
   under `away`, what it remembers of the time nobody held it (`away/2`).
@@ -126,6 +130,7 @@ defmodule Avwe.Perception do
       time: view.time,
       light: light(view),
       body: %{id: body, name: name(view, body)},
+      cell: position,
       holder: holder(view, body),
       here: here,
       nearest: if(here, do: nil, else: nearest_place(view, body, position)),
@@ -642,6 +647,7 @@ defmodule Avwe.Perception do
       %{
         id: id,
         name: name(view, id),
+        cell: position(view, id),
         burning: hearth.burning,
         fuel_kg: hearth.fuel_kg,
         distance_m: Space.meters(distance)
@@ -666,6 +672,7 @@ defmodule Avwe.Perception do
       %{
         ref: source.id,
         name: source.name,
+        cell: source.position,
         distance_m: Space.meters(distance),
         direction: Space.direction(position, source.position),
         sign: sign
@@ -734,6 +741,7 @@ defmodule Avwe.Perception do
       %{
         id: other,
         name: name(view, other),
+        cell: other_position,
         here: distance <= @at_place_cells,
         distance_m: Space.meters(distance),
         direction: Space.direction(position, other_position)
@@ -752,6 +760,7 @@ defmodule Avwe.Perception do
       %{
         id: place,
         name: name(view, place),
+        cell: place_position,
         distance_m: Space.meters(Space.distance(position, place_position)),
         direction: Space.direction(position, place_position)
       }
@@ -839,7 +848,12 @@ defmodule Avwe.Perception do
         nil
 
       {place, _distance} ->
-        %{id: place, name: name(view, place), description: description(view, place)}
+        %{
+          id: place,
+          name: name(view, place),
+          cell: position(view, place),
+          description: description(view, place)
+        }
     end
   end
 
