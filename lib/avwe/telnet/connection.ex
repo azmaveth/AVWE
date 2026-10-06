@@ -39,7 +39,7 @@ defmodule Avwe.Telnet.Connection do
     stop              stop what you're doing
     time              the time in the world
     quit              leave
-  Lines starting with "- " are what your routine does with you while you stop acting; any command keeps you in hand for ten more minutes, and any command that acts (go, say, wait, light...) takes you back if the routine had you.\
+  Lines starting with "- " are what your routine does with you while you stop acting; any command you type keeps you in hand a while longer, and any command that acts (go, say, wait, light...) takes you back if the routine had you.\
   """
 
   def start_link({socket, opts}), do: GenServer.start_link(__MODULE__, {socket, opts})

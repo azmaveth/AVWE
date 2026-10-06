@@ -435,22 +435,26 @@ defmodule Avwe.Autopilot do
   # controller left it on) to anything better and to a routine entry;
   # anything else only to something urgent.
   defp interrupt(best, record, action, plan) do
+    record = weighed_against(record, action)
+
     cond do
-      best.why == :routine and same_intent?(best.intent, action) ->
-        {:adopt, best}
-
-      plan != nil ->
-        on_plan(best, record, action)
-
-      wait?(action) and (best.why == :routine or better?(best, record)) ->
-        {:act, best}
-
-      urgent?(best, record) ->
-        {:act, best}
-
-      true ->
-        :stay
+      best.why == :routine and same_intent?(best.intent, action) -> {:adopt, best}
+      plan != nil -> on_plan(best, record, action)
+      cuts_wait?(best, record, action) -> {:act, best}
+      urgent?(best, record) -> {:act, best}
+      true -> :stay
     end
+  end
+
+  # Autopilot's last choice only counts against an action of its own: a
+  # controller's leftover action is weighed as if from nothing.
+  defp weighed_against(record, action),
+    do: if(own_action?(action), do: record, else: %{record | current: nil})
+
+  # A wait that is not a plan's yields to a routine entry come due and to
+  # anything better; idling is never worth cutting a wait for.
+  defp cuts_wait?(best, record, action) do
+    wait?(action) and (best.why == :routine or (best.why != :idle and better?(best, record)))
   end
 
   # A plan's step yields to something urgent, which leaves the plan under
@@ -481,6 +485,12 @@ defmodule Avwe.Autopilot do
 
       {%{outcome: :success}, []} ->
         {:plan_done, after_plan(region, tick, body, record, action)}
+
+      # Replaced by a controller that has already let go (take, act and
+      # release in one step): a takeover, not a failure, so the plan is
+      # taken up again like one interrupted across steps.
+      {%{outcome: :interrupted, reason: :replaced}, _steps} ->
+        resume(region, tick, body, record, action)
 
       {%{outcome: outcome, reason: reason}, _steps} ->
         {:plan_abandoned, {outcome, reason}, after_plan(region, tick, body, record, action)}
@@ -595,6 +605,9 @@ defmodule Avwe.Autopilot do
 
   defp under_way?(%{ref: ref}, %{ref: ref}), do: true
   defp under_way?(_action, _plan), do: false
+
+  defp own_action?(%{ref: "auto-" <> _rest}), do: true
+  defp own_action?(_action), do: false
 
   defp urgent?(candidate, record), do: candidate.utility >= @urgent and better?(candidate, record)
 

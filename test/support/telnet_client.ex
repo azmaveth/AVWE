@@ -37,7 +37,9 @@ defmodule Avwe.Test.TelnetClient do
   Waits until the server has handled every line sent so far, by asking the
   time and reading up to the answer. Lines are handled in order, so after this
   an earlier command's intent is in the world. Call it straight after
-  commands, before stepping the world, so no percepts are skipped.
+  commands, before stepping the world, so no percepts are skipped. Asking
+  the time counts as presence, so a sync also re-arms the session's idle
+  timer; do not sync between a command and a yield you expect.
   """
   def sync(socket) do
     send_line(socket, "time")

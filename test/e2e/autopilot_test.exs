@@ -226,7 +226,7 @@ defmodule Avwe.E2E.AutopilotTest do
 
     expect(
       mira,
-      ~s(Lines starting with "- " are what your routine does with you while you stop acting; any command keeps you in hand for ten more minutes, and any command that acts \(go, say, wait, light...\) takes you back if the routine had you.)
+      ~s(Lines starting with "- " are what your routine does with you while you stop acting; any command you type keeps you in hand a while longer, and any command that acts \(go, say, wait, light...\) takes you back if the routine had you.)
     )
 
     assert %{controller: :autopilot} = mira()
@@ -308,6 +308,21 @@ defmodule Avwe.E2E.AutopilotTest do
     Avwe.step(@world, 1)
     assert %{controller: :autopilot, taken: true} = mira()
     assert [%Percept{type: :control_released}] = percepts(session)
+  end
+
+  test "a telnet player who keeps reading help is not yielded either" do
+    port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0, idle_after: 300}))
+    mira = join(port, "mira")
+
+    for _n <- 1..5 do
+      Process.sleep(100)
+      send_line(mira, "help")
+      expect(mira, "takes you back if the routine had you.")
+    end
+
+    Avwe.step(@world, 1)
+    assert %{controller: :human} = mira()
+    refute_line(mira, "You let your routine carry you.")
   end
 
   test "a telnet player who keeps asking the time is not yielded" do
