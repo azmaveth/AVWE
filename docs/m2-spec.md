@@ -132,39 +132,67 @@ hundreds of worlds), only when a session first asks for a scene (2.5), which
 adds the map to the view it works on, as it already adds `:terrain`. A world
 with no terrain has none, and its scenes have no ground.
 
-### 2.4 The scene
+### 2.4 The scene (built)
 
-`Avwe.Scene.build(view, body)` (pure) is what the body can see now:
+`Avwe.Scene.build(view, body)` (pure) is what the body can see now, built from
+the view a session works on (the region's view, its `:terrain`, and the
+`:ground` map):
 
 | Field | Meaning |
 |---|---|
-| `time`, `light` | the world's time, and light from 0.0 to 1.0 |
-| `center` | the body's cell |
-| `radius` | sight in cells, `Perception.sight_cells/1`: 5 at night, 50 at noon |
-| `window` | the square of cells around `center` that holds the circle, as run-length-coded rows of ground kinds; cells outside the circle are blank, because the server sends what is seen and nothing more |
-| `water` | the channel cells whose reach is running (not silent), from the river state: the same channel is a dry bed in 813 and water in 812 |
-| `things` | what is in sight, each with `id`, `kind`, `cell`, `name` and its glyph layer: bodies, burning and cold hearths, places the body knows, and the fires that show by smoke or glow (`sign`) |
-| `legend` | the representation layers (2.2) of the kinds that appear, and only those |
-| `body`, `holder` | whose scene it is, and whether a controller or the routine holds it |
+| `you`, `holder` | the viewer (`id`, `name`, `glyph`), and who holds its body: a controller, or `nil` for its routine |
+| `center` | the viewer's cell |
+| `radius` | sight in cells, `Perception.sight_cells/1`: 5 at night, 50 at noon, taken up to the next half cell so it does not change every minute at dusk; `light` is to the nearest tenth, for the same reason |
+| `origin`, `size` | the square window of cells that holds the circle of sight and everything shown |
+| `rows` | the ground of each cell of the window, as run-length-coded rows (below), or `nil` in a world with no terrain; cells outside the circle are blank, because the server sends what is seen and nothing more |
+| `things` | what is in sight, each `%{id, kind, cell, name, glyph}`: bodies, hearths (cold or burning), the places the viewer knows, and fires seen from afar (`:smoke` by day, `:glow` by night) |
+| `legend` | the layers (2.2) of the kinds used, and only those |
+| `time` | the world's time; the one field that is not part of what makes a scene differ (`same_view?/2`) |
 
-**One rule of sight.** `things` is built from the look's own lists
-(`bodies`, `hearths`, `fires`, `places`), which gain a `cell` each; the
-circle is the look's sight radius. The scene never recomputes visibility, so
-the page and the prose cannot disagree (a property test holds it: the
-bodies in the look and the bodies in the scene are the same set). A known
-place beyond sight is not drawn on the map; it stays in the HUD list as a
-button, as telnet lists it.
+Where the river runs is in the rows, not a separate list: a bed cell whose
+reach is running is `water` and otherwise `channel_bed`, so the same channel is
+water in 812 and a dry bed in 813, and goes dry again, reach by reach
+downstream, after the source fails.
 
-Run-length coding keeps a typical window (mostly grass) in a few hundred
-bytes. The scene is a plain map of strings, numbers and lists, so a client
-in any language can read it. An example, at night at the town:
+**One rule of sight.** `things` is built from the look's own lists (`bodies`,
+`hearths`, `fires`, `places`), each of which gained a `cell`, as did the
+look's own (`look.cell`); the circle is the look's sight. The scene never
+recomputes visibility, so the page and the prose cannot disagree, and a
+property test holds it: bodies, hearths, fires and in-sight places are the same
+in both. A known place beyond sight is not drawn on the map; it stays in the
+HUD list as a button, as telnet lists it.
 
-    {"center": [121, 138], "radius": 5.0, "origin": [116, 133], "size": 11,
-     "rows": ["g11", "g3s5g3", ...],
-     "water": [], "light": 0.0,
-     "things": [{"id": "mira-vale", "kind": "body", "cell": [121, 138],
-                 "name": "Mira Vale", "glyph": {"char": "@", "color": "#e8d9a0"}}],
-     "legend": {"g": {"name": "grass", "glyph": {"char": "\"", "color": "#4c7a3a"}}}}
+**The window grows for fires.** The look shows a fire by its smoke or glow from
+at least 200 m, farther than a body sees at night (50 m), so the window is
+sized to hold every thing as well as the circle, and the ground in the extra
+space is blank. (The draft of this spec missed that; a test found the rows
+beyond the circle being drawn once the window grew.)
+
+**Rows.** Each row is `size` cells, west to east, as runs of one letter and a
+count: `"g3s2.4"` is three grass, two silt and four cells not seen. The letters
+are `g` grass, `s` silt, `c` clay, `t` stone, `r` reeds, `b` bed, `w` water and
+`.` for blank (`Scene.kind_at/2` decodes one). A noon window of 101 by 101 is
+under four kilobytes this way. The scene is plain strings, numbers and lists,
+so a client in any language can read it. This is Mira at night in the town
+(813, 22:00), as the code builds it (the legend is the two kinds below and the
+ground kinds in the rows):
+
+    center: {121, 138}   radius: 5.0   light: 0.0   holder: :human
+    origin: {116, 133}   size: 11
+    rows:   [".5s1.5", ".2g3c1s3.2", ".1g2c5s1r1.1", ".1g1c7r1.1", ".1g1c7r1.1",
+             "g1c8r1b1", ".1g1c7r1.1", ".1g1c7r1.1", ".1g2c5s1r1.1", ".2g3c1s3.2", ".5g1.5"]
+    you:    %{id: "mira-vale", name: "Mira Vale", glyph: %{char: "@", color: "#e8a07a"}}
+    things: [%{id: "town-hearth", kind: :hearth, cell: {121, 138}, name: "the kiln-house hearth",
+               glyph: %{char: "o", color: "#8a8078"}},
+             %{id: "ember-reach", kind: :place, cell: {121, 138}, name: "Ember Reach",
+               glyph: %{char: "#", color: "#d8c8a8"}}]
+
+(The eleven rows are the town's clay streets around her, and the dry bed's
+reeds and silt at the east edge, as the circle of five cells clips them.)
+
+A spectator has no scene (that is M2b), and neither has a body that is nowhere.
+A world with no terrain has things and no rows. Cost: about 1 ms at noon and
+0.1 ms at night, with the ground map built (the perf test bounds it at 10 ms).
 
 ### 2.5 Sessions produce scenes
 
