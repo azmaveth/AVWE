@@ -174,7 +174,7 @@ defmodule AvweWeb.PlayLive do
           autocomplete="off"
           autocapitalize="none"
           spellcheck="false"
-          placeholder="look, go to the dry bend, say hello, help"
+          placeholder="look, say hello, help"
         />
         <button type="submit">Do</button>
       </form>
@@ -410,11 +410,8 @@ defmodule AvweWeb.PlayLive do
   defp thing_at(scene, cell, kind),
     do: Enum.find(scene.things, &(&1.cell == cell and &1.kind == kind))
 
-  defp named(nil, thing), do: String.capitalize(to_string(thing.kind))
-
-  defp named(name, _thing),
-    do:
-      name
-      |> String.graphemes()
-      |> then(fn [first | rest] -> String.upcase(first) <> Enum.join(rest) end)
+  # What a thing is called, to start a sentence: its name, with its first
+  # letter a capital and the rest as it is (a place keeps its own capitals).
+  defp named(name, thing) when name in [nil, ""], do: String.capitalize(to_string(thing.kind))
+  defp named(<<first::utf8, rest::binary>>, _thing), do: String.upcase(<<first::utf8>>) <> rest
 end
