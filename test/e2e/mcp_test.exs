@@ -317,6 +317,17 @@ defmodule Avwe.E2E.MCPTest do
     refute call(forger, "leave", %{"player" => token}).error?
   end
 
+  test "a join while the world is stopped says so, and leaves no player behind", %{
+    client: client
+  } do
+    :ok = Avwe.stop_world(@world)
+
+    stopped = call(client, "join", %{"body" => "wren"})
+    assert stopped.error?
+    assert stopped.text == "The world is not running right now."
+    assert Players.playing(@world) == %{}
+  end
+
   test "a client that names its session in the legacy X-Session-Id header is that session's player",
        %{port: port} do
     session = legacy_initialize(port)

@@ -334,47 +334,50 @@ defmodule Avwe.MCP do
          {:ok, id} <- resolve_body(query, bodies),
          {:ok, mind} <- Players.join(key, state.world, id, mind_opts(state)),
          {:ok, look} <- first_look(key, mind) do
-      token = token(key)
-
-      # The look was taken as the body was being taken: the player has it
-      # now, whatever the snapshot it was read from says, but "While you
-      # were away" is that snapshot's.
-      look = %{look | holder: :mcp}
-      text = Enum.join(Enum.reject([token_line(token), Prose.look(look)], &is_nil/1), "\n")
-      away = Enum.map(look.away, &%{&1 | time: Prose.stamp(&1.time, look.time)})
-      data = %{body: id, player: token, look: Report.look(look), away: Report.jsonable(away)}
-      result(text, data)
+      joined(key, id, look)
     else
-      {:error, :not_found} ->
-        error("The world is not running right now.")
-
-      {:error, :no_such_world} ->
-        error("The world is not running right now.")
-
-      {:error, :already_joined} ->
-        already_joined(state)
-
-      {:error, :unknown_token} ->
-        error(
-          "That player token plays no body now: it ended when you left, or after a long " <>
-            "silence. Call join without player to be given a new token."
-        )
-
-      {:error, :body_taken} ->
-        error(
-          "#{query} is being played by someone else right now. Choose another body (see bodies)."
-        )
-
-      {:error, :no_such_body} ->
-        error("There is no body called \"#{query}\". See bodies.")
-
-      {:error, :no_look} ->
-        error("The world did not answer in time, so you were not joined. Try again.")
-
-      {:error, message} when is_binary(message) ->
-        error(message)
+      {:error, reason} -> join_error(reason, query, state)
     end
   end
+
+  # What a join tells the player: the first look, and the token if they need one.
+  defp joined(key, id, look) do
+    token = token(key)
+
+    # The look was taken as the body was being taken: the player has it
+    # now, whatever the snapshot it was read from says, but "While you
+    # were away" is that snapshot's.
+    look = %{look | holder: :mcp}
+    text = Enum.join(Enum.reject([token_line(token), Prose.look(look)], &is_nil/1), "\n")
+    away = Enum.map(look.away, &%{&1 | time: Prose.stamp(&1.time, look.time)})
+    data = %{body: id, player: token, look: Report.look(look), away: Report.jsonable(away)}
+    result(text, data)
+  end
+
+  # A join that did not happen, in plain words.
+  defp join_error(reason, _query, _state) when reason in [:not_found, :no_such_world],
+    do: error("The world is not running right now.")
+
+  defp join_error(:already_joined, _query, state), do: already_joined(state)
+
+  defp join_error(:unknown_token, _query, _state) do
+    error(
+      "That player token plays no body now: it ended when you left, or after a long " <>
+        "silence. Call join without player to be given a new token."
+    )
+  end
+
+  defp join_error(:body_taken, query, _state) do
+    error("#{query} is being played by someone else right now. Choose another body (see bodies).")
+  end
+
+  defp join_error(:no_such_body, query, _state),
+    do: error("There is no body called \"#{query}\". See bodies.")
+
+  defp join_error(:no_look, _query, _state),
+    do: error("The world did not answer in time, so you were not joined. Try again.")
+
+  defp join_error(message, _query, _state) when is_binary(message), do: error(message)
 
   defp mind_opts(%{idle_after: idle_after}) when is_integer(idle_after),
     do: [idle_after: idle_after]
