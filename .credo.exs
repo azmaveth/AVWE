@@ -1,6 +1,6 @@
-# Credo's default checks, plus the opt-in ones below. Each is enabled because
-# it finds nothing in the code today, so a finding from now on is something
-# new. Turning a check off needs the reason beside it.
+# Credo's default checks, plus the opt-in ones below. Each was enabled once the
+# code had no findings for it, so a finding from now on is something new.
+# Turning a check off needs the reason beside it.
 %{
   configs: [
     %{
@@ -39,7 +39,22 @@
           # Tests: a skipped one says why on the line before it, and each test
           # module says whether it runs async instead of defaulting to false.
           {Credo.Check.Design.SkipTestWithoutComment, []},
-          {Credo.Check.Refactor.PassAsyncInTestCases, []}
+          {Credo.Check.Refactor.PassAsyncInTestCases, []},
+
+          # House style: `alias` before `require`, and `@impl GenServer` rather
+          # than `@impl true`, so a callback names the contract it belongs to.
+          {Credo.Check.Readability.StrictModuleLayout, []},
+          {Credo.Check.Readability.ImplTrue, []},
+
+          # lib/ only. Public functions carry a @spec, which Dialyzer then
+          # checks; no block of code is copied; nothing prints with IO.puts
+          # (tests do, for timings); and no function goes past an ABC size of
+          # 60, so one that grows that far is split. Tests are left out because
+          # their helpers and long scenarios are not the code to hold to these.
+          {Credo.Check.Readability.Specs, files: %{excluded: ["test/"]}},
+          {Credo.Check.Design.DuplicatedCode, files: %{excluded: ["test/"]}},
+          {Credo.Check.Refactor.IoPuts, files: %{excluded: ["test/"]}},
+          {Credo.Check.Refactor.ABCSize, max_size: 60, files: %{excluded: ["test/"]}}
         ]
       }
     }
