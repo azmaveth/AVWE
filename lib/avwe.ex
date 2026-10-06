@@ -15,6 +15,13 @@ defmodule Avwe do
       Avwe.Session.act(mira, :go, target: "the-dry-bend")
       Avwe.step(:ember_reach, 10)     # ten world minutes
       flush()                         # {:avwe_percepts, _, [%Avwe.Percept{summary: "You arrive at The Dry Bend."}]}
+
+  A program that plays a body (the MCP adapter, Arbor) uses `Avwe.Mind`,
+  which holds the session, runs plans and waits on world time:
+
+      {:ok, mind} = Avwe.Mind.start(:ember_reach, "mira-vale", controller: :mcp)
+      {:ok, look} = Avwe.Mind.look(mind)        # look.away: "While you were away"
+      {:ok, %{status: :done}} = Avwe.Mind.act(mind, [{:go, target: "the-dry-bend"}, {:write, params: %{text: "Dry."}}])
   """
 
   alias Avwe.{Calendar, Clock, Quire, RegionServer}
@@ -31,7 +38,8 @@ defmodule Avwe do
     Avwe.Systems.Waiting,
     Avwe.Systems.Discovery,
     Avwe.Systems.Autopilot,
-    Avwe.Systems.Smoke
+    Avwe.Systems.Smoke,
+    Avwe.Systems.Memory
   ]
 
   @doc """

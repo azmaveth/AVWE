@@ -15,7 +15,8 @@ defmodule Avwe.Test.Ember do
     Avwe.Systems.Waiting,
     Avwe.Systems.Discovery,
     Avwe.Systems.Autopilot,
-    Avwe.Systems.Smoke
+    Avwe.Systems.Smoke,
+    Avwe.Systems.Memory
   ]
 
   @doc "The Ember Reach's region at a time given as `{year, opts}`."

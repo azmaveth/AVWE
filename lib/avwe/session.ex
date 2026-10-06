@@ -40,6 +40,15 @@ defmodule Avwe.Session do
   `:autopilot`, except its waits, which `Avwe.Perception` keeps quiet
   unless the controller stops one.
 
+  **While you were away.** A body's look carries `away`, what it perceived
+  while nobody held it (`Avwe.Perception.away/2`), which is empty once a
+  controller holds it. The session takes the body only at the next step,
+  and a live clock may step before the controller's first look, so the
+  session reads `away` from the world as it found it on connecting, before
+  it submitted `:control`, and its first `look/1` returns that. Later looks
+  show the world's own: empty while held, what the routine did since the
+  session yielded while yielded.
+
   Start sessions with `Avwe.connect/2`.
   """
 
@@ -114,7 +123,8 @@ defmodule Avwe.Session do
         idle_after: Keyword.get(opts, :idle_after, @idle_after),
         idle_tag: nil,
         yielded: false,
-        lease_refs: %{}
+        lease_refs: %{},
+        away: body && Perception.away(view, body)
       }
 
       {:ok, state |> take_control(:take) |> arm_idle()}
@@ -127,10 +137,10 @@ defmodule Avwe.Session do
   def handle_call(:look, _from, state) do
     reply =
       with {:ok, view} <- snapshot(state.world) do
-        {:ok, Perception.look(view, state.body)}
+        {:ok, view |> Perception.look(state.body) |> arrival(state.away)}
       end
 
-    {:reply, reply, arm_idle(state)}
+    {:reply, reply, arm_idle(%{state | away: nil})}
   end
 
   def handle_call(:touch, _from, state), do: {:reply, :ok, arm_idle(state)}
@@ -213,6 +223,10 @@ defmodule Avwe.Session do
   end
 
   def terminate(_reason, _state), do: :ok
+
+  # The first look tells what happened before the session took the body.
+  defp arrival(look, nil), do: look
+  defp arrival(look, away), do: %{look | away: away}
 
   # Control
 

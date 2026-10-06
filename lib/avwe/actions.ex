@@ -6,8 +6,9 @@ defmodule Avwe.Actions do
   with an outcome from Arbor's vocabulary: `:success`, `:failure`, `:blocked`
   or `:interrupted`.
 
-  Instant actions (speaking, stopping, kindling and dousing a hearth, taking
-  and releasing control) finish in the step they start. Durative actions (going, following, walking,
+  Instant actions (speaking, stopping, kindling and dousing a hearth,
+  writing in and reading a notebook, taking and releasing control) finish in
+  the step they start. Durative actions (going, following, walking,
   waiting) live in the body's `:action` component until a system completes
   them, `:stop` interrupts them, or a new action replaces them. Journeys carry
   a `:path` of waypoints that `Avwe.Systems.Movement` walks along.
@@ -18,6 +19,11 @@ defmodule Avwe.Actions do
   in the same step, burns from the moment of the intent. Those two events
   carry the intent's `ref` beside `by`, so the body's own percept of its
   fire says who asked for it, as its action percepts do.
+
+  Writing and reading act on a notebook the body carries (an item entity
+  with `:notebook` and `carried_by`): the one named, or the first by id
+  when the intent names none. A read's result carries the pages it read,
+  so the reader is told them in the same step.
   """
 
   alias Avwe.{Calendar, Event, Intent, Region, Space, Terrain, Tick}
@@ -29,6 +35,10 @@ defmodule Avwe.Actions do
   @moments %{dawn: :sunrise, sunrise: :sunrise, dusk: :sunset, sunset: :sunset}
   @default_map_cells 256
   @walk_m 10..2_000
+  @max_page 1_000
+  @max_pages 500
+  @read_last 10
+  @read_most 1..50
 
   @doc "Applies an intent at the start of a step."
   @spec handle(Region.t(), Intent.t(), Tick.t()) :: {Region.t(), [Event.t()]}
@@ -175,6 +185,43 @@ defmodule Avwe.Actions do
     end
   end
 
+  defp perform(region, %Intent{verb: :write} = intent, tick) do
+    case carried_notebook(region, intent) do
+      {:ok, id, notebook} ->
+        intent = %{intent | target: id}
+        text = intent.params |> param(:text) |> trim()
+
+        cond do
+          text == "" or String.length(text) > @max_page ->
+            {region, [result(intent, :blocked, :invalid)]}
+
+          length(notebook.pages) >= @max_pages ->
+            {region, [result(intent, :blocked, :full)]}
+
+          true ->
+            pages = notebook.pages ++ [%{time: tick.time, text: text}]
+
+            {Region.put_component(region, id, :notebook, %{notebook | pages: pages}),
+             [result(%{intent | params: %{text: text}}, :success, nil)]}
+        end
+
+      {:error, reason} ->
+        {region, [result(intent, :blocked, reason)]}
+    end
+  end
+
+  defp perform(region, %Intent{verb: :read} = intent, _tick) do
+    with {:ok, id, notebook} <- carried_notebook(region, intent),
+         {:ok, last} <- read_last(param(intent.params, :last)) do
+      read = %{intent | target: id, params: %{last: last}}
+      pages = Enum.take(notebook.pages, -last)
+      %Event{data: data} = event = result(read, :success, nil)
+      {region, [%{event | data: Map.merge(data, %{pages: pages, total: length(notebook.pages)})}]}
+    else
+      {:error, reason} -> {region, [result(intent, :blocked, reason)]}
+    end
+  end
+
   # Control is state (`docs/autopilot-spec.md`, 1): who drives a body is
   # written on it, so the simulation knows and replay reproduces it. Taking
   # what one already holds, or releasing what nobody holds, still succeeds.
@@ -207,6 +254,28 @@ defmodule Avwe.Actions do
   end
 
   defp perform(region, intent, _tick), do: {region, [result(intent, :blocked, :unknown_verb)]}
+
+  # The notebook an intent means: the named one if the body carries it, or
+  # the first it carries, by id.
+  defp carried_notebook(region, %Intent{body: body, target: target}) do
+    carried =
+      for id <- Region.with_components(region, [:notebook, :carried_by]),
+          Region.get(region, id, :carried_by) == body,
+          target == nil or id == target,
+          do: id
+
+    case carried do
+      [id | _more] -> {:ok, id, Region.get(region, id, :notebook)}
+      [] -> {:error, :no_notebook}
+    end
+  end
+
+  defp read_last(nil), do: {:ok, @read_last}
+  defp read_last(last) when is_integer(last) and last in @read_most, do: {:ok, last}
+  defp read_last(_last), do: {:error, :invalid}
+
+  defp param(%{} = params, key), do: Map.get(params, key)
+  defp param(_params, _key), do: nil
 
   defp control(region, body), do: Region.get(region, body, :control) || %{holder: nil, since: nil}
 

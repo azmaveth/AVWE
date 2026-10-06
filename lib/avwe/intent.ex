@@ -26,6 +26,17 @@ defmodule Avwe.Intent do
       `:too_far`, `:already_burning` or `:no_fuel`.
     * `:douse` - put a hearth out; same target rule. Blocked with
       `:not_burning`; fails with `:unquenchable` when the fire won't go out.
+    * `:write` - write a page in a notebook the body carries. `params`:
+      `%{text: text}`, trimmed, 1 to 1 000 characters. `target` is the
+      notebook's id, or `nil` for the one it carries (the first by id). The
+      page is `%{time, text}`, stamped with the step's start. Blocked with
+      `:no_notebook` when the body carries no such notebook, `:invalid` for
+      bad text, `:full` when the notebook holds 500 pages.
+    * `:read` - read the last pages of a notebook the body carries; same
+      target rule. `params`: `%{last: n}`, 1 to 50 (10 when left out). The
+      result's data carries `pages: [%{time, text}]`, the last `n` oldest
+      first, and `total`, the number of pages written. Blocked with
+      `:no_notebook` or `:invalid`.
     * `:control` - the intent's `controller` takes the body: its `:control`
       component records the holder, and autopilot leaves it alone.
       `Avwe.Session` submits it when it claims a body. Succeeds with
@@ -50,6 +61,8 @@ defmodule Avwe.Intent do
           | :stop
           | :kindle
           | :douse
+          | :write
+          | :read
           | :control
           | :release
           | atom()

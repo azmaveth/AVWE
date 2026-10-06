@@ -42,6 +42,8 @@ defmodule Avwe.Telnet.Command do
           | :stop
           | {:kindle, String.t() | nil}
           | {:douse, String.t() | nil}
+          | {:write, String.t()}
+          | {:read, pos_integer() | nil}
           | :time
           | :help
           | :quit
@@ -68,6 +70,15 @@ defmodule Avwe.Telnet.Command do
 
       iex> Avwe.Telnet.Command.parse("put out the fire in the kiln-house hearth")
       {:douse, "kiln-house hearth"}
+
+  Writing keeps the text as typed; reading takes an optional number of
+  pages (`nil` for the world's default), and `notes` is reading.
+
+      iex> Avwe.Telnet.Command.parse("write The reeds lean North.")
+      {:write, "The reeds lean North."}
+
+      iex> Avwe.Telnet.Command.parse("read 3")
+      {:read, 3}
   """
   @spec parse(String.t()) :: t()
   def parse(line) do
@@ -115,6 +126,18 @@ defmodule Avwe.Telnet.Command do
     if String.downcase(rest) == "out" or String.starts_with?(String.downcase(rest), "out "),
       do: {:douse, rest |> strip_prefix("out") |> hearth_name()},
       else: {:unknown, line}
+  end
+
+  defp command("write", "", _line), do: {:invalid, "Write what?"}
+  defp command("write", rest, _line), do: {:write, rest}
+  defp command("notes", _rest, _line), do: {:read, nil}
+  defp command("read", "", _line), do: {:read, nil}
+
+  defp command("read", rest, _line) do
+    case Integer.parse(rest) do
+      {n, ""} when n > 0 -> {:read, n}
+      _other -> {:invalid, "Read how many pages? Try: read, read 5."}
+    end
   end
 
   defp command("time", _rest, _line), do: :time

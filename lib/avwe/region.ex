@@ -171,7 +171,8 @@ defmodule Avwe.Region do
       time: region.time,
       dt: dt,
       seed: region.seed,
-      region: region.id
+      region: region.id,
+      emitted: length(region.outbox)
     }
 
     region
@@ -240,6 +241,19 @@ defmodule Avwe.Region do
   @doc "The intents waiting for the next step, in the order they were submitted."
   @spec pending(t()) :: [Intent.t()]
   def pending(%__MODULE__{inbox: inbox}), do: Enum.reverse(inbox)
+
+  @doc """
+  The events emitted so far in the step `tick` describes, oldest first: the
+  intents' and those of the systems that ran before the caller. For a
+  system that reacts to what happened earlier in the same step. It counts
+  from the outbox's length when the step began (`tick.emitted`), so it is
+  the same whether the region is advanced one step at a time and drained,
+  as `Avwe.RegionServer` does, or many steps at once, as replay does.
+  """
+  @spec step_events(t(), Tick.t()) :: [Event.t()]
+  def step_events(%__MODULE__{outbox: outbox}, %Tick{emitted: emitted}) do
+    outbox |> Enum.take(length(outbox) - emitted) |> Enum.reverse()
+  end
 
   @doc "Takes the events emitted since the last drain, oldest first."
   @spec drain_events(t()) :: {[Event.t()], t()}

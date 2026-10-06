@@ -26,6 +26,17 @@ defmodule Avwe.Telnet.CommandTest do
       assert Command.parse("whisper") == {:invalid, "Whisper what?"}
     end
 
+    test "writing and reading the notebook" do
+      assert Command.parse("write  The reeds lean North. ") == {:write, "The reeds lean North."}
+      assert Command.parse("WRITE x") == {:write, "x"}
+      assert Command.parse("write") == {:invalid, "Write what?"}
+      assert Command.parse("read") == {:read, nil}
+      assert Command.parse("notes") == {:read, nil}
+      assert Command.parse("read 5") == {:read, 5}
+      assert Command.parse("read 0") == {:invalid, "Read how many pages? Try: read, read 5."}
+      assert Command.parse("read all") == {:invalid, "Read how many pages? Try: read, read 5."}
+    end
+
     test "waiting" do
       assert Command.parse("wait") == {:wait, %{for: 600}}
       assert Command.parse("wait 30") == {:wait, %{for: 1_800}}

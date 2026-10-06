@@ -76,6 +76,15 @@ config :avwe, :worlds,
     characters: [
       "mira-vale": [
         norms: [:invited_fire],
+        # Her diegetic memory: what a player writes here, the next one reads.
+        carries: [
+          [
+            id: "mira-notebook",
+            kind: :notebook,
+            name: "survey notebook",
+            description: "Her survey, in a tin that once held salt ink."
+          ]
+        ],
         routine: [
           [
             at: "04:30",

@@ -38,6 +38,12 @@ defmodule Avwe.Worldgen do
       empty plan or a step that is not a verb raises `ArgumentError` here,
       like a bad hearth. This is the shape a routine compiled from the
       body's Quire article would take (`docs/DESIGN.md`, 10.3).
+      A body named here may also `:carries` items, each a keyword list with
+      `:id`, `:kind` (only `:notebook` so far), `:name` and an optional
+      `:description`. An item is an entity of its own with `item: %{kind}`,
+      `carried_by: body`, `repr` and, for a notebook, `notebook: %{pages:
+      []}` (`Avwe.Actions`, `:write` and `:read`). An id already in use, an
+      unknown kind or a missing name raises `ArgumentError` here.
 
   Finally each system prepares the region for its starting time
   (`Avwe.Region.prepare/1`).
@@ -89,7 +95,67 @@ defmodule Avwe.Worldgen do
       acc
       |> put_unless_nil(id, :routine, spec[:routine] && routine!(id, spec[:routine]))
       |> put_unless_nil(id, :norms, spec[:norms] && norms!(id, spec[:norms]))
+      |> add_items(id, spec[:carries] || [])
     end)
+  end
+
+  @item_kinds [:notebook]
+
+  defp add_items(region, body, items) when is_list(items),
+    do: Enum.reduce(items, region, &add_item(&2, body, &1))
+
+  defp add_items(_region, body, items),
+    do:
+      raise(
+        ArgumentError,
+        "character #{inspect(body)}: carries must be a list, got #{inspect(items)}"
+      )
+
+  defp add_item(region, body, item) do
+    %{id: id, kind: kind, name: name, description: description} = item!(body, item)
+
+    if Region.entity(region, id) != %{},
+      do: raise(ArgumentError, "item #{inspect(id)}: the id is already in use")
+
+    Region.put_entity(region, id, %{
+      item: %{kind: kind},
+      carried_by: body,
+      repr: %{name: name, description: description},
+      notebook: %{pages: []}
+    })
+  end
+
+  # An item's declaration, checked where a bad one is easiest to explain:
+  # the notebook verbs would find nothing to write in.
+  defp item!(body, item) do
+    if not Keyword.keyword?(item),
+      do: raise(ArgumentError, "character #{inspect(body)}: an item must be a keyword list")
+
+    declared = %{
+      id: item[:id],
+      kind: item[:kind],
+      name: item[:name],
+      description: item[:description]
+    }
+
+    case Enum.find(item_checks(), fn {_what, ok?} -> not ok?.(declared) end) do
+      nil ->
+        declared
+
+      {what, _ok?} ->
+        raise ArgumentError,
+              "character #{inspect(body)}, item #{inspect(declared.id)}: #{what}, " <>
+                "got #{inspect(item)}"
+    end
+  end
+
+  defp item_checks do
+    [
+      {"id must be a string", &(is_binary(&1.id) and &1.id != "")},
+      {"kind must be one of #{inspect(@item_kinds)}", &(&1.kind in @item_kinds)},
+      {"name must be a string", &(is_binary(&1.name) and &1.name != "")},
+      {"description must be a string", &(&1.description == nil or is_binary(&1.description))}
+    ]
   end
 
   defp put_unless_nil(region, _id, _name, nil), do: region

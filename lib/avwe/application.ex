@@ -13,6 +13,7 @@ defmodule Avwe.Application do
         {Registry, keys: :duplicate, name: Avwe.PubSub},
         {DynamicSupervisor, name: Avwe.Worlds, strategy: :one_for_one},
         {DynamicSupervisor, name: Avwe.Sessions, strategy: :one_for_one},
+        {DynamicSupervisor, name: Avwe.Minds, strategy: :one_for_one},
         {Task, &autostart/0}
       ] ++ telnet()
 

@@ -2,7 +2,7 @@ defmodule Avwe.ActionsTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  alias Avwe.{Calendar, Event, Intent, Quire, Region}
+  alias Avwe.{Calendar, Event, Intent, Quire, Region, Worldgen}
   alias Avwe.Systems.{Daylight, Movement, Waiting}
   alias Avwe.Test.Fixtures
 
@@ -13,9 +13,13 @@ defmodule Avwe.ActionsTest do
     %{world: world}
   end
 
+  # Wren carries a notebook, so writing and reading can succeed.
   defp hollow(world, hour \\ 12) do
     world
     |> Quire.Seed.region(id: {0, 0}, seed: 1, time: Calendar.at(1, hour: hour), systems: @systems)
+    |> Worldgen.add_characters(
+      wren: [carries: [[id: "wren-notebook", kind: :notebook, name: "notebook"]]]
+    )
     |> Region.prepare()
   end
 
@@ -252,6 +256,22 @@ defmodule Avwe.ActionsTest do
           tuple({constant(:stop), constant([])}),
           tuple({constant(:kindle), map(member_of([nil, "mill-pond"]), &[target: &1])}),
           tuple({constant(:douse), map(member_of([nil, "mill-pond"]), &[target: &1])}),
+          tuple(
+            {constant(:write),
+             map(
+               member_of([
+                 [params: %{text: "a note"}],
+                 [params: %{text: ""}],
+                 [params: %{text: "x"}, target: "wren-notebook"],
+                 [params: %{text: "x"}, target: "mill-pond"]
+               ]),
+               & &1
+             )}
+          ),
+          tuple(
+            {constant(:read),
+             member_of([[], [params: %{last: 3}], [params: %{last: 0}], [target: "nowhere"]])}
+          ),
           tuple({constant(:control), map(member_of([:human, :arbor, nil]), &[controller: &1])}),
           tuple({constant(:release), constant([])}),
           tuple({constant(:juggle), constant([])})

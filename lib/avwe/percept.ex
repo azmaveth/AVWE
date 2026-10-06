@@ -41,6 +41,7 @@ defmodule Avwe.Percept do
     :reason,
     :progress,
     :summary,
+    :data,
     confidence: 1.0,
     salience: 0.5
   ]
@@ -62,6 +63,7 @@ defmodule Avwe.Percept do
           reason: atom() | nil,
           progress: float() | nil,
           summary: String.t() | nil,
+          data: map() | nil,
           confidence: float(),
           salience: float()
         }

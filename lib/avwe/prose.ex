@@ -103,10 +103,42 @@ defmodule Avwe.Prose do
   def result(:douse, :blocked, :not_burning, _target, _params), do: "It isn't lit."
   def result(:douse, :failure, :unquenchable, _target, _params), do: "It does not go out."
 
+  def result(:write, :success, _reason, target, _params), do: "You write in your #{target}."
+
+  def result(:write, :blocked, :no_notebook, _target, _params),
+    do: "You have nothing to write in."
+
+  def result(:write, :blocked, :full, target, _params), do: "Your #{target} is full."
+
+  def result(:write, :blocked, _reason, _target, _params),
+    do: "You can't write that. A page holds 1 to 1000 characters."
+
+  def result(:read, :blocked, :no_notebook, _target, _params), do: "You have nothing to read."
+
+  def result(:read, :blocked, _reason, _target, _params),
+    do: "You can't read like that. Read the last 1 to 50 pages."
+
   # Taking and releasing a body is the session's bookkeeping, not something
   # the body did, so nothing is said.
   def result(verb, :success, _reason, _target, _params) when verb in [:control, :release], do: nil
   def result(_verb, _outcome, _reason, _target, _params), do: "You can't do that."
+
+  @doc """
+  A body read the last pages of a notebook: a line saying how many, then one
+  line per page with its world time, oldest first. The text is quoted as it
+  was written; prose never interprets it.
+  """
+  @spec read(String.t(), [%{time: Calendar.time(), text: String.t()}], non_neg_integer()) ::
+          String.t()
+  def read(name, [], _total), do: "Your #{name} is empty."
+
+  def read(name, pages, total) do
+    lines = Enum.map(pages, &"  #{Calendar.format(&1.time)}: #{&1.text}")
+    Enum.join(["You read your #{name} (#{length(pages)} of #{pages(total)}):" | lines], "\n")
+  end
+
+  defp pages(1), do: "1 page"
+  defp pages(n), do: "#{n} pages"
 
   @doc "Someone was heard speaking. `direction` is set when they are some way off."
   @spec heard(String.t(), atom(), String.t(), String.t() | nil) :: String.t()
@@ -206,6 +238,7 @@ defmodule Avwe.Prose do
   def look(look) do
     [
       clock(look),
+      away(look[:away] || [], look.time),
       you_are(look),
       look.here && look.here.description,
       ground(look[:ground], look[:channel]),
@@ -217,10 +250,44 @@ defmodule Avwe.Prose do
       smoke(look[:smoke]),
       others(look.bodies),
       known(look.places),
+      carried(look[:carried] || []),
       doing(look.action, look[:holder])
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
+  end
+
+  # What the body perceived while nobody held it, oldest first, each line
+  # with its time, and the day too when it was not today.
+  defp away([], _now), do: nil
+
+  defp away(entries, now) do
+    lines = Enum.map(entries, &"  #{stamp(&1.time, now)} #{&1.summary}")
+    Enum.join(["While you were away:" | lines], "\n")
+  end
+
+  defp stamp(time, now) do
+    then = Calendar.describe(time)
+    today = Calendar.describe(now)
+    clock = "#{pad(then.hour)}:#{pad(then.minute)}"
+
+    cond do
+      then.year != today.year -> Calendar.format(time)
+      then.day != today.day -> "day #{then.day}, #{clock}"
+      true -> clock
+    end
+  end
+
+  defp pad(n), do: n |> Integer.to_string() |> String.pad_leading(2, "0")
+
+  defp carried([]), do: nil
+
+  defp carried(items) do
+    Enum.map_join(items, "\n", fn
+      %{kind: :notebook, name: name, pages: 0} -> "You carry your #{name} (empty)."
+      %{kind: :notebook, name: name, pages: pages} -> "You carry your #{name} (#{pages(pages)})."
+      %{name: name} -> "You carry #{name}."
+    end)
   end
 
   defp clock(look), do: "#{Calendar.format(look.time)}. #{light(look.light)}"

@@ -3,7 +3,8 @@ defmodule Avwe.Telnet.Connection do
   One telnet player.
 
   Greets them, has them choose a world if more than one is running, then a
-  body (or to watch). After that it turns their commands into intents and
+  body (or to watch). The first look after joining begins with what the
+  body did while nobody held it ("While you were away:"). After that it turns their commands into intents and
   their percepts into lines of text. Everything goes through an
   `Avwe.Session`, like any other controller. A player who stops typing
   yields the body to its routine (the session's idle rule, `:idle_after` in
@@ -36,6 +37,8 @@ defmodule Avwe.Telnet.Connection do
     wait [minutes]    let time pass (also: wait 2 hours, wait until dawn, wait until dusk)
     kindle [hearth]   light the hearth here (also: light the fire, light the lodge hearth)
     douse [hearth]    put the fire out (also: put out the fire, douse the coal)
+    write <text>      write a page in your notebook
+    read [pages]      read the last pages of your notebook (also: notes)
     stop              stop what you're doing
     time              the time in the world
     quit              leave
@@ -217,6 +220,9 @@ defmodule Avwe.Telnet.Connection do
     do: act(state, :say, params: %{text: text, volume: volume})
 
   defp run(state, {:wait, params}), do: act(state, :wait, params: params)
+  defp run(state, {:write, text}), do: act(state, :write, params: %{text: text})
+  defp run(state, {:read, nil}), do: act(state, :read, params: %{})
+  defp run(state, {:read, pages}), do: act(state, :read, params: %{last: pages})
   defp run(state, :stop), do: act(state, :stop, [])
   defp run(state, {verb, nil}) when verb in [:kindle, :douse], do: act(state, verb, [])
 

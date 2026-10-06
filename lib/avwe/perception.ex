@@ -54,6 +54,11 @@ defmodule Avwe.Perception do
   their act tells the story. The hand-over between the two
   (`:control_released`, `:control_taken`) is a percept of the body's own
   and nobody else's; `:decided` stays the game master's.
+
+  A body's look also lists what it `carried` (a notebook with its page
+  count, and the `write` and `read` affordances that go with it) and,
+  under `away`, what it remembers of the time nobody held it (`away/2`).
+  A notebook's reading is a result percept whose `data` holds the pages.
   """
 
   alias Avwe.{Event, Percept, Prose, Space, Terrain}
@@ -78,6 +83,7 @@ defmodule Avwe.Perception do
   @fire_salience %{fire_lit: 0.7, fire_out: 0.6, fire_low: 0.5}
   @smell_salience %{faint: 0.5, clear: 0.7, thick: 0.7}
   @glow_below 0.1
+  @away_entries 12
 
   @doc "How far a body can see, in cells, for a light level from 0.0 to 1.0."
   @spec sight_cells(float()) :: float()
@@ -107,6 +113,7 @@ defmodule Avwe.Perception do
     action = component(view, :action)[body]
     channel = channel_near(view, position)
     hearths = hearths_here(view, position)
+    carried = carried(view, body)
 
     %{
       spectator: false,
@@ -129,9 +136,40 @@ defmodule Avwe.Perception do
       fires: fires_in_sight(view, position),
       bodies: bodies_in_sight(view, body, position),
       places: known_places(view, body, position, here),
-      affordances: affordances(view, body, here, action, channel, position)
+      carried: carried,
+      away: away(view, body),
+      affordances:
+        affordances(view, body, here, action, channel, position) ++ notebook_affordances(carried)
     }
   end
+
+  @doc """
+  What the body remembers (`Avwe.Systems.Memory`) of the time nobody held
+  it: the entries since it was last released (`control.since` while
+  `control.holder` is `nil`), or all of them when it was never held, oldest
+  first, at most #{@away_entries}. Empty while the body is held.
+  """
+  @spec away(map(), String.t()) :: [map()]
+  def away(view, body) do
+    entries = Map.get(component(view, :memory)[body] || %{}, :entries, [])
+
+    case component(view, :control)[body] do
+      %{holder: nil, since: nil} ->
+        last_away(entries)
+
+      %{holder: nil, since: since} ->
+        entries |> Enum.take_while(&(&1.time > since)) |> last_away()
+
+      %{holder: _held} ->
+        []
+
+      nil ->
+        last_away(entries)
+    end
+  end
+
+  # Entries are kept newest first.
+  defp last_away(entries), do: entries |> Enum.take(@away_entries) |> Enum.reverse()
 
   @doc "The percepts a body notices among a step's events, in order."
   @spec percepts(map(), String.t() | nil, [Event.t()]) :: [Percept.t()]
@@ -227,6 +265,27 @@ defmodule Avwe.Perception do
       progress: data.progress,
       salience: 0.3,
       summary: Prose.progress(data.verb, name(view, data.target), data.params, data.progress)
+    }
+  end
+
+  defp own(
+         view,
+         body,
+         %Event{type: :action_result, data: %{verb: :read, outcome: :success}} = event
+       ) do
+    %{data: data} = event
+
+    %Percept{
+      kind: :result,
+      type: :action_result,
+      time: event.time,
+      body: body,
+      intent: data.ref,
+      issuer: Percept.issuer(data.ref),
+      outcome: :success,
+      salience: 1.0,
+      data: Map.take(data, [:pages, :total]),
+      summary: Prose.read(name(view, data.target), data.pages, data.total)
     }
   end
 
@@ -684,6 +743,28 @@ defmodule Avwe.Perception do
       if(channel, do: [%{verb: :follow, directions: [:upstream, :downstream]}], else: []) ++
       hearth_affordances(view, position) ++
       if(action, do: [%{verb: :stop}], else: [])
+  end
+
+  # The items a body carries, by id: for a notebook, how many pages it has.
+  defp carried(view, body) do
+    for id <- ids(view, :carried_by), component(view, :carried_by)[id] == body do
+      item = component(view, :item)[id] || %{}
+      notebook = component(view, :notebook)[id]
+
+      %{
+        id: id,
+        name: name(view, id),
+        kind: Map.get(item, :kind),
+        pages: notebook && length(notebook.pages)
+      }
+    end
+  end
+
+  defp notebook_affordances(carried) do
+    case for(%{kind: :notebook, id: id} <- carried, do: id) do
+      [] -> []
+      notebooks -> [%{verb: :write, targets: notebooks}, %{verb: :read, targets: notebooks}]
+    end
   end
 
   # Within reach of a hearth, a body can light one that is cold and has fuel

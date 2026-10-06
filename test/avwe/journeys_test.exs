@@ -140,7 +140,12 @@ defmodule Avwe.JourneysTest do
         ),
         tuple(
           {constant(:douse), map(member_of([nil, "town-hearth", "the-last-coal"]), &[target: &1])}
-        )
+        ),
+        tuple(
+          {constant(:write),
+           member_of([[params: %{text: "The reeds lean north."}], [params: %{text: " "}]])}
+        ),
+        tuple({constant(:read), member_of([[], [params: %{last: 1}], [target: "town-hearth"]])})
       ])
 
     # Mira is nobody's here, so autopilot's intents (refs `auto-*`) land
