@@ -24,7 +24,7 @@ defmodule Avwe do
       {:ok, %{status: :done}} = Avwe.Mind.act(mind, [{:go, target: "the-dry-bend"}, {:write, params: %{text: "Dry."}}])
   """
 
-  alias Avwe.{Calendar, Clock, Quire, RegionServer}
+  alias Avwe.{Calendar, Clock, GroundCache, Quire, RegionServer, Terrain}
 
   @default_region {0, 0}
   @default_systems [
@@ -114,6 +114,23 @@ defmodule Avwe do
 
   defp store_dir(_id, nil), do: nil
   defp store_dir(id, data_dir), do: data_dir |> Path.expand() |> Path.join(to_string(id))
+
+  @doc """
+  Builds the ground map of a world's terrain in the background, if it has any
+  and the map is not kept yet (`Avwe.GroundCache`), so that the first page to
+  ask for a scene finds it ready and does not draw its first scene bare. It
+  takes about a second for the Ember Reach, and returns at once. A world that
+  is not running, or has no terrain, has nothing to build.
+  """
+  @spec warm_ground(atom()) :: :ok
+  def warm_ground(world) do
+    with {:ok, %{terrain: %Terrain{} = terrain}} <- snapshot(world),
+         false <- GroundCache.cached?(terrain) do
+      {:ok, _task} = Task.start(fn -> GroundCache.fetch(terrain) end)
+    end
+
+    :ok
+  end
 
   @doc "Stops a running world."
   @spec stop_world(atom()) :: :ok | {:error, :not_found}

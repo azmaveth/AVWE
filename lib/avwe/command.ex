@@ -1,13 +1,31 @@
 defmodule Avwe.Command do
   @moduledoc """
   What a player types, and what it means. Pure, and no client's own: telnet
-  uses it, and so will the web page.
+  and the web page use it.
 
     * `parse/1` reads one line of input.
     * `resolve/2` matches a name typed against places, bodies, hearths and
       worlds.
     * `interpret/2` says what a parsed command asks for, given the player's
       look: an act with its names resolved, or a refusal in words.
+    * `help/0` lists the commands.
+  """
+
+  @help """
+  Commands:
+    look              describe where you are
+    go <place>        walk to a place you know
+    go <direction>    walk 100 m north, south-east... (or: go west 300)
+    follow upstream   follow the river channel (or: follow downstream)
+    say <text>        speak (also: whisper, shout)
+    wait [minutes]    let time pass (also: wait 2 hours, wait until dawn, wait until dusk)
+    kindle [hearth]   light the hearth here (also: light the fire, light the lodge hearth)
+    douse [hearth]    put the fire out (also: put out the fire, douse the coal)
+    write <text>      write a page in your notebook
+    read [pages]      read the last pages of your notebook (also: notes)
+    stop              stop what you're doing
+    time              the time in the world
+    quit              leave\
   """
 
   @default_wait_minutes 10
@@ -241,6 +259,13 @@ defmodule Avwe.Command do
       do: text |> String.slice(String.length(prefix)..-1//1) |> String.trim(),
       else: text
   end
+
+  @doc """
+  The commands, in the words a player is told them: what `help` says. A client
+  adds what is its own (telnet explains its marked lines).
+  """
+  @spec help() :: String.t()
+  def help, do: @help
 
   @doc """
   Whether `interpret/2` reads the player's look for this command: `go`, whose

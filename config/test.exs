@@ -14,3 +14,11 @@ config :avwe, AvweWeb.Endpoint,
   secret_key_base: "test-only-key-for-the-avwe-web-client-not-a-secret-0123456789abcdef012345678"
 
 config :avwe, lobby_refresh_ms: nil
+
+# A page redraws its look when it is told to, not on a timer, and its session
+# keeps the body in hand for as long as the tests need.
+config :avwe, play_refresh_ms: nil
+
+# A page does not wait for a held body to be let go of, except in the test
+# that is about it.
+config :avwe, play_retry_ms: 0

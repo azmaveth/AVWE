@@ -60,9 +60,15 @@ defmodule AvweWeb.LobbyLiveTest do
       send(view.pid, :refresh)
       assert has_element?(view, "li.taken", "Pell")
 
+      # The registry lets go of a session's lease a moment after the session
+      # has stopped, so the lobby may need to look again.
       Avwe.Session.close(session)
-      send(view.pid, :refresh)
-      refute has_element?(view, "li.taken")
+
+      assert eventually(fn ->
+               send(view.pid, :refresh)
+               not has_element?(view, "li.taken")
+             end)
+
       assert has_element?(view, "a", "Pell")
     end
 

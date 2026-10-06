@@ -304,8 +304,8 @@ tests themselves do not need them.
   that each look arranges the next). No "watch" yet (M2b).
 - **`/play/:world/:body`** (`PlayLive`). Its shell is built, the rest is 3.3.
   A page mounts twice, as a plain request and then over its socket. The
-  plain request only checks that the body is free, and turns a held one away
-  with a redirect to the lobby; the socket's mount starts the session
+  plain request shows the page ("Joining...") and decides nothing about the
+  body (see "Reloading" in 3.3); the socket's mount starts the session
   (`Avwe.connect/2`, controller `:human`) with the LiveView as its sink, so the
   lease is released when the page closes, as for any sink. A race for a free
   body is settled by the lease, and the one who is late is sent to the lobby
@@ -319,7 +319,7 @@ tests themselves do not need them.
   world stopped) the page says so, with a way back. It sends no commands yet,
   asks for no scenes yet, and marks nothing for the routine yet: those are 3.3.
 
-### 3.3 The play page
+### 3.3 The play page (built)
 
 Mounting twice is how LiveView works (a plain request, then the socket), so
 the session is started only in the connected mount, with the LiveView as its
@@ -327,34 +327,102 @@ sink and `scenes: true`. The session ending (the world stopped, the process
 gone) shows a notice and a link back to the lobby, and the lease is released
 when the page closes, as for any sink.
 
-The page has four parts:
+The page has four parts, and they are one thing seen four ways:
 
-1. **The map**: a `<canvas>` drawn by one hook, `SceneCanvas`. The hook only
-   draws what it is sent (glyphs from the legend, shaded by light, nothing
-   outside the sight circle) and reports clicks as `{cell}`. It holds no game
-   logic: the server decides what a click means and whether it is allowed. A
-   click on a place goes there; a click elsewhere names the cell and does
-   nothing. It never receives a cell the body cannot see.
+1. **The map**: a `<canvas>` drawn by one hook, `SceneCanvas`. The server puts
+   the latest scene on the canvas as JSON in `data-scene`
+   (`Avwe.Scene.to_map/1`), and the hook draws what it is given: glyphs and
+   colours from the legend, shaded by the light and the fog at the rim of sight,
+   nothing where the scene is blank. It reports where a click fell as a cell
+   and holds no game logic. The server decides what a click means: a click on a
+   place goes there (as the command `go to <place>`), a click on somebody or
+   something names it, a click on the ground says what it is, and a click beyond
+   the circle of sight says it cannot be seen. It answers only from what the
+   scene already shows, and ignores a click that is not a pair of whole numbers.
+   Once drawn, the hook writes what it drew on the canvas as `data-drawn-*`
+   attributes (center, radius, light, cells, things, the zoom), so a test reads
+   state and not pixels.
+
+   **The near view.** A noon window is 101 cells across, and glyphs that fit
+   it are 7 pixels and unreadable (found by looking at it in a browser). So the
+   map shows the 41 cells around you at up to 40 pixels each, and a "Wider view"
+   button shows all that is in sight. The button is the page's own: it switches
+   the canvas in the browser (`JS.dispatch`) and the server never hears of it;
+   `aria-pressed` says which is showing. What the scene does not show the
+   viewer's body cannot see; what the near view leaves out is still in the
+   look, which says the same in words.
 2. **The log**: percepts as lines, as telnet shows them, with the routine's
-   lines styled apart rather than prefixed (the same `yielded` tracking the
-   telnet connection has). Speech and notes arrive as text and are escaped,
-   never HTML (the "words are plain text" rule holds on the way in and the
-   way out).
-3. **The look and the HUD**: the prose look in an `aria-live` region (the
-   accessible form of the map, and the proof the two agree), the time and
-   light, a banner when the routine has the body ("Your routine has you; act
-   to take yourself back"), and the body's affordances as buttons: go to a
-   known place, kindle or douse a hearth within reach, stop, wait, read the
+   lines styled apart (grey, italic, and "Your routine:" for a screen reader)
+   by the same `yielded` tracking the telnet connection has, a banner while the
+   routine has the body, and the replies to commands. Speech and notes arrive as
+   text and are escaped, never HTML. It is a stream of the last two hundred
+   lines, scrolled to the newest unless the player scrolled up
+   (`LogScroll`). The first look, with "While you were away", is its first
+   lines, as in telnet.
+3. **The look and the HUD**: the prose look in an `aria-live` region, which is
+   the map in words and the proof the two agree, refreshed as the world moves;
+   the time and light; and the body's affordances as buttons (`AvweWeb.Hud`,
+   a pure function of the look): go to a known place, light or put out a
+   hearth within reach, stop, wait (now, until dawn, until dusk), read the
    notebook.
-4. **The command line**: the same words as telnet, through `Avwe.Commands`,
-   for everything the buttons do not cover (`say`, `write`, `follow`,
-   `go north 200`). Typing or clicking is the controller's presence: it
-   touches the session, so the idle rule works as it does for telnet.
+4. **The command line**: the same words as telnet, through `Avwe.Command`, for
+   everything the buttons do not cover (`say`, `write`, `follow`,
+   `go north 200`). `help` is `Avwe.Command.help/0` with a note of the page's
+   own after it, as telnet adds its own.
 
-Glyph-only means the map is characters drawn in a monospace face; the
-legend, not the hook, decides which. Sprites later are legend entries with a
-`sprite` layer and a hook that prefers them: no change to the scene or the
-session.
+**One way in.** A button is a command line, and a click is one (a place
+becomes `go to <place>`), so all three go through one function and the page can
+do no more than a player typing. Every button the HUD can make is held by a test
+to be read by the command parser as an act.
+
+**Presence.** Typing, pressing and clicking are the controller's presence: they
+touch the session, so the idle rule works as it does for telnet. Redrawing the
+look is not (`Session.peek/1`, which neither re-arms the idle timer nor tells
+`away`), or the page itself would keep the body in hand for ever. The page
+redraws its look when something arrives (a percept or a scene) and every two
+real seconds while open (`:play_refresh_ms`); a viewer who only watches loses
+the body to its routine after ten minutes, as the banner says, and takes it back
+by acting. `:play_idle_after_ms` makes that short for the tests.
+
+**Glyphs, and later sprites.** Glyph-only means the map is characters drawn in
+a monospace face; the legend, not the hook, decides which. Sprites later are
+legend entries with a `sprite` layer and a hook that prefers them: no change to
+the scene or the session.
+
+**Drawing arithmetic is tested without a browser.** `assets/js/draw.js` holds
+where a cell is and which cell a pixel is in, the view, the shading, the order
+things are laid down, and `paint` (which takes any object with a canvas
+context's methods); `assets/test` tests it with Node's own runner (`npm test`
+in `assets/`, nothing to install; CI runs it) on scenes the server builds. Those
+scenes are `assets/test/fixtures/*.json`, written by the scene's Elixir test,
+which fails if the server's format drifts from them and says how to write them
+again. The hooks themselves (`assets/js/hooks.js`) are glue over the DOM and
+are for the browser job.
+
+**Warm ground.** The application builds the ground map of each world it
+autostarts (`Avwe.warm_ground/1`), so the first page does not draw its first
+scene bare.
+
+**Reloading.** A page that is reloaded asks for the body its own old page is
+only just letting go of. Found by pressing reload in a real browser, which sent
+the new page to the lobby, refused by itself. The first fix waited for the body
+to be let go, at the plain request and at the socket, and made it worse:
+reloading alternated between refused and accepted, each refusal after the whole
+wait. A browser keeps the page it is leaving until the new document begins to
+arrive, so a request that waits for the old page to let go waits for something
+that cannot happen until the request answers. So the plain request answers at
+once and decides nothing about a held body, and it is the socket, which connects
+after the browser has dropped the old page, that waits for a held body, up to a
+second and a half (`:play_retry_ms`), before the player is told it is taken. A
+body somebody else holds costs the wait and is then refused; a free one costs
+nothing. The cost of deciding at the socket is that a body held by somebody
+else shows the page ("Joining...") for the wait before the lobby does.
+
+**Known limits.** A page that comes back after a connection the server has not
+noticed is gone (a laptop that slept) can still be refused for up to a minute,
+until the old page's process times out: that is the question of who a page is
+(DESIGN 14, question 12), which the wait does not answer. There is no keyboard
+play, no remembered map, and no zoom beyond the two views.
 
 ### 3.4 Security
 
@@ -429,8 +497,9 @@ its real transport.
   `<script>alert(1)</script>` shows as text.
   *Built with the skeleton:* `test/avwe_web/` has the lobby (lists, offers a
   free body, shows a held one, looks again, follows worlds), the play page
-  (takes the body at the socket and not before, refuses a held one at the
-  plain request and at the socket, a missing world or body, shows percepts as
+  (takes the body at the socket and not before, answers a plain request with
+  the page whoever holds the body and refuses at the socket after a short wait,
+  a missing world or body, shows percepts as
   lines and as text, keeps two hundred, frees the body when the page closes or
   is left, says so when the world stops) and the endpoint's security (headers,
   policy, no inline script, cookie, the Host guard). `test/e2e/web_test.exs`
@@ -439,13 +508,29 @@ its real transport.
   a forged token, and a LiveView joined with the tokens of its page, which
   takes a body and frees it when the socket closes. Twenty deliberate breaks of
   the web layer, one at a time, were each caught.
+  *Built with the play page:* the command line (what is typed reaches the world
+  and a neighbour hears it; look, time and help; refusals in words, with the
+  player's own text as text; an empty line; walking; quit), the buttons (go,
+  light and put out, stop, wait, and that a forged line is read as a typed one),
+  the log (lines, markup as text, the last two hundred, the routine's lines
+  styled apart and the banner), presence (typing and pressing keep the body in
+  hand, redrawing the look and not), the look (the time away is in the log once
+  and not in the look; read again when told and by itself), the map (the scene
+  the canvas is given, the legend, a neighbour who walks, a scene that arrives
+  with the ground when the ground is built late, nothing out of sight) and a
+  click on it (a place goes there, somebody is named, ground, beyond sight,
+  what is not a cell, and a click is presence too). The HUD has its own tests,
+  and so do the scene's JSON form and `Avwe.warm_ground/1`. Twenty-six
+  deliberate breaks of the page, the HUD and the drawing were each caught by the
+  test meant for them.
 - **The done criterion** (`test/e2e/three_controllers_test.exs`), in Lantern
   Hollow: a telnet player, a web player and an MCP player. Each hears the
   others speak within earshot; the web scene shows the other two at their
   cells and moves them as they walk; the MCP player's `listen` and the telnet
   lines report the web player's arrival and speech; releasing one body
   frees it for the routine in all three views.
-- **The browser**, in two layers. The canvas drawing arithmetic (cell to
+- **The browser**, in two layers (the arithmetic is built, the browser job is
+  the fourth change). The canvas drawing arithmetic (cell to
   pixel, fog, glyph colour by light) is plain functions in their own module
   with `node --test` unit tests and no dependencies; CI runs them (Node is on
   the runners). And a headless-browser end-to-end test of the play page, in
@@ -474,7 +559,7 @@ separate Browser job (Node and a headless Chromium).
 
 ## 6. Delivery
 
-Three pull requests, each green on its own, so that none is the size of the
+Four pull requests, each green on its own, so that none is the size of the
 first:
 
 1. **The core** (2.1 to 2.5): commands, representation layers, the ground
@@ -486,9 +571,14 @@ first:
    to go and the refusal of a held body belongs to the page: the session's
    life, and what happens as plain lines. Nothing in it uses scenes.
 3. **The play page** (3.3: the map, the HUD, the command line and the marking
-   of the routine's lines), the Browser job, the done-criterion test, and the
-   DESIGN.md updates: 5 (layout), 8.4 (layers as built), 9 (the web row), 13 (M2
-   split into M2a and M2b), 14.
+   of the routine's lines), the done-criterion test, and the DESIGN.md updates:
+   5 (layout), 8.4 (layers and the scene as built), 8.5 and 9 (the web row), 13
+   (M2 split into M2a and M2b), 14.
+4. **The Browser job**: Playwright (open question 2), a headless-browser test of
+   the page against a running endpoint, and its own CI job, off the required
+   list until it has run stably for a while. It was split from the third change
+   because it brings Node packages and a downloaded browser, and the page is
+   complete, and played by hand in a browser, without it.
 
 Order inside the work: 2.1 first (a pure refactor with its own tests), then
 2.2 to 2.5, then the web.

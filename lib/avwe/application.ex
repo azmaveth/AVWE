@@ -29,6 +29,7 @@ defmodule Avwe.Application do
       case Avwe.start_world(id, opts) do
         {:ok, _pid} ->
           Logger.info("Started world #{inspect(id)}")
+          Avwe.warm_ground(id)
 
         {:error, reason} ->
           Logger.warning("Couldn't start world #{inspect(id)}: #{inspect(reason)}")

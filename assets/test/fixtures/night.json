@@ -1,0 +1,122 @@
+{
+  "center": [
+    121,
+    138
+  ],
+  "holder": "human",
+  "legend": {
+    "channel_bed": {
+      "description": "Cracked mud where the river ran.",
+      "glyph": {
+        "char": "_",
+        "color": "#7a6850"
+      },
+      "name": "dry river bed"
+    },
+    "clay": {
+      "description": "Packed clay, the town's streets.",
+      "glyph": {
+        "char": ":",
+        "color": "#b0653a"
+      },
+      "name": "clay"
+    },
+    "grass": {
+      "description": "Dry grass.",
+      "glyph": {
+        "char": "\"",
+        "color": "#6f8f4a"
+      },
+      "name": "grass"
+    },
+    "hearth_burning": {
+      "description": "A hearth with a fire in it.",
+      "glyph": {
+        "char": "*",
+        "color": "#ff9a3c"
+      },
+      "name": "burning hearth"
+    },
+    "place": {
+      "description": "A place you know.",
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "name": "place"
+    },
+    "reeds": {
+      "description": "Reeds that keep the channel's shape.",
+      "glyph": {
+        "char": "|",
+        "color": "#9aa84a"
+      },
+      "name": "reeds"
+    },
+    "silt": {
+      "description": "Pale, fine silt, the old river's banks.",
+      "glyph": {
+        "char": ".",
+        "color": "#b8a070"
+      },
+      "name": "silt"
+    }
+  },
+  "light": 0.0,
+  "origin": [
+    116,
+    133
+  ],
+  "radius": 5.0,
+  "rows": [
+    ".5s1.5",
+    ".2g3c1s3.2",
+    ".1g2c5s1r1.1",
+    ".1g1c7r1.1",
+    ".1g1c7r1.1",
+    "g1c8r1b1",
+    ".1g1c7r1.1",
+    ".1g1c7r1.1",
+    ".1g2c5s1r1.1",
+    ".2g3c1s3.2",
+    ".5g1.5"
+  ],
+  "size": 11,
+  "things": [
+    {
+      "cell": [
+        121,
+        138
+      ],
+      "glyph": {
+        "char": "*",
+        "color": "#ff9a3c"
+      },
+      "id": "town-hearth",
+      "kind": "hearth_burning",
+      "name": "the kiln-house hearth"
+    },
+    {
+      "cell": [
+        121,
+        138
+      ],
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "id": "ember-reach",
+      "kind": "place",
+      "name": "Ember Reach"
+    }
+  ],
+  "time": 25657768800,
+  "you": {
+    "glyph": {
+      "char": "@",
+      "color": "#e8a07a"
+    },
+    "id": "mira-vale",
+    "name": "Mira Vale"
+  }
+}

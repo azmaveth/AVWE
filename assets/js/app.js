@@ -1,12 +1,14 @@
-// The web client's one script: it connects the page to its LiveView.
+// The web client's one script: it connects the page to its LiveView, and
+// draws what the server sends (hooks.js, draw.js).
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
+import {CommandLine, LogScroll, SceneCanvas} from "./hooks.js"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {},
+  hooks: {CommandLine, LogScroll, SceneCanvas},
 })
 
 liveSocket.connect()

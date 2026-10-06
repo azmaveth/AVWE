@@ -55,6 +55,14 @@ jobs:
       - name: Build the web client's assets
         run: mix assets.setup && mix assets.build
 
+      # The page's drawing arithmetic is plain JavaScript, tested with Node's
+      # own runner on scenes the server builds (assets/test).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Test the drawing arithmetic
+        run: npm test --prefix assets
+
       - name: Tests
         run: mix test --warnings-as-errors
 

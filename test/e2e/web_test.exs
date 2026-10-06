@@ -237,17 +237,26 @@ defmodule Avwe.E2E.WebTest do
       assert eventually(fn -> not taken?("wren") end)
     end
 
-    test "turns away a second page for a body that is held", %{port: port} do
+    test "turns away a second page for a body that is held, at its socket", %{port: port} do
       {first, _topic, _reply} = open_page(port, "/play/hollow_web/wren")
 
+      # The plain request is answered with the page, whoever holds the body.
       plain = HTTPClient.request(port, "GET", "/play/hollow_web/wren")
-      assert plain.status == 302
-      assert header(plain, "location") == ["/"]
+      assert plain.status == 200
+      assert plain.body =~ "Joining Lantern Hollow..."
+
+      {second, _topic, reply} = open_page(port, "/play/hollow_web/wren")
+
+      assert [_, _, _, "phx_reply", %{"status" => "error", "response" => response}] = reply
+      assert response["live_redirect"]["to"] == "/"
+      WebSocketClient.close(second)
 
       WebSocketClient.close(first)
       assert eventually(fn -> not taken?("wren") end)
 
-      assert %{status: 200} = HTTPClient.request(port, "GET", "/play/hollow_web/wren")
+      {third, _topic, reply} = open_page(port, "/play/hollow_web/wren")
+      assert [_, _, _, "phx_reply", %{"status" => "ok"}] = reply
+      WebSocketClient.close(third)
     end
   end
 end

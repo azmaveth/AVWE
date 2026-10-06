@@ -26,23 +26,12 @@ defmodule Avwe.Telnet.Connection do
 
   @routine_prefix "- "
 
-  @help """
-  Commands:
-    look              describe where you are
-    go <place>        walk to a place you know
-    go <direction>    walk 100 m north, south-east... (or: go west 300)
-    follow upstream   follow the river channel (or: follow downstream)
-    say <text>        speak (also: whisper, shout)
-    wait [minutes]    let time pass (also: wait 2 hours, wait until dawn, wait until dusk)
-    kindle [hearth]   light the hearth here (also: light the fire, light the lodge hearth)
-    douse [hearth]    put the fire out (also: put out the fire, douse the coal)
-    write <text>      write a page in your notebook
-    read [pages]      read the last pages of your notebook (also: notes)
-    stop              stop what you're doing
-    time              the time in the world
-    quit              leave
-  Lines starting with "- " are what your routine does with you while you stop acting; any command you type keeps you in hand a while longer, and any command that acts (go, say, wait, light...) takes you back if the routine had you.\
-  """
+  # The commands are `Avwe.Command`'s; what is telnet's own is told after them.
+  @help Command.help() <>
+          """
+
+          Lines starting with "- " are what your routine does with you while you stop acting; any command you type keeps you in hand a while longer, and any command that acts (go, say, wait, light...) takes you back if the routine had you.\
+          """
 
   @spec start_link({:gen_tcp.socket(), keyword()}) :: GenServer.on_start()
   def start_link({socket, opts}), do: GenServer.start_link(__MODULE__, {socket, opts})

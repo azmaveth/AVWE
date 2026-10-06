@@ -117,6 +117,10 @@ h3 {
   color: var(--alert);
 }
 
+.page.play {
+  max-width: 72rem;
+}
+
 .play header {
   display: flex;
   flex-wrap: wrap;
@@ -130,17 +134,174 @@ h3 {
   margin-left: auto;
 }
 
-.arrival {
+.play .clock {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The map beside what can be done, and under it on a narrow screen. */
+.stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
   margin: 1rem 0;
 }
 
-.log {
-  margin: 1rem 0;
+@media (min-width: 60rem) {
+  .stage {
+    grid-template-columns: minmax(0, 1fr) 17rem;
+    align-items: start;
+  }
+}
+
+.map {
+  min-width: 0;
+}
+
+#map {
+  display: block;
+  max-width: 100%;
+  background: #0e0c09;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  cursor: pointer;
+}
+
+.map-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem 1rem;
+  margin-top: 0.5rem;
+}
+
+.map-tools button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.legend {
+  margin-top: 0.3rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.legend ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0.4rem 0 0;
   padding: 0;
   list-style: none;
 }
 
+.glyph {
+  display: inline-block;
+  min-width: 1ch;
+  color: var(--fg);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-weight: 700;
+  text-align: center;
+}
+
+.hud h2 {
+  margin: 0.9rem 0 0.4rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.hud .group:first-child h2 {
+  margin-top: 0;
+}
+
+button {
+  margin: 0 0.35rem 0.35rem 0;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover,
+button:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.look p {
+  margin: 0.35rem 0;
+}
+
+.look {
+  margin: 1rem 0;
+  padding: 0.5rem 0.9rem;
+  border-left: 3px solid var(--line);
+}
+
+.log {
+  max-height: 22rem;
+  margin: 1rem 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
 .log li {
   padding: 0.15rem 0;
+}
+
+/* A line may hold several (the look, help): keep its breaks. */
+.log .text {
   white-space: pre-line;
+}
+
+.log .reply {
+  color: var(--accent);
+}
+
+/* What the routine does with the body while the player has let it go. */
+.log .routine {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.command {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.command label {
+  color: var(--muted);
+}
+
+.command input {
+  flex: 1 1 14rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+}
+
+.command button {
+  margin: 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }

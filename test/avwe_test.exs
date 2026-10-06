@@ -42,6 +42,40 @@ defmodule AvweTest do
     assert view.time == sunrise
   end
 
+  test "warm_ground keeps the ground map of a world's terrain, without waiting for it" do
+    warm = :warm_reach
+    seed = System.unique_integer([:positive])
+
+    {:ok, _pid} =
+      Avwe.start_world(warm,
+        quire: Fixtures.lantern_hollow(),
+        terrain: [clay: [{"hollow-green", radius_cells: 3}]],
+        seed: seed
+      )
+
+    on_exit(fn -> Avwe.stop_world(warm) end)
+
+    {:ok, %{terrain: terrain}} = Avwe.snapshot(warm)
+    refute Avwe.GroundCache.cached?(terrain)
+
+    # It returns at once; the map, which takes about a second, comes after.
+    {microseconds, :ok} = :timer.tc(fn -> Avwe.warm_ground(warm) end)
+    assert microseconds < 250_000
+    refute Avwe.GroundCache.cached?(terrain)
+
+    assert Fixtures.eventually(fn -> Avwe.GroundCache.cached?(terrain) end, 10_000)
+    assert :ok = Avwe.warm_ground(warm)
+  end
+
+  test "warm_ground has nothing to build for a world with no terrain, or none running" do
+    flat = :flat_reach
+    {:ok, _pid} = Avwe.start_world(flat, quire: Fixtures.lantern_hollow())
+    on_exit(fn -> Avwe.stop_world(flat) end)
+
+    assert :ok = Avwe.warm_ground(flat)
+    assert :ok = Avwe.warm_ground(:no_such_world)
+  end
+
   test "a subscriber hears of a step with no events only if it asked to hear of every step" do
     # Only the daylight runs here, so nothing happens between now and sunrise.
     hushed = :hushed_reach

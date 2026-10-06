@@ -1,0 +1,238 @@
+{
+  "center": [
+    121,
+    138
+  ],
+  "holder": "human",
+  "legend": {
+    "channel_bed": {
+      "description": "Cracked mud where the river ran.",
+      "glyph": {
+        "char": "_",
+        "color": "#7a6850"
+      },
+      "name": "dry river bed"
+    },
+    "clay": {
+      "description": "Packed clay, the town's streets.",
+      "glyph": {
+        "char": ":",
+        "color": "#b0653a"
+      },
+      "name": "clay"
+    },
+    "grass": {
+      "description": "Dry grass.",
+      "glyph": {
+        "char": "\"",
+        "color": "#6f8f4a"
+      },
+      "name": "grass"
+    },
+    "hearth": {
+      "description": "A hearth with no fire in it.",
+      "glyph": {
+        "char": "o",
+        "color": "#8a8078"
+      },
+      "name": "cold hearth"
+    },
+    "place": {
+      "description": "A place you know.",
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "name": "place"
+    },
+    "reeds": {
+      "description": "Reeds that keep the channel's shape.",
+      "glyph": {
+        "char": "|",
+        "color": "#9aa84a"
+      },
+      "name": "reeds"
+    },
+    "silt": {
+      "description": "Pale, fine silt, the old river's banks.",
+      "glyph": {
+        "char": ".",
+        "color": "#b8a070"
+      },
+      "name": "silt"
+    }
+  },
+  "light": 1.0,
+  "origin": [
+    71,
+    88
+  ],
+  "radius": 50.0,
+  "rows": [
+    ".50g1.50",
+    ".41g19.41",
+    ".36g29.36",
+    ".33g35.33",
+    ".31g37s2.31",
+    ".29g38s5.29",
+    ".27g39s5r1b2.27",
+    ".25g41s5r1b3r1.25",
+    ".23g42s5r1b3r1s3.23",
+    ".22g43s4r1b3r1s5.22",
+    ".20g44s5r1b3r1s5g2.20",
+    ".19g44s5r1b3r1s5g4.19",
+    ".18g45s5r1b3r1s4g6.18",
+    ".17g45s5r1b3r1s5g7.17",
+    ".16g45s5r1b3r1s5g9.16",
+    ".15g46s5r1b3r1s5g10.15",
+    ".14g46s5r1b3r1s5g12.14",
+    ".13g46s5r1b3r1s5g14.13",
+    ".12g47s5r1b3r1s5g15.12",
+    ".11g47s5r1b3r1s5g17.11",
+    ".10g47s5r1b3r1s5g19.10",
+    ".10g47s5r1b3r1s5g19.10",
+    ".9g47s5r1b3r1s5g21.9",
+    ".8g47s5r1b3r1s5g23.8",
+    ".8g47s5r1b3r1s5g23.8",
+    ".7g47s5r1b3r1s5g25.7",
+    ".7g46s5r1b3r1s5g26.7",
+    ".6g47s5r1b3r1s5g27.6",
+    ".6g46s5r1b3r1s5g28.6",
+    ".5g47s4r1b3r1s5g30.5",
+    ".5g47s4r1b3r1s5g30.5",
+    ".4g47s4r1b3r1s5g32.4",
+    ".4g47s4r1b3r1s4g33.4",
+    ".3g48s4r1b3r1s4g34.3",
+    ".3g48s4r1b3r1s4g34.3",
+    ".3g48s4r1b3r1s4g34.3",
+    ".2g49s4r1b3r1s4g35.2",
+    ".2g49s4r1b3r1s4g35.2",
+    ".2g49s4r1b3r1s4g35.2",
+    ".2g49s4r1b3r1s4g35.2",
+    ".2g49s4r1b3r1s4g35.2",
+    ".1g49s4r1b3r1s4g37.1",
+    ".1g49s4r1b3r1s4g37.1",
+    ".1g49s4r1b3r1s4g37.1",
+    ".1g49s4r1b3r1s4g37.1",
+    ".1g49s4r1b3r1s4g37.1",
+    ".1g49c1s3r1b3r1s4g37.1",
+    ".1g47c5s1r1b3r1s4g37.1",
+    ".1g46c7r1b3r1s4g37.1",
+    ".1g46c7r1b3r1s4g37.1",
+    "g46c8r1b3r1s4g38",
+    ".1g46c7r1b3r1s4g37.1",
+    ".1g46c7r1b3r1s4g37.1",
+    ".1g47c5s1r1b3r1s4g37.1",
+    ".1g49c1s4r1b3r1s4g36.1",
+    ".1g50s4r1b3r1s4g36.1",
+    ".1g50s4r1b3r1s5g35.1",
+    ".1g50s4r1b3r1s5g35.1",
+    ".1g51s4r1b3r1s5g34.1",
+    ".1g51s5r1b3r1s5g33.1",
+    ".2g50s5r1b3r1s6g31.2",
+    ".2g51s5r1b3r1s5g31.2",
+    ".2g52s5r1b3r1s5g30.2",
+    ".2g52s6r1b3r1s5g29.2",
+    ".2g53s5r1b3r1s5g29.2",
+    ".3g53s5r1b3r1s5g27.3",
+    ".3g54s5r1b3r1s4g27.3",
+    ".3g54s5r1b3r1s5g26.3",
+    ".4g54s5r1b3r1s4g25.4",
+    ".4g55s4r1b3r1s4g25.4",
+    ".5g54s5r1b3r1s4g23.5",
+    ".5g55s4r1b3r1s4g23.5",
+    ".6g54s4r1b3r1s4g22.6",
+    ".6g55s4r1b3r1s4g21.6",
+    ".7g54s4r1b3r1s4g20.7",
+    ".7g54s4r1b3r1s4g20.7",
+    ".8g53s4r1b3r1s4g19.8",
+    ".8g53s4r1b3r1s4g19.8",
+    ".9g52s4r1b3r1s4g18.9",
+    ".10g51s4r1b3r1s4g17.10",
+    ".10g51s4r1b3r1s4g17.10",
+    ".11g50s4r1b3r1s4g16.11",
+    ".12g49s4r1b3r1s4g15.12",
+    ".13g48s4r1b3r1s4g14.13",
+    ".14g47s4r1b3r1s4g13.14",
+    ".15g46s4r1b3r1s4g12.15",
+    ".16g45s4r1b3r1s4g11.16",
+    ".17g44s4r1b3r1s4g10.17",
+    ".18g43s4r1b3r1s4g9.18",
+    ".19g42s4r1b3r1s4g8.19",
+    ".20g41s4r1b3r1s4g7.20",
+    ".22g39s4r1b3r1s4g5.22",
+    ".23g38s4r1b3r1s4g4.23",
+    ".25g36s4r1b3r1s4g2.25",
+    ".27g34s4r1b3r1s4.27",
+    ".29g32s4r1b3r1s2.29",
+    ".31g30s4r1b3r1.31",
+    ".33g28s4r1b2.33",
+    ".36g25s4.36",
+    ".41g19.41",
+    ".50g1.50"
+  ],
+  "size": 101,
+  "things": [
+    {
+      "cell": [
+        121,
+        138
+      ],
+      "glyph": {
+        "char": "o",
+        "color": "#8a8078"
+      },
+      "id": "town-hearth",
+      "kind": "hearth",
+      "name": "the kiln-house hearth"
+    },
+    {
+      "cell": [
+        94,
+        105
+      ],
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "id": "ashwarden-lodge",
+      "kind": "place",
+      "name": "Ashwarden Lodge"
+    },
+    {
+      "cell": [
+        121,
+        138
+      ],
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "id": "ember-reach",
+      "kind": "place",
+      "name": "Ember Reach"
+    },
+    {
+      "cell": [
+        138,
+        162
+      ],
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "id": "willow-docks",
+      "kind": "place",
+      "name": "Willow Docks"
+    }
+  ],
+  "time": 25657732800,
+  "you": {
+    "glyph": {
+      "char": "@",
+      "color": "#e8a07a"
+    },
+    "id": "mira-vale",
+    "name": "Mira Vale"
+  }
+}
