@@ -248,14 +248,16 @@ at most.
 ### 3.1 Phoenix, minimally
 
 Dependencies: `phoenix ~> 1.8`, `phoenix_live_view ~> 1.2`,
-`phoenix_html ~> 4.3`, `esbuild` (dev, to bundle one JavaScript file) and
-`lazy_html` (test). No Ecto, mailer, gettext or Tailwind: the app has no
+`phoenix_html ~> 4.3`, `esbuild` (dev, to bundle one JavaScript file) and, in
+test, `phoenix_test` (which brings `lazy_html`) and `phoenix_test_playwright`
+(open question 2). No Ecto, mailer, gettext or Tailwind: the app has no
 database and the pages are simple, so styling is one plain stylesheet. The
 modules are hand-written under `lib/avwe_web/` rather than generated, so
 nothing is imported that is not used.
 
 The HTTP adapter is Bandit, Phoenix's default, declared in `mix.exs` by
-name rather than arriving through another dependency (open question 1).
+name rather than arriving through another dependency (open question 1,
+settled).
 Cowboy is here today only because ExMCP 1.5 needs it. ArborMCP 2
 (`arbor_mcp`, `Arbor.MCP.*`, now a release candidate) makes its HTTP
 backends optional and pins Bandit 1.12.5, Thousand Island 1.5.0 and, for
@@ -414,15 +416,27 @@ Order inside the work: 2.1 first (a pure refactor with its own tests), then
 
 ## 7. Open questions
 
-1. **The HTTP adapter.** Bandit, as 3.1 explains: v2 of the MCP library pins
-   Ranch 1.8.1 for Cowboy and Bandit 1.12.5 for Bandit, so Bandit is the one
-   that does not push us backward. Confirm, or say Cowboy.
-2. **The headless driver.** Playwright through `phoenix_test_playwright`
-   (0.18) together with `phoenix_test`, which gives one API for in-process
-   LiveView tests and real-browser ones, at the cost of Node and a downloaded
-   Chromium in CI; or Wallaby (0.31), older and steadier, using the Chrome
-   that is already on the runners. Default: Playwright; settle it in the
-   third pull request after trying it.
+1. **The HTTP adapter. Settled (Hysun, 2026-10-06): Bandit.** As 3.1
+   explains: v2 of the MCP library pins Ranch 1.8.1 for Cowboy and Bandit
+   1.12.5 for Bandit, so Bandit is the one that does not push us backward.
+2. **The headless driver. Settled (2026-10-06, left to me): Playwright**
+   through `phoenix_test_playwright` with `phoenix_test`. It waits by itself
+   for the LiveView socket and the first scene, which is most of what makes a
+   page like this flaky; it runs a Chromium pinned by its version, the same
+   browser on a laptop and on the runner, where Wallaby needs ChromeDriver to
+   match whatever Chrome has updated to; it keeps traces and screenshots as CI
+   artifacts (section 4 asks for one); WebKit and Firefox are a config line away,
+   which matters to a canvas page that someone will open in Safari; and
+   PhoenixTest drives the in-process LiveView tests with the same API. The
+   costs are Node and a downloaded Chromium in the Browser job (Node is on the
+   runners already for `node --test`), `lazy_html` in test, and a library that
+   is pre-1.0 and releases quickly (0.14 in May, 0.18 in September; its client
+   `playwright_ex` made five releases in three weeks in September). The lock
+   file freezes it, and `mix.exs` pins the minor (`~> 0.18.0`) so an update is
+   a choice. Wallaby 0.31 (older, steadier, using the Chrome and ChromeDriver
+   already on the runners) is the fallback if the job proves flaky or heavy:
+   the browser test is one file. Browser tests are tagged `:browser` and
+   excluded from `mix test`; the Test job needs neither Node nor a browser.
 3. **MCP and the web endpoint.** The MCP server keeps its own listener (4041)
    in M2. With ArborMCP 2's `Arbor.MCP.HttpPlug` mounts it could later live in
    the Phoenix router: one port, one origin policy. Revisit when the MCP
