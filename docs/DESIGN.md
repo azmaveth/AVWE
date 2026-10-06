@@ -906,6 +906,8 @@ core. A feature isn't done until its end-to-end test exists.
 - *Is the source on the map?* Yes, so it can be discovered (section 10.2).
 - *Does anyone in the Reach know where the source is?* No. Its location was
   forgotten.
+- *Should AVWE build on Jido or Ash?* Not now, and in neither case in the
+  core. Open questions 10 and 11 say where each could come in.
 
 **Open**
 
@@ -935,6 +937,26 @@ core. A feature isn't done until its end-to-end test exists.
    joins again takes a second body, and the first stays held for 15 minutes.
    The instructions warn about it; is a shorter quit time for token players,
    or a way to reclaim, worth it?
+10. **Other agent frameworks.** Jido (an agent framework for Elixir: agents as
+    immutable data with a pure `cmd/2`, actions, signals, directives) overlaps
+    Arbor, the framework meant to play here, and its decision logic is the
+    pattern AVWE already has by hand (a system returns `{region, events}`;
+    autopilot returns intents). It stays outside AVWE's dependencies, and the
+    core never calls a model. Its place is as one more client: a Jido agent
+    playing a body through MCP or Channels with no help from AVWE is the same
+    test Claude and Arbor pass, and cheap evidence that the protocol has no
+    back doors. Jido is in a 3.0 beta, so there is no hurry.
+11. **A platform layer.** Accounts, game-master tools (section 9), saved
+    scenarios, and a searchable chronicle (10.4) are ordinary records and
+    policies around the world, not part of it. When the web client has to
+    leave loopback (it needs identity) or question 7 is answered with a
+    database, Ash is the candidate: resources and policies, AshAuthentication,
+    AshAdmin, and AshSqlite or AshPostgres. It would be a separate application
+    that calls AVWE's public API (`Avwe.worlds/0`, `bodies/1`, `connect/2`)
+    and is never called by the simulation. It does not fit the core: the
+    world is an event-sourced simulation whose journal, snapshots and tick
+    pipeline need exact replay and a per-step budget of a few milliseconds,
+    which a resource and action layer would only get in the way of.
 
 ## 15. Prior art
 

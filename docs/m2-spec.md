@@ -12,6 +12,10 @@
    (heat, water, smoke) are M2b, after this.
 3. Rendering is glyph-only first: characters and colour on a canvas.
    Sprites come later, through the same representation layers.
+4. Browser testing is both: Node unit tests for the drawing arithmetic, and a
+   headless-browser end-to-end test of the play page in CI (section 4).
+5. No remembered map in M2a: the canvas shows what is in sight now, and a
+   reload forgets.
 
 **Done when** (DESIGN 13): a telnet player, a web player and Claude are in
 the world at once and each perceives the others.
@@ -166,9 +170,19 @@ database and the pages are simple, so styling is one plain stylesheet. The
 modules are hand-written under `lib/avwe_web/` rather than generated, so
 nothing is imported that is not used.
 
-The HTTP adapter is Cowboy, which is already here for the MCP server (one
-HTTP stack to review and keep patched); Bandit is a one-line swap later. The
-endpoint listens on `127.0.0.1:4042` (telnet 4040, MCP 4041), allows only
+The HTTP adapter is Bandit, Phoenix's default, declared in `mix.exs` by
+name rather than arriving through another dependency (open question 1).
+Cowboy is here today only because ExMCP 1.5 needs it. ArborMCP 2
+(`arbor_mcp`, `Arbor.MCP.*`, now a release candidate) makes its HTTP
+backends optional and pins Bandit 1.12.5, Thousand Island 1.5.0 and, for
+Cowboy, Ranch 1.8.1 (we run 2.3.0). A web on Cowboy would be pushed back a
+Ranch major version when the MCP adapter moves to v2; a web on Bandit
+already sits on the stack v2 and Phoenix both lean toward. Until the MCP
+adapter moves (a separate task: four files in `lib/`), the app runs two HTTP
+servers, one for each. Nothing in `AvweWeb` touches the adapter, so changing
+it is a config line.
+
+The endpoint listens on `127.0.0.1:4042` (telnet 4040, MCP 4041), allows only
 its own origin, and takes its secret key base from `AVWE_SECRET_KEY_BASE` in
 prod. It is started by the application when `config :avwe, AvweWeb.Endpoint`
 is set (dev and prod), as telnet and MCP are; tests start their own.
@@ -270,11 +284,17 @@ its real transport.
   cells and moves them as they walk; the MCP player's `listen` and the telnet
   lines report the web player's arrival and speech; releasing one body
   frees it for the routine in all three views.
-- **The browser** (Open question 1): the canvas drawing arithmetic (cell to
+- **The browser**, in two layers. The canvas drawing arithmetic (cell to
   pixel, fog, glyph colour by light) is plain functions in their own module
-  and has `node --test` unit tests, no dependencies; CI runs them (Node is
-  on the runners). A real browser is driven by hand during development, with
-  screenshots in the PR.
+  with `node --test` unit tests and no dependencies; CI runs them (Node is on
+  the runners). And a headless-browser end-to-end test of the play page, in
+  its own CI job: it opens the page against a running endpoint, waits for the
+  first scene, checks the canvas was drawn (the hook also mirrors the scene
+  into `data-` attributes, so the test reads state, not pixels), clicks a
+  place and sees the walk begin in the log, and keeps a screenshot as a CI
+  artifact. That job stays off the required list until it has run stably for a
+  while. The page is also driven by hand in a real browser during
+  development, with screenshots in the PR.
 
 ## 5. Rules
 
@@ -288,8 +308,8 @@ are required on every PR (`master` is protected). Expect: a larger Dialyzer
 PLT (Phoenix and LiveView add several hundred modules, so a cold build is
 slower; it is cached); `@impl Phoenix.LiveView` and a `@spec` on every public
 function in `lib/avwe_web/`, as Credo requires; the weekly dependency audit
-now also covers Phoenix; and an assets step (esbuild) plus the Node tests in
-CI.
+now also covers Phoenix; an assets step (esbuild) plus the Node tests; and a
+separate Browser job (Node and a headless Chromium).
 
 ## 6. Delivery
 
@@ -299,10 +319,10 @@ first:
 1. **The core** (2.1 to 2.5): commands, representation layers, the ground
    map, scenes, and sessions that produce them. No web code; the telnet and
    MCP tests are the proof that nothing moved.
-2. **The skeleton** (3.1, 3.2, 3.4): Phoenix, the endpoint, the router, the
-   lobby, headers and Sobelow's new settings, the assets build.
-3. **The play page** (3.3), the done-criterion test, and the DESIGN.md
-   updates: 5 (layout), 8.4 (layers as built), 9 (the web row), 13 (M2
+2. **The skeleton** (3.1, 3.2, 3.4): Phoenix on Bandit, the endpoint, the
+   router, the lobby, headers and Sobelow's new settings, the assets build.
+3. **The play page** (3.3), the Browser job, the done-criterion test, and the
+   DESIGN.md updates: 5 (layout), 8.4 (layers as built), 9 (the web row), 13 (M2
    split into M2a and M2b), 14.
 
 Order inside the work: 2.1 first (a pure refactor with its own tests), then
@@ -310,21 +330,26 @@ Order inside the work: 2.1 first (a pure refactor with its own tests), then
 
 ## 7. Open questions
 
-1. **Browser-level testing.** Recommended: Node unit tests for the drawing
-   arithmetic plus manual verification in a real browser with screenshots.
-   The alternative is a headless-browser test in CI (Playwright or Wallaby),
-   which is stronger and adds a heavy dependency and slower, flakier runs.
-2. **A map that is remembered.** Recommended for M2a: none; the canvas shows
-   only what is in sight now, and a reload forgets. A remembered map is
-   either browser-side (cheap, lost on reload) or a per-body state component
-   (survives, and has to be journaled and replayed); that is its own design.
-3. **Glyph overrides.** Config keys now (2.2). Whether Quire articles should
+1. **The HTTP adapter.** Bandit, as 3.1 explains: v2 of the MCP library pins
+   Ranch 1.8.1 for Cowboy and Bandit 1.12.5 for Bandit, so Bandit is the one
+   that does not push us backward. Confirm, or say Cowboy.
+2. **The headless driver.** Playwright through `phoenix_test_playwright`
+   (0.18) together with `phoenix_test`, which gives one API for in-process
+   LiveView tests and real-browser ones, at the cost of Node and a downloaded
+   Chromium in CI; or Wallaby (0.31), older and steadier, using the Chrome
+   that is already on the runners. Default: Playwright; settle it in the
+   third pull request after trying it.
+3. **MCP and the web endpoint.** The MCP server keeps its own listener (4041)
+   in M2. With ArborMCP 2's `Arbor.MCP.HttpPlug` mounts it could later live in
+   the Phoenix router: one port, one origin policy. Revisit when the MCP
+   adapter moves to v2.
+4. **Glyph overrides.** Config keys now (2.2). Whether Quire articles should
    carry them is for Quire.
-4. **Keyboard play.** Not in M2a (clicks and the command line). Arrow keys
+5. **Keyboard play.** Not in M2a (clicks and the command line). Arrow keys
    walking a fixed distance is an easy addition once the page exists.
-5. **Names of bodies not yet met.** The look names every body in sight, so
+6. **Names of bodies not yet met.** The look names every body in sight, so
    the scene does too. DESIGN 8.3 wants names known only once met; that is a
    separate feature and would change the look first.
-6. **Binding and exposure.** Loopback only. If the page is ever to be
+7. **Binding and exposure.** Loopback only. If the page is ever to be
    reachable beyond it, that needs identity, and TLS in front, before any
    other change.
