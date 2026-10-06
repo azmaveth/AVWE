@@ -77,6 +77,9 @@ defmodule Avwe.Quire do
     end
   end
 
+  # The paths are the Quire folder the operator configured and the names
+  # `File.ls` finds in it, never a controller's input.
+  # sobelow_skip ["Traversal.FileModule"]
   defp read(path) do
     case File.read(path) do
       {:ok, text} -> {:ok, text}

@@ -33,6 +33,18 @@ defmodule Avwe.Store do
       tag is refused with `{:unknown_snapshot, path, tag}`, so a region never
       resumes from a snapshot that a different build of the code wrote.
 
+  ## Trust
+
+  Everything here lives under the operator's `data_dir`, and the names in it
+  (the world, the region, the step) come from configuration and the
+  simulation; no controller supplies a path, so the file functions below
+  carry `sobelow_skip` marks for directory traversal. Snapshots are decoded
+  with `:erlang.binary_to_term/1`, also skipped: `:safe` would still decode
+  funs, and refuses atoms that the writing build had but this one has not
+  loaded yet (modules load lazily outside a release). Whoever can write a
+  snapshot there can already write the log, which `:disk_log` decodes the
+  same way, so the files are as trusted as the code.
+
   ## Durability
 
   Intents are journaled when they are accepted, so an intent the region
@@ -147,6 +159,7 @@ defmodule Avwe.Store do
   @spec close(t()) :: :ok | {:error, term()}
   def close(%__MODULE__{log: log}), do: :disk_log.close(log)
 
+  # sobelow_skip ["Traversal.FileModule"]
   defp mkdir(path) do
     case File.mkdir_p(path) do
       :ok -> :ok
@@ -154,6 +167,7 @@ defmodule Avwe.Store do
     end
   end
 
+  # sobelow_skip ["Traversal.FileModule"]
   defp remove_partial_snapshots(path) do
     path
     |> Path.join(@snapshot_prefix <> "*" <> @snapshot_suffix <> ".tmp")
@@ -377,8 +391,10 @@ defmodule Avwe.Store do
     end
   end
 
+  # sobelow_skip ["Traversal.FileModule"]
   defp remove(store, step), do: File.rm(snapshot_path(store, step))
 
+  # sobelow_skip ["Traversal.FileModule"]
   defp read_snapshot(store, step) do
     path = snapshot_path(store, step)
 
@@ -392,6 +408,7 @@ defmodule Avwe.Store do
   # `{:avwe_snapshot, 1, region}` was written by other code: a later version
   # of this one, or the untagged format from before the tag. The tag names
   # which, so the error can say what the file is.
+  # sobelow_skip ["Misc.BinToTerm"]
   defp decode_snapshot(binary, path) do
     case :erlang.binary_to_term(binary) do
       {@snapshot_tag, @snapshot_version, %Region{} = region} -> {:ok, region}

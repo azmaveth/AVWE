@@ -1,0 +1,47 @@
+name: Set up Elixir
+description: >
+  The Erlang/OTP and Elixir pinned in .tool-versions (so CI and local work
+  match), and the project's dependencies, cached.
+
+inputs:
+  mix-env:
+    description: The MIX_ENV the dependencies are compiled for, and the job runs in.
+    default: dev
+
+outputs:
+  otp-version:
+    description: The Erlang/OTP version that was installed.
+    value: ${{ steps.beam.outputs.otp-version }}
+  elixir-version:
+    description: The Elixir version that was installed.
+    value: ${{ steps.beam.outputs.elixir-version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Erlang and Elixir
+      id: beam
+      uses: erlef/setup-beam@v1
+      with:
+        version-file: .tool-versions
+        version-type: strict
+
+    - name: Use MIX_ENV=${{ inputs.mix-env }}
+      shell: bash
+      run: echo "MIX_ENV=${{ inputs.mix-env }}" >> "$GITHUB_ENV"
+
+    - name: Cache dependencies
+      uses: actions/cache@v6
+      with:
+        path: |
+          deps
+          _build
+        key: mix-${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ inputs.mix-env }}-${{ hashFiles('mix.lock') }}
+        restore-keys: |
+          mix-${{ runner.os }}-${{ steps.beam.outputs.otp-version }}-${{ steps.beam.outputs.elixir-version }}-${{ inputs.mix-env }}-
+
+    - name: Fetch and compile dependencies
+      shell: bash
+      run: |
+        mix deps.get
+        mix deps.compile

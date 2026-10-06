@@ -46,11 +46,44 @@ changing anything structural; it records the decisions and the reasons.
 
 ```bash
 mix test
-mix format
-mix credo --strict
-mix compile --warnings-as-errors
 mix test --include perf     # also runs the per-step cost bound (< 10 ms)
+mix format
+mix lint                    # format check, unused deps, compile with warnings as
+                            # errors, credo --strict: about a second warm
+mix dialyzer                # types; the first run builds the PLTs (about a minute)
+scripts/sobelow             # security scan (mix sobelow, minus the mix.lock noise)
+mix hex.audit               # advisories in the locked deps; needs the network
 ```
+
+## Checks: hooks and CI
+
+Everything above runs in CI (`.github/workflows/`) for every pull request and
+push to master: Lint, Test, Dialyzer and Sobelow in `ci.yml`, and
+`mix hex.audit` in `audit.yml`, which also runs weekly because advisories
+appear without any change here. A change is not done until they all pass.
+
+`.githooks/` has the same checks for local use; turn them on once per clone
+with `git config core.hooksPath .githooks`. `pre-commit` runs `mix lint` when
+Elixir files or deps changed; `pre-push` runs Dialyzer and Sobelow (a few
+seconds once the PLTs exist). The tests are CI-only (about two minutes), and
+the audit needs the network, so neither is a hook. `--no-verify` skips a hook
+once; CI has no such switch.
+
+What to do with a finding, in order: fix it; or, if it was looked at and is
+fine, say so where the tool reads it, with the reason beside it, so the next
+finding of that kind still fails:
+
+- **Sobelow:** a `# sobelow_skip ["Module"]` comment above the function (see
+  `lib/avwe/store.ex`). Ignoring a whole check goes in `.sobelow-conf`, only
+  for one that cannot apply (`Config.HTTPS`: there is no Phoenix endpoint yet).
+- **Dialyzer:** fix the spec or the code. There is no ignore file; if one is
+  ever needed, it is `.dialyzer_ignore.exs` with a comment per entry.
+- **Advisories:** update the dependency; if no fixed release exists and the
+  affected code is not reachable, add the id to `hex: [ignore_advisories: ...]`
+  in `mix.exs` with the reason. Hex warns when an entry stops matching.
+- **Credo:** fix it. It runs `mix credo --strict` with Credo's default checks.
+  Turning one off, in a `.credo.exs` or with a `# credo:disable` comment, needs
+  the reason beside it.
 
 Tests use worlds in `test/fixtures/quire/`: a copy of the Ember Reach, and
 Lantern Hollow, a tiny world laid out to test hearing and sight ranges (fire

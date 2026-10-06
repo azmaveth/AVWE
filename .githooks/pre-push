@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Runs the slower static checks before anything is shared: Dialyzer (a few
+# seconds once its PLTs exist; the first run builds them, about a minute) and
+# Sobelow. CI runs both as well, and the tests, which take about two minutes
+# and are not run here.
+#
+#   git config core.hooksPath .githooks    turn the hooks on, once per clone
+#   git push --no-verify                   skip them for one push
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+if ! command -v mix >/dev/null 2>&1; then
+  echo "pre-push: mix is not on PATH, so Dialyzer and Sobelow were skipped (CI will run them)." >&2
+  exit 0
+fi
+
+fail() {
+  echo >&2
+  echo "pre-push: $1 failed. --no-verify skips this once." >&2
+  exit 1
+}
+
+echo "pre-push: mix dialyzer"
+mix dialyzer --quiet-with-result || fail "mix dialyzer"
+
+echo "pre-push: scripts/sobelow"
+scripts/sobelow --quiet || fail "Sobelow"

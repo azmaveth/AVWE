@@ -28,3 +28,6 @@ avwe-*.tar
 
 # Worktrees the Claude app makes for parallel agents
 /.claude/worktrees/
+
+# Dialyzer's persistent lookup tables (cached in CI).
+/priv/plts/

@@ -128,11 +128,25 @@ Avwe.Session.act(mira, :go, target: "the-dry-bend")
 flush()   # {:avwe_percepts, _, [%Avwe.Percept{summary: "You set off toward The Dry Bend."}]} ...
 ```
 
-## Tests
+## Tests and checks
 
 ```bash
-mix test
+mix test                  # about two minutes
+mix lint                  # format, unused deps, compiler warnings, credo: about a second
+mix dialyzer              # types; the first run builds the PLTs, about a minute
+scripts/sobelow           # security scan
+mix hex.audit             # known advisories in the dependencies; needs the network
 ```
+
+CI (`.github/workflows/`) runs all of these on every pull request. To run the
+quick ones before each commit and push, turn on the hooks once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`pre-commit` runs `mix lint`; `pre-push` runs Dialyzer and Sobelow.
+`git commit --no-verify` skips a hook once; CI does not skip.
 
 End-to-end tests in `test/e2e/` play through the real transports: telnet over
 TCP, sessions as agents use them, and MCP over real HTTP.
