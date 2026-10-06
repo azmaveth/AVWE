@@ -12,7 +12,7 @@ The design is in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Status
 
-M0 in progress. Built so far:
+M0 and M1 are built:
 
 - Worlds load from Quire. Map pins become places, and characters start at home
   knowing the way to every pinned place.
@@ -42,7 +42,16 @@ M0 in progress. Built so far:
   goes cold the year after the river does. Take her over mid-journey and give
   her back, and she carries on.
 
-That completes M0. Next is M1: an MCP adapter so Claude can play Mira.
+- Memory in the world (M1): Mira carries a survey notebook you can `write`
+  in and `read`, and a body remembers what it perceived, so whoever takes it
+  next is told "While you were away".
+- An MCP server (M1), so Claude can play: join a body, look, act with plans
+  that run on while it thinks, speak, wait, write and read, over streamable
+  HTTP. Claude has played Mira across two sessions and found the notes from
+  the first.
+
+Next is M2: a web client, so a telnet player, a web player and Claude can be
+in the world at once.
 
 ## Playing
 
@@ -71,6 +80,34 @@ lodge to feel the Last Coal; stand by the kiln-house hearth, light it, and
 watch it burn low and out over eight world hours. Or choose `watch` and see
 Mira keep her day on her own. If you stop acting for ten minutes your body
 goes back to its routine, shown as "- " lines, until your next command.
+`write The reeds lean north.` keeps a note in her notebook, and `read` (or
+`notes`) reads it back; it is still there the next time anyone plays her.
+
+If you ran the Ember Reach before M1, delete `worlds/ember_reach` once: a
+world resumed from its saved state keeps its saved characters, so Mira would
+have no notebook.
+
+## Playing with Claude
+
+`mix run --no-halt` also serves MCP at `http://127.0.0.1:4041/mcp`.
+`.mcp.json` in this folder points Claude Code at it, so a Claude Code session
+started here (with the server running, and the `avwe` server approved) has
+the tools: `bodies`, `join`, `look`, `act`, `say`, `wait`, `write`, `read`,
+`listen` and `leave`. Ask it to play Mira.
+
+To play over MCP by hand, or to see what Claude sees:
+
+```bash
+scripts/mcp_call.py bodies
+scripts/mcp_call.py join '{"body": "Mira"}'
+scripts/mcp_call.py act '{"steps": [{"verb": "go", "target": "the dry bend"}, {"verb": "wait", "params": {"minutes": 20}}]}'
+scripts/mcp_call.py write '{"text": "The reeds at the bend lean north."}'
+scripts/mcp_call.py --leave
+```
+
+The script keeps its MCP session in `tmp/mcp_session`; `--new` starts a new
+one, and `--json` prints the structured result too. The world does not wait:
+in dev a world minute passes every real second, whether or not anyone acts.
 
 To see the river run, and hear it fall silent, start the Ember Reach in 812,
 an hour before its source fails:
@@ -98,7 +135,7 @@ mix test
 ```
 
 End-to-end tests in `test/e2e/` play through the real transports: telnet over
-TCP, and sessions as agents use them.
+TCP, sessions as agents use them, and MCP over real HTTP.
 
 ## License
 

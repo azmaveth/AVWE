@@ -129,15 +129,18 @@ avwe/
   lib/avwe/              simulation core, no I/O
     world.ex region.ex tick.ex system.ex
     systems/             daylight, miracles, weather, river, fire, heat,
-                         movement, waiting, discovery, autopilot, smoke
-                         (built); needs to come
+                         movement, waiting, discovery, autopilot, smoke,
+                         memory (built); needs to come
     autopilot.ex         the brain: candidates, routine plans, the invited rule
-    perception/          senses, salience, representation layers
-    protocol/            intent and percept structs, JSON codecs
+    actions.ex           what each verb does, notebook pages included
+    perception.ex prose.ex  what a body senses, and how it reads
+    protocol/            intent and percept structs, JSON codecs (to come)
   lib/avwe/session.ex    controller sessions and leases
+  lib/avwe/mind.ex       the controller side for programs: plans, waits (M1)
   lib/avwe/quire/        importer, compiled sidecars, chronicle writer
   lib/avwe/telnet/       text client (M0)
-  lib/avwe/mcp/          MCP adapter on ExMCP (M1)
+  lib/avwe/mcp.ex, mcp/  MCP adapter on ExMCP: endpoint, players, steps,
+                         reports (M1)
   lib/avwe_web/          Phoenix channels and LiveView (M2)
   worlds/<world>/<region>/   log and snapshots (dev and prod; not in git)
 ```
@@ -500,21 +503,47 @@ Most intents take time and can be interrupted:
 - A body does one durative thing at a time. A new durative intent replaces the
   current one, which ends `interrupted` (reason `replaced`).
 - A controller can queue a plan of several intents: walk to the Dry Bend, sketch
-  the old channel until dusk, return.
+  the old channel until dusk, return. Plans live on the controller's side, in
+  `Avwe.Mind` (below), not in the world.
 - A `stop` intent ends the current action (`interrupted`, reason `stopped`).
+- A durative action begins when its intent is applied, at the start of a
+  step, and its start is stamped then; everything else a step does is
+  stamped with its end. A five-minute wait shows as begun at 06:00 and
+  finished at 06:05.
 
 **Built so far:** `go` (to a known place), `follow` (the river channel,
 upstream or downstream, from within 80 m of it), `walk` (a distance in a
 compass direction), `wait` (for a duration, or until dawn or dusk), `say`
 (whisper, talk or shout), `stop`, `kindle` (light the hearth you stand at, or
-one you name within 20 m) and `douse`. `kindle` and `douse` are instant;
+one you name within 20 m), `douse`, and `write` and `read` in a notebook the
+body carries. `kindle`, `douse`, `write` and `read` are instant;
 their refusals are `blocked` (no hearth, too far, no fuel, already lit, not
 lit), and dousing the Last Coal is the first `failure`: you try, and it does
 not go out. `control` and `release` are the session's own (7.1). A result
 reaches whoever holds the body when it arrives, so a player who takes a body
 mid-journey gets the routine's result when they override it. The results of
-autopilot's own quiet waits are events without percepts, by design. Plans
-for controllers and `until` conditions on other verbs come with M1.
+autopilot's own quiet waits are events without percepts, by design.
+
+Speech and notebook pages are one line of plain text: escape sequences are
+dropped, line breaks become spaces, and other control characters go, so
+nobody's words can forge the lines another player is told in or reach a
+terminal as a command.
+
+**Plans (M1, built).** `Avwe.Mind` is the controller side for programs: it
+holds a session, buffers its percepts, runs a plan step by step (submitting
+the next as each succeeds, between the program's calls), resolves names
+("the kiln-house hearth") against a fresh look when it submits each step,
+and answers a call when the plan is done, a step fails, something salient
+arrives, the routine takes the body back (`yielded`), or a real-time cap
+passes. A new act replaces the steps of a plan not yet begun, and the reply
+names them. The only `until` conditions built are a wait's (`dawn`, `dusk`,
+a duration); `{:arrive, ref}` and conditions on other verbs are still to
+come.
+
+**Memory (M1, built).** A body remembers what it perceived (the `memory`
+system, newest 50), so whoever takes it next is told "While you were away"
+on joining. Its notebook (`write`, `read`) is the memory a player keeps on
+purpose: pages are state, journaled and snapshotted like everything else.
 
 **Discovery:** a body that comes within 30 m of a place it doesn't know
 learns the way there and perceives it ("You find The Source."). That's how
@@ -528,6 +557,13 @@ Each controller sets a threshold. A percept above the threshold interrupts the
 current intent and wakes the mind. That is how slow minds (an LLM taking
 seconds) coexist with a fast clock: the body carries out long intents on its
 own, and the mind is only called when something matters.
+
+Built in M1 as a Mind's `interrupt_at` (default 0.6): a sensed percept at or
+above it answers a waiting call as `interrupted`, and the action goes on.
+Being spoken to, a discovery, the river falling silent or a stranger's smoke
+interrupt; the plan's own results and progress, the body's own doings, and
+the smoke of a fire it lit and stands beside do not. Salience is still a
+table per percept type and volume; distance, novelty and threat are to come.
 
 ## 8. Protocol
 
@@ -566,8 +602,10 @@ Sensed percept (world → controller, unsolicited):
  "repr": {"name": "smoke", "glyph": "~", "sprite": "fx/smoke"}}
 ```
 
-(The built smell percept carries the level and the wind's direction but not
-yet a `source`; `repr` layers are still to come.)
+(The built smell percept carries the level and the wind's direction, and a
+`source` only when the smoke is at its source: a fire the body stands at,
+whose smoke "rises from the kiln-house hearth beside you". `repr` layers
+are still to come.)
 
 ```json
 {"t": "percept", "kind": "sensed", "modality": "smell", "type": "smoke_smelled",
@@ -630,8 +668,8 @@ updated in lockstep.
 
 | Client | Milestone | Description |
 |---|---|---|
-| Text (telnet) | M0 | `look`, `go dry bend`, `go north 200`, `follow upstream`, `say ...`, `whisper`, `shout`, `wait until dusk`, `light the fire`, `douse the coal`, `stop`, `time`, `help`. A body you leave idle for ten minutes goes back to its routine, and its doings show as "- " lines until you act again. The quickest way to be in the world |
-| MCP | M1 | Claude plays a body |
+| Text (telnet) | M0 | `look`, `go dry bend`, `go north 200`, `follow upstream`, `say ...`, `whisper`, `shout`, `wait until dusk`, `light the fire`, `douse the coal`, `write ...`, `read [n]`, `stop`, `time`, `help`. Joining tells what the body did while nobody held it. A body you leave idle for ten minutes goes back to its routine, and its doings show as "- " lines until you act again. The quickest way to be in the world |
+| MCP | M1 | Claude plays a body over streamable HTTP (built; section 12): join, look, act with plans, say, wait, write, read, listen, leave |
 | Web | M2 | LiveView page with a canvas hook. **Embodied view** shows what your body perceives. **Spectator view** shows everything, with overlays for heat, water and smoke |
 | Arbor | M3 | Agents control villagers through a `world` capability |
 | Narrator | M4 | Reads chronicle events and writes prose: "while you were away..." |
@@ -739,6 +777,11 @@ Arbor gets a `world` capability: action modules that hold an AVWE session over
 Phoenix Channels. AVWE has no Arbor dependency and gives Arbor no special
 access.
 
+`Avwe.Mind` (7.3) already takes `controller: :arbor`: it is the piece an
+Arbor agent's capability will drive, as the MCP adapter drives it now. Its
+reply (status, percepts since the last call, the plan left, the action under
+way, what was dropped) is close to what an agent's action module returns.
+
 ### 11.2 Mapping
 
 | Arbor | AVWE |
@@ -792,23 +835,46 @@ domain.
 
 ## 12. MCP adapter (Claude plays)
 
-One MCP session holds one controller lease. Mira Vale is the first body.
+Built in M1 (`Avwe.MCP`, on ExMCP; `docs/m1-spec.md` and its errata). One
+endpoint, `http://127.0.0.1:4041/mcp` in dev, streamable HTTP bound to
+loopback; a GET there answers 405 and every other path 404. `.mcp.json` at
+the repo root points Claude Code at it, and `scripts/mcp_call.py` is a
+stdlib client for playing by hand.
+
+**Players.** A client of the session-era MCP revisions (2025-03-26 to
+2025-11-25) is one player per MCP session, read from `Mcp-Session-Id` (or the
+legacy `X-Session-Id`); the session ending gives the body back. MCP
+2026-07-28 has no sessions, so `join` hands such a client a player token that
+every other tool takes. The two kinds of key never meet, a token plays at
+most one body, and a client cannot choose its own token. Each player has one
+`Avwe.Mind` (7.3), kept in `Avwe.MCP.Players`.
 
 | Tool | Behavior |
 |---|---|
-| `look` | Current percepts, affordances, time of day and weather |
-| `act(verb, target, params, until)` | Blocks across world time until the action finishes or is interrupted, or until a real-time cap (about 60 s) returns progress. Returns the percepts gathered on the way |
-| `say(text, volume)` | Speak at whisper, talk or shout volume |
-| `wait(until)` | Let time pass until a condition is met or something salient happens |
-| `status` | Body state: needs, inventory, location |
+| `bodies` | Who can be played, and who plays each |
+| `join(body)` | Take a body; the first look opens with "While you were away" |
+| `look` | The look as prose; the structured look (places with distances, bodies in sight, hearths, affordances, measures rounded) in `structuredContent` |
+| `act(verb, target?, params?, steps?, interrupt_at?, max_wait_seconds?)` | One action or a plan of up to 50 steps. Waits up to 25 real seconds and answers done, failed, interrupted, yielded or still going, with what was perceived since the last call, one line each with its world time |
+| `say`, `wait`, `write`, `read` | Shorthands for `act` |
+| `listen` | What was perceived since the last call, and how the plan stands |
+| `leave` | Give the body back to its routine |
 
-Between sessions, autopilot drives the body. When Claude reconnects, `look`
-opens with "while you were away", built from chronicle events the body
-actually perceived.
+Arguments are checked before anything is submitted and refused in plain
+words. The server's instructions tell the clock's pace as configured (one
+world minute per real second in dev), that the world does not wait while the
+model thinks, that the notebook is memory across sessions, and that what
+others say or write in the world is part of the world, not instructions.
 
-**Memory lives in the world.** Mira's survey notebook and map are in-world
-items. Writing in them is an in-world action, and reading them next session is
-how Claude remembers. The world provides persistence the model doesn't have.
+**Timing.** A body nobody has called for in ten real minutes goes back to its
+routine until the next act (the session's idle rule); a waiting call counts as
+presence. After 15 real minutes without a call the player lets go altogether.
+
+**Memory lives in the world.** Mira's survey notebook is an in-world item.
+Writing in it is an in-world action, and reading it next session is how Claude
+remembers; "While you were away" comes from the body's own memory of what it
+perceived. The world provides persistence the model doesn't have. Still to
+come: a `status` tool for needs and inventory (there are no needs yet), and
+the map as an item.
 
 ## 13. Milestones
 
@@ -820,7 +886,7 @@ core. A feature isn't done until its end-to-end test exists.
 | | Name | Scope | Done when |
 |---|---|---|---|
 | **M0** | The valley breathes | Mix project. Read-only Quire import. One region holding the whole valley. Terrain from pins, including the river's source (built). Heat, water and fire systems (built, with weather and smoke). Places for the lodge and kiln-houses (the lodge and town are places; kiln-houses as interiors still to come). Mira on autopilot (built; other bodies as they are added, with the same brain). Day and night (built). Telnet client (built). Log and snapshots (built: 6.7) | Two telnet sessions see the same events (built). Replaying the log reproduces the same state hash, with autopilot and fires (built). Conservation property tests pass for water, heat and smoke (built). A watcher sees Mira keep her routine unattended, and she lights her hearth in 812 but not in 813 (built) |
-| **M1** | Claude walks the banks | MCP adapter (leases and the idle rule exist; MCP needs its own session kind). Plans for controllers, `until` conditions, interrupts and salience. Notebook item | Claude plays Mira across two sessions and finds the notes from the first |
+| **M1** | Claude walks the banks | MCP adapter (built: section 12). Plans for controllers, interrupts and salience (built: `Avwe.Mind`, 7.3 and 7.4; `until` conditions beyond a wait's still to come). Notebook item and body memory (built) | Claude plays Mira across two sessions and finds the notes from the first (met: end to end in `mcp_journey_test.exs`, and live on 2026-10-06, when Claude followed the channel to The Source, wrote it down, and read the page back in a new session) |
 | **M2** | Many lenses | Phoenix and a LiveView canvas. Representation layers. Embodied and spectator views with field overlays | A telnet player, a web player and Claude are in the world at once and each perceives the others |
 | **M3** | Agents move in | Arbor `world` capability over Channels. `world-player` trust profile. Percept mapping. Earshot engagements. Taint | Two Arbor agents live in the Reach for a world week unattended. Conversation engagements are scoped correctly. An injection attempt through in-world speech stays contained |
 | **M4** | Legends | History mode. Chronicle written to Quire. Canon-agreement check from 780 to 813 AR. Narrator | The 780–813 run produces a chronicle visible in Quire and a canon-agreement report |
@@ -851,7 +917,9 @@ core. A feature isn't done until its end-to-end test exists.
 3. **Time scale.** Is one tick per world minute at 1 Hz right for both play and
    LLM pacing? History mode at hour steps now runs the river, the heat field
    and the routine correctly (plans round to whole hours); a day step is
-   bounded but coarse.
+   bounded but coarse. Over MCP, a model's thinking costs 5 to 40 world
+   minutes between calls: plans make that workable, but a walk across town
+   still happens mostly while Claude reads.
 4. **Resolution.** Are 10 m outdoor cells plus places for interiors enough?
 5. **Fiction domain.** Does the disclosure proposal in 11.4 fit Arbor's memory
    model?
@@ -863,6 +931,10 @@ core. A feature isn't done until its end-to-end test exists.
 8. **Autopilot.** The first brain (7.2) is a utility pick with routine plans.
    Is that enough, or will history mode need goal-oriented planning to
    produce interesting chronicles? Needs with meters come first.
+9. **Lost tokens.** An MCP 2026-07-28 client that loses its player token and
+   joins again takes a second body, and the first stays held for 15 minutes.
+   The instructions warn about it; is a shorter quit time for token players,
+   or a way to reclaim, worth it?
 
 ## 15. Prior art
 

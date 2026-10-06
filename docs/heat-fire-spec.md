@@ -97,6 +97,11 @@ moduledocs are right. The differences, with their reasons:
   observer is not at it.
 - **Weather:** `Worldgen` validates the wind (`from` a compass direction,
   `m_s` at least 0) at build time.
+- **Changed in M1** (`docs/m1-spec.md`, errata): smoke smelled at a fire
+  names that fire instead of the wind (`"Woodsmoke rises from #{name}
+  beside you."`, `"The smoke from #{name} beside you is thick."`), in the
+  percept and the look; and a kindle or douse whose target is no hearth's
+  id says `"You find no hearth by that name within reach."`.
 
 ---
 

@@ -189,3 +189,72 @@ in exactly one result. Every user- or agent-facing feature has an
 end-to-end test through its real transport. Match the code style.
 `mix format`, `mix compile --warnings-as-errors`, `mix credo --strict`,
 `mix test` clean; the full suite twice.
+
+## As built: errata
+
+Where M1 as built differs from the spec above, or goes past it. The
+moduledocs of `Avwe.Mind`, `Avwe.MCP` and its modules are the reference.
+
+**Notebook and memory**
+- A page is stamped with the end of the step it was written in (the time its
+  result reports), not `tick.time`.
+- Pages and speech are one line of plain text: escape sequences are dropped
+  whole, line breaks and tabs become spaces, other control characters go,
+  then the length is checked. A blank page or speech is refused.
+- A durative action's start (and a journey's departure) is stamped with the
+  start of its step, so a wait's start and end lines are its whole length
+  apart. Autopilot's departures moved a minute earlier with it.
+
+**Mind**
+- A sixth status, `:yielded`: the session's idle rule handed the body to its
+  routine while a plan ran; the plan ends there. `percepts/1` answers `:idle`
+  when nothing the Mind asked for is under way.
+- The Mind chooses every intent's ref (`"m-"` and 72 random bits, so none
+  repeats across server restarts); a caller's `:ref` is only a label.
+- `:target_name` (or a `:target` that names nothing by id) is resolved when
+  the step is submitted, against a fresh look: places known for `go`; hearths
+  in reach, then fires in sight, for `kindle` and `douse`; notebooks carried
+  for `write` and `read`. A name matching nothing goes to the world as given;
+  one matching several is not submitted (`{:error, {:ambiguous, query,
+  names}}` for the first step, or `problem` and `:failed` later).
+- Replies carry `abandoned` (steps a failure, a yield or a new act dropped
+  unsubmitted) and `problem`. `action` is also the body's own doing when an
+  instant step left a durative one under way.
+- A waiting call keeps the body present (a touch every half `idle_after`).
+- Bodies a stopped world left held are released when it starts again, and a
+  world that stops ends its Minds.
+
+**MCP server**
+- The endpoint is `/mcp` only: a GET answers 405 (`allow: POST, DELETE`),
+  any other path 404. `.mcp.json` points at `http://127.0.0.1:4041/mcp`.
+- Players: session-era clients (2025-03-26 to 2025-11-25) by MCP session
+  (`Mcp-Session-Id`, or the legacy `X-Session-Id`); MCP 2026-07-28 clients
+  by a player token `join` gives. The two never meet; a token plays one body;
+  a made-up token is refused.
+- `quit_after` is 15 real minutes for MCP players (the Mind's own default
+  stays 30). `Avwe.MCP` takes `idle_after` for its players' sessions.
+- The instructions are written per request, with the clock's pace as
+  configured, and also say that a new act replaces a pending plan and that
+  joining without one's token takes a second body.
+- `Avwe.MCP.Steps` checks every argument it can before submitting: plans of
+  at most 50 steps, target names (1 to 200 characters, one line), say and
+  write text, volumes, wait (exactly one of minutes, hours, for, until; a
+  minute to a week), follow and walk directions, walk distance (10 to 2000
+  m), read's `last`.
+- Reports: "Failed." alone for one action, the dropped steps named for a
+  plan; "Yielded: ..." says the routine has the body; long plans show three
+  steps "and N more"; places and hearths go by name; `(your routine)` marks
+  what the routine did while the player was away. The join text no longer
+  repeats "You are Mira Vale."; `away` times in `structuredContent` are
+  formatted like every other time.
+- Smoke smelled at a fire names the fire ("Woodsmoke rises from the
+  kiln-house hearth beside you"), in percepts and in the look, rather than
+  the wind.
+- `scripts/mcp_call.py` starts a new session only when the server says 404;
+  `--leave` leaves, ends the session and forgets it.
+
+**Tests** (end to end): `test/e2e/mcp_test.exs` (tools, errors, leases,
+players, timeouts, argument checks), `mcp_journey_test.exs` (the done
+criterion, persistence, notes that cannot forge lines),
+`mcp_play_test.exs` (speech, names, replaced plans, yielding, own smoke),
+`mcp_script_test.exs` (the script), and `notebook_test.exs` (telnet).

@@ -20,8 +20,15 @@ changing anything structural; it records the decisions and the reasons.
   return the struct, converters at the end.
 - **Every user- or agent-facing feature gets an end-to-end test** through its
   real transport (`test/e2e/`): telnet over TCP with `Avwe.Test.TelnetClient`,
-  sessions as agents use them, and later MCP and Arbor. Before stepping the
-  world after a telnet command, call `TelnetClient.sync/1`.
+  sessions as agents use them, MCP over real HTTP with `Avwe.Test.MCPClient`
+  (ExMCP's client; `test/e2e/mcp_*_test.exs`), and later Arbor. Before
+  stepping the world after a telnet command, call `TelnetClient.sync/1`; a
+  tool call that waits on world time is started with `MCPClient.calling/5`
+  and stepped with `step_until_done/4`.
+- **Words are plain text.** Speech and notebook pages are cleaned in
+  `Avwe.Actions` (escape sequences, line breaks, control characters) so no
+  player's words can forge another's lines or reach a terminal. Anything new
+  that carries a player's text to other players gets the same.
 - **Every intent ends in exactly one result event.** New verbs must keep
   this; the property tests in `test/avwe/actions_test.exs` and
   `test/avwe/journeys_test.exs` check it, autopilot's intents included. The
@@ -52,5 +59,8 @@ and smoke tests add hearths and a wind to it through start options).
 settings (terrain, river, the 812 miracle) from the fixture copy, and
 `Avwe.Test.Ember.region/2` builds its region directly for unit tests.
 `mix run --no-halt` in dev runs the Ember Reach live (one world minute per
-second) with telnet on port 4040, reading Quire from `../quire/data/worlds` or
-`AVWE_QUIRE_ROOT`.
+second) with telnet on port 4040 and MCP at `http://127.0.0.1:4041/mcp`,
+reading Quire from `../quire/data/worlds` or `AVWE_QUIRE_ROOT`. `.mcp.json`
+points a Claude Code session in this folder at that server, and
+`scripts/mcp_call.py <tool> '<json>'` plays it by hand (stdlib Python; the
+session id is kept in `tmp/mcp_session`).
