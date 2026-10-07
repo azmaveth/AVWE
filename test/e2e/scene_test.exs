@@ -11,7 +11,7 @@ defmodule Avwe.E2E.SceneTest do
 
   import Avwe.Test.Fixtures
 
-  alias Avwe.{GroundCache, Percept, Scene, Session, Space}
+  alias Avwe.{GroundCache, Percept, Scene, Session, Space, WorldScene}
   alias Avwe.Test.Idle
 
   @world :hollow_scenes
@@ -112,21 +112,29 @@ defmodule Avwe.E2E.SceneTest do
       assert scenes(odo) == []
     end
 
-    test "a spectator has none, whatever it asks" do
+    # A spectator that asks is given the other lens, the whole valley's
+    # (`test/e2e/watch_test.exs` has more of it); one that does not ask, as
+    # telnet's and MCP's watchers do not, has none, as it always had.
+    test "a spectator is given the world's scene if it asks, and none if it does not" do
       watcher = join(nil)
-      assert {:ok, nil} = Session.scene(watcher)
+      assert {:ok, %WorldScene{}} = Session.scene(watcher)
+
+      {:ok, quiet} = Avwe.connect(@world)
+      assert {:ok, nil} = Session.scene(quiet)
 
       odo = plain("odo")
       {:ok, _ref} = Session.act(odo, :go, target: "hollow-green")
       Avwe.step(@world, 3)
 
-      assert scenes(watcher) == []
+      assert [%WorldScene{} | _] = scenes(watcher)
+      assert scenes(quiet) == []
     end
   end
 
   describe "who is woken" do
     test "only a session that draws is woken by a step with nothing in it" do
       odo = plain("odo")
+      {:ok, quiet} = Avwe.connect(@world)
       watcher = join(nil)
       wren = join("wren")
 
@@ -134,7 +142,7 @@ defmodule Avwe.E2E.SceneTest do
       # routines of the others set about waiting.
       Avwe.step(@world, 2)
 
-      sessions = [odo, watcher, wren]
+      sessions = [odo, quiet, watcher, wren]
       for session <- sessions, do: :erlang.trace(session, true, [:receive])
       Avwe.step(@world, 3)
       for session <- sessions, do: Session.body(session)
@@ -145,7 +153,7 @@ defmodule Avwe.E2E.SceneTest do
         Enum.count(messages, &match?({:trace, ^session, :receive, {:avwe_events, _, [], _}}, &1))
       end
 
-      assert {heard.(odo), heard.(watcher), heard.(wren)} == {0, 0, 3}
+      assert {heard.(odo), heard.(quiet), heard.(watcher), heard.(wren)} == {0, 0, 3, 3}
     end
   end
 

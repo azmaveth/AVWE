@@ -138,9 +138,12 @@ avwe/
     scene.ex repr.ex ground_map.ex  what a body can see, as something a
                          client draws: the scene, the glyph layers, and the
                          ground as one binary (M2)
+    world_scene.ex world_ground.ex overlays.ex rle.ex  what a spectator sees:
+                         the whole valley, its ground once, and the river, the
+                         heat and the smoke drawn over it (M2b)
     protocol/            intent and percept structs, JSON codecs (to come)
   lib/avwe/session.ex    controller sessions and leases
-  lib/avwe/ground_cache.ex  keeps each terrain's ground map, built once (runtime)
+  lib/avwe/ground_cache.ex  keeps each terrain's ground map and world ground, built once (runtime)
   lib/avwe/mind.ex       the controller side for programs: plans, waits (M1)
   lib/avwe/quire/        importer, compiled sidecars, chronicle writer
   lib/avwe/telnet/       text client (M0)
@@ -686,6 +689,26 @@ scenes when it is opened with `scenes: true` (`Avwe.Session`), after the
 percepts of the step that changed one, and never before the first it was asked
 for. `Avwe.Scene.to_map/1` is its form as plain data.
 
+**As built (M2b).** A spectator that asks for scenes (a session with no body and
+`scenes: true`) is given the other lens: an `Avwe.WorldScene`, with no window and
+no sight, every body, hearth and place in the world (a body with who holds it),
+the world's time and light, and three overlays read from the published snapshot
+by `Avwe.Overlays`: the river by reach (silent or running, its temperature,
+whether it steams), the ground's heat in whole degrees over the whole map as
+run-length rows (a letter for each of fifty-two levels, and `.` for a cell the
+heat system does not store, which has its ground's background), and the smoke's
+puffs. How each overlay is coloured is in `Avwe.Repr.overlay/1`, and `to_map/1`
+carries it beside the data, so a client holds no table. The ground never changes,
+so no scene has it: `Avwe.Session.ground/1` gives it once, as an
+`Avwe.WorldGround` (the whole map's rows, the bed always `b`, and each reach's
+bed cells, so that a reach falling silent changes the water overlay and never the
+ground), built once for a terrain and kept (`Avwe.GroundCache`). A spectator's
+scene is built from the snapshot, which has the fields the step's view leaves
+out, and sent only when that is the step the percepts are of, so it is never
+ahead of the words about it; a burst of steps reaches it as the newest. Nothing
+is added to the region, and a spectator without `scenes: true` (telnet's, MCP's)
+is as it was.
+
 ### 8.5 Transports
 
 | Transport | Used by | Notes |
@@ -920,7 +943,7 @@ core. A feature isn't done until its end-to-end test exists.
 | **M0** | The valley breathes | Mix project. Read-only Quire import. One region holding the whole valley. Terrain from pins, including the river's source (built). Heat, water and fire systems (built, with weather and smoke). Places for the lodge and kiln-houses (the lodge and town are places; kiln-houses as interiors still to come). Mira on autopilot (built; other bodies as they are added, with the same brain). Day and night (built). Telnet client (built). Log and snapshots (built: 6.7) | Two telnet sessions see the same events (built). Replaying the log reproduces the same state hash, with autopilot and fires (built). Conservation property tests pass for water, heat and smoke (built). A watcher sees Mira keep her routine unattended, and she lights her hearth in 812 but not in 813 (built) |
 | **M1** | Claude walks the banks | MCP adapter (built: section 12). Plans for controllers, interrupts and salience (built: `Avwe.Mind`, 7.3 and 7.4; `until` conditions beyond a wait's still to come). Notebook item and body memory (built) | Claude plays Mira across two sessions and finds the notes from the first (met: end to end in `mcp_journey_test.exs`, and live on 2026-10-06, when Claude followed the channel to The Source, wrote it down, and read the page back in a new session) |
 | **M2a** | A window onto the world | Representation layers (glyphs), the scene, Phoenix on Bandit with a lobby, and the embodied view on a LiveView canvas (all built: 8.4 and 9) | A telnet player, a web player and Claude are in the world at once and each perceives the others (met: end to end in `three_controllers_test.exs`, with the page, telnet and MCP; and the page itself is held in a real browser by `test/browser`, a CI job of its own) |
-| **M2b** | Many lenses | The spectator view with field overlays (heat, water, smoke). Sprites through the same layers. A remembered map | A watcher in a browser sees the river's reaches fall silent one after another, and the silt cool, as the telnet watcher is told of them |
+| **M2b** | Many lenses | The spectator view with field overlays (heat, water, smoke), and "watch" in the lobby (`docs/m2b-spec.md`). Sprites and a remembered map are left for later: sprites need art, and a remembered map is body memory, which is simulation state | A watcher in a browser sees the river's reaches fall silent one after another, and the silt cool, as the telnet watcher is told of them |
 | **M3** | Agents move in | Arbor `world` capability over Channels. `world-player` trust profile. Percept mapping. Earshot engagements. Taint | Two Arbor agents live in the Reach for a world week unattended. Conversation engagements are scoped correctly. An injection attempt through in-world speech stays contained |
 | **M4** | Legends | History mode. Chronicle written to Quire. Canon-agreement check from 780 to 813 AR. Narrator | The 780–813 run produces a chronicle visible in Quire and a canon-agreement report |
 

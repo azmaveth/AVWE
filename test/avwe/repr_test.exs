@@ -35,6 +35,47 @@ defmodule Avwe.ReprTest do
     end
   end
 
+  describe "the overlays" do
+    test "are the river, the ground's heat and the smoke" do
+      assert Repr.overlays() == [:heat, :smoke, :water]
+    end
+
+    test "each has a name and a description, and colours a client can draw" do
+      for kind <- Repr.overlays() do
+        layers = Repr.overlay(kind)
+        assert is_binary(layers.name) and layers.name != "", inspect(kind)
+        assert is_binary(layers.description) and layers.description != "", inspect(kind)
+      end
+
+      assert Repr.valid_color?(Repr.overlay(:smoke).color)
+      for {_state, color} <- Repr.overlay(:water).colors, do: assert(Repr.valid_color?(color))
+    end
+
+    test "the heat's ramp runs from cold to hot, in colours, in degrees" do
+      heat = Repr.overlay(:heat)
+      assert heat.unit == "°C"
+      stops = Enum.map(heat.ramp, & &1.at)
+      assert stops == Enum.sort(Enum.uniq(stops))
+      assert length(stops) >= 2
+      for stop <- heat.ramp, do: assert(Repr.valid_color?(stop.color))
+    end
+
+    test "colour the river as a body's scene does: running water, and the dry bed" do
+      colors = Repr.overlay(:water).colors
+      assert colors.flowing == Repr.glyph(:water).color
+      assert colors.silent == Repr.glyph(:channel_bed).color
+    end
+
+    # The smoke overlay is the field of puffs, the smoke kind the sign of a far
+    # fire in a body's scene; the water overlay is the river by reach, the water
+    # kind a bed cell where it runs. They share a name and nothing else.
+    test "are a catalogue apart from the kinds, though two share a name" do
+      assert Repr.overlay(:smoke).description != Repr.layers(:smoke).description
+      assert Repr.overlay(:water).description != Repr.layers(:water).description
+      refute Repr.overlay(:heat) |> Map.has_key?(:glyph)
+    end
+  end
+
   describe "a body's glyph" do
     test "is its own when its world gave it one" do
       own = %{char: "M", color: "#e8c07a"}
