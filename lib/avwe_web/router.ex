@@ -12,6 +12,7 @@ defmodule AvweWeb.Router do
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
+    plug AvweWeb.BrowserId
     plug :fetch_live_flash
     plug :put_root_layout, html: {AvweWeb.Layouts, :root}
     plug :protect_from_forgery

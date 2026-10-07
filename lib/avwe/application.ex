@@ -17,6 +17,7 @@ defmodule Avwe.Application do
         Avwe.MCP.Players,
         {Task, &autostart/0},
         {Phoenix.PubSub, name: AvweWeb.PubSub},
+        {Registry, keys: :duplicate, name: AvweWeb.Pages},
         AvweWeb.Endpoint
       ] ++ telnet() ++ mcp()
 
