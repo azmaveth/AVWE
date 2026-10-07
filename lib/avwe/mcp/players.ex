@@ -46,15 +46,16 @@ defmodule Avwe.MCP.Players do
   (`Avwe.Mind.start/3` with `controller: :mcp`, this server's
   `quit_after`, and `opts`, such as `:idle_after`). Fails with
   `:already_joined` when the player plays a body already, or as
-  `Avwe.Mind.start/3` does.
+  `Avwe.Mind.start/3` does. A `nil` body with a `:guest` in `opts` is a guest
+  arriving (`Avwe.Guests`); the player is kept under the body's id then too.
   """
-  @spec join(key(), atom(), String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
+  @spec join(key(), atom(), String.t() | nil, keyword()) :: {:ok, pid()} | {:error, term()}
   def join({kind, id} = key, world, body, opts \\ [])
       when kind in [:session, :token] and is_binary(id) do
     with {:ok, quit_after} <- GenServer.call(__MODULE__, {:free, key}),
          opts = Keyword.merge(opts, controller: :mcp, quit_after: quit_after),
          {:ok, mind} <- Mind.start(world, body, opts) do
-      register(key, mind, world, body)
+      register(key, mind, world, Mind.body(mind))
     end
   end
 
