@@ -2,13 +2,13 @@
 // draws what the server sends (hooks.js, draw.js).
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
-import {CommandLine, LogScroll, SceneCanvas} from "./hooks.js"
+import {CommandLine, LogScroll, SceneCanvas, WorldCanvas} from "./hooks.js"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 
 const liveSocket = new LiveSocket("/live", Socket, {
   params: {_csrf_token: csrfToken},
-  hooks: {CommandLine, LogScroll, SceneCanvas},
+  hooks: {CommandLine, LogScroll, SceneCanvas, WorldCanvas},
 })
 
 liveSocket.connect()

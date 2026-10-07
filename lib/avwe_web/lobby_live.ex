@@ -5,7 +5,9 @@ defmodule AvweWeb.LobbyLive do
   A free body is a link to its page (`AvweWeb.PlayLive`). One that somebody
   holds is shown and cannot be chosen, unless a page of this very browser holds
   it: that is the player's own, and may be chosen, which takes it over from that
-  page (DESIGN 14, "who is a page"). As telnet lists them, only the words differ:
+  page (DESIGN 14, "who is a page"). Each world also has a link to watch it
+  (`AvweWeb.WatchLive`), which takes no body. As telnet lists them, only the words
+  differ:
   bodies are taken and freed and worlds start and stop without telling anyone,
   so the page looks again every two real seconds while it is open
   (`config :avwe, :lobby_refresh_ms`; `nil` for never, which the tests use, as
@@ -43,6 +45,10 @@ defmodule AvweWeb.LobbyLive do
         <h2 id={"world-#{world.id}"}>{world.name}</h2>
         <p :if={world.tagline} class="tagline">{world.tagline}</p>
         <p :if={world.time} class="time">{world.time}</p>
+        <p class="watch">
+          <.link navigate={~p"/watch/#{world.id}"}>Watch {world.name}</.link>
+          <span class="state">(see everything, and take no part)</span>
+        </p>
         <h3>Who will you be?</h3>
         <ul class="bodies">
           <li
