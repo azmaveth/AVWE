@@ -11,8 +11,11 @@ export const SceneCanvas = {
     this.zoom = "near"
     this.onClick = (event) => {
       if (!this.geo) return
+      // The canvas has a border, which is not part of what is drawn.
       const box = this.el.getBoundingClientRect()
-      const cell = cellAtPixel(this.geo, event.clientX - box.left, event.clientY - box.top)
+      const x = event.clientX - box.left - this.el.clientLeft
+      const y = event.clientY - box.top - this.el.clientTop
+      const cell = cellAtPixel(this.geo, x, y)
       if (cell) this.pushEvent("cell", {x: cell[0], y: cell[1]})
     }
     this.el.addEventListener("click", this.onClick)
