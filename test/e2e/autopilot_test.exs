@@ -15,8 +15,10 @@ defmodule Avwe.E2E.AutopilotTest do
 
   import Avwe.Test.Fixtures
   import Avwe.Test.TelnetClient
+  import Avwe.Test.WebCase, only: [session_of: 2]
 
   alias Avwe.{Percept, Prose, Session}
+  alias Avwe.Test.Idle
 
   @world :ember_autopilot
   @moduletag start: {813, day: 220, hour: 4}
@@ -113,12 +115,12 @@ defmodule Avwe.E2E.AutopilotTest do
 
   test "an idle session yields the body to autopilot until it acts again" do
     {:ok, _owner} = Avwe.subscribe(@world)
-    {:ok, session} = Avwe.connect(@world, body: "mira-vale", idle_after: 500)
+    {:ok, session} = Avwe.connect(@world, body: "mira-vale")
     Avwe.step(@world, 1)
     assert %{controller: :human, taken: true} = mira()
     refute Enum.any?(percepts(session), &(&1.type in [:control_taken, :control_released]))
 
-    Process.sleep(600)
+    Idle.expire(session)
     Avwe.step(@world, 1)
     assert %{controller: :autopilot, taken: true} = mira()
     Avwe.step(@world, 1)
@@ -176,30 +178,32 @@ defmodule Avwe.E2E.AutopilotTest do
   end
 
   test "a session that keeps looking is not yielded" do
-    {:ok, session} = Avwe.connect(@world, body: "mira-vale", idle_after: 300)
+    {:ok, session} = Avwe.connect(@world, body: "mira-vale")
 
+    # Each look is presence: it arms a new idle timer, so the one that was
+    # running goes off too late to take the body.
     for _n <- 1..5 do
-      Process.sleep(100)
-      assert {:ok, %{spectator: false}} = Session.look(session)
+      assert {:ok, %{spectator: false}} = Idle.presence(session, fn -> Session.look(session) end)
     end
 
     Avwe.step(@world, 1)
     assert %{controller: :human, taken: true} = mira()
     refute Enum.any?(percepts(session), &(&1.type == :control_released))
 
-    Process.sleep(400)
+    # Left alone, the timer goes off with no look since: the routine has her.
+    Idle.expire(session)
     Avwe.step(@world, 1)
     assert %{controller: :autopilot, taken: true} = mira()
   end
 
   test "a telnet player who stops typing sees the routine take over, marked" do
-    port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0, idle_after: 300}))
+    port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0}))
     watcher = join(port, "watch", "You are watching.")
     mira = join(port, "mira")
     Avwe.step(@world, 1)
     assert %{controller: :human} = mira()
 
-    Process.sleep(400)
+    @world |> session_of("mira-vale") |> Idle.expire()
     Avwe.step(@world, 1)
     expect(mira, "You let your routine carry you.")
     assert %{controller: :autopilot} = mira()
@@ -327,31 +331,32 @@ defmodule Avwe.E2E.AutopilotTest do
   end
 
   test "a session that keeps touching is not yielded" do
-    {:ok, session} = Avwe.connect(@world, body: "mira-vale", idle_after: 300)
+    {:ok, session} = Avwe.connect(@world, body: "mira-vale")
 
     for _n <- 1..5 do
-      Process.sleep(100)
-      assert :ok = Session.touch(session)
+      assert :ok = Idle.presence(session, fn -> Session.touch(session) end)
     end
 
     Avwe.step(@world, 1)
     assert %{controller: :human, taken: true} = mira()
     refute Enum.any?(percepts(session), &(&1.type == :control_released))
 
-    Process.sleep(400)
+    Idle.expire(session)
     Avwe.step(@world, 1)
     assert %{controller: :autopilot, taken: true} = mira()
     assert [%Percept{type: :control_released}] = percepts(session)
   end
 
   test "a telnet player who keeps reading help is not yielded either" do
-    port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0, idle_after: 300}))
+    port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0}))
     mira = join(port, "mira")
+    session = session_of(@world, "mira-vale")
 
     for _n <- 1..5 do
-      Process.sleep(100)
-      send_line(mira, "help")
-      expect(mira, "takes you back if the routine had you.")
+      Idle.presence(session, fn ->
+        send_line(mira, "help")
+        expect(mira, "takes you back if the routine had you.")
+      end)
     end
 
     Avwe.step(@world, 1)
@@ -360,20 +365,22 @@ defmodule Avwe.E2E.AutopilotTest do
   end
 
   test "a telnet player who keeps asking the time is not yielded" do
-    port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0, idle_after: 300}))
+    port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0}))
     mira = join(port, "mira")
+    session = session_of(@world, "mira-vale")
 
     for _n <- 1..5 do
-      Process.sleep(100)
-      send_line(mira, "time")
-      expect(mira, ~r/^813 AR, day 220, \d\d:\d\d$/)
+      Idle.presence(session, fn ->
+        send_line(mira, "time")
+        expect(mira, ~r/^813 AR, day 220, \d\d:\d\d$/)
+      end)
     end
 
     Avwe.step(@world, 1)
     assert %{controller: :human} = mira()
     refute_line(mira, "You let your routine carry you.")
 
-    Process.sleep(400)
+    Idle.expire(session)
     Avwe.step(@world, 1)
     expect(mira, "You let your routine carry you.")
     assert %{controller: :autopilot} = mira()
@@ -401,8 +408,8 @@ defmodule Avwe.E2E.AutopilotTest do
 
   @tag start: {813, day: 220, hour: 13}
   test "a wait the routine began is the player's once they have the body back: their look says so, and so does its end" do
-    {:ok, session} = Avwe.connect(@world, body: "mira-vale", idle_after: 300)
-    Process.sleep(400)
+    {:ok, session} = Avwe.connect(@world, body: "mira-vale")
+    Idle.expire(session)
     Avwe.step(@world, 2)
     assert %{verb: :wait, params: %{for: 3600}, ref: "auto-" <> _step = ref} = mira_action()
     assert [%Percept{type: :control_released}] = percepts(session)
@@ -426,8 +433,10 @@ defmodule Avwe.E2E.AutopilotTest do
     # Present while the hour passes, she keeps the body: the wait ends as
     # hers, and the routine issues nothing after it.
     for _n <- 1..3 do
-      Avwe.step(@world, 20)
-      :ok = Session.touch(session)
+      Idle.presence(session, fn ->
+        Avwe.step(@world, 20)
+        :ok = Session.touch(session)
+      end)
     end
 
     assert mira_action() == nil
@@ -446,10 +455,11 @@ defmodule Avwe.E2E.AutopilotTest do
 
   @tag start: {813, day: 220, hour: 13}
   test "a telnet player who speaks has the routine's wait as their own: their look says so, and its end is said, unmarked" do
-    port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0, idle_after: 300}))
+    port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0}))
     mira = join(port, "mira")
+    session = session_of(@world, "mira-vale")
     Avwe.step(@world, 1)
-    Process.sleep(400)
+    Idle.expire(session)
     Avwe.step(@world, 2)
     expect(mira, "You let your routine carry you.")
     assert %{verb: :wait, ref: "auto-" <> _step} = mira_action()
@@ -468,8 +478,10 @@ defmodule Avwe.E2E.AutopilotTest do
 
     # Asking the time now and then keeps the body through the hour.
     for _n <- 1..2 do
-      Avwe.step(@world, 20)
-      sync(mira)
+      Idle.presence(session, fn ->
+        Avwe.step(@world, 20)
+        sync(mira)
+      end)
     end
 
     Avwe.step(@world, 20)
@@ -495,12 +507,12 @@ defmodule Avwe.E2E.AutopilotTest do
 
     @tag start: {812, day: 199, hour: 3}
     test "a yielded player sees the fire the routine lights, marked, and takes the body back by stopping" do
-      port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0, idle_after: 300}))
+      port = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0}))
       mira = join(port, "mira")
       Avwe.step(@world, 1)
       assert %{controller: :human} = mira()
 
-      Process.sleep(400)
+      @world |> session_of("mira-vale") |> Idle.expire()
       Avwe.step(@world, 1)
       expect(mira, "You let your routine carry you.")
 

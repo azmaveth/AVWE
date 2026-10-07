@@ -12,6 +12,7 @@ defmodule Avwe.E2E.SceneTest do
   import Avwe.Test.Fixtures
 
   alias Avwe.{GroundCache, Percept, Scene, Session, Space, WorldScene}
+  alias Avwe.Test.Idle
 
   @world :hollow_scenes
   @terrain [clay: [{"hollow-green", radius_cells: 3}]]
@@ -338,19 +339,21 @@ defmodule Avwe.E2E.SceneTest do
 
   describe "the hand-over" do
     test "a scene follows who holds the body, and asking for scenes keeps the body in hand" do
-      wren = join("wren", idle_after: 300)
+      wren = join("wren")
       first_scene(wren)
 
+      # Each ask is presence: it arms a new idle timer, so the one that was
+      # running goes off too late to take the body.
       for _n <- 1..5 do
-        Process.sleep(100)
-        assert {:ok, %Scene{}} = Session.scene(wren)
+        assert {:ok, %Scene{}} = Idle.presence(wren, fn -> Session.scene(wren) end)
       end
 
       assert [%Scene{holder: :arbor}] = step_scenes(wren)
       assert {:ok, [%{id: "wren", controller: :arbor}]} = bodies("wren")
 
-      # Left alone, the session yields the body to its routine, and the scene says so.
-      Process.sleep(400)
+      # Left alone, the timer goes off with no ask since: the session yields
+      # the body to its routine, and the scene says so.
+      Idle.expire(wren)
       assert [%Scene{holder: nil}] = step_scenes(wren)
       assert {:ok, [%{id: "wren", controller: :autopilot}]} = bodies("wren")
     end

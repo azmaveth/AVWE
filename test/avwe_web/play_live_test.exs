@@ -2,6 +2,7 @@ defmodule AvweWeb.PlayLiveTest do
   use Avwe.Test.WebCase, async: false
 
   alias Avwe.{GroundCache, Percept, Session}
+  alias Avwe.Test.Idle
   alias AvweWeb.Pages
 
   @world :hollow_play
@@ -588,23 +589,27 @@ defmodule AvweWeb.PlayLiveTest do
   end
 
   describe "presence" do
-    setup do
-      Application.put_env(:avwe, :play_idle_after_ms, 300)
-      on_exit(fn -> Application.delete_env(:avwe, :play_idle_after_ms) end)
-    end
-
-    test "typing and pressing keep the body in hand, and redrawing the look does not",
-         %{conn: conn} do
+    test "typing and pressing keep the body in hand", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/play/hollow_play/wren")
+      session = session_of(@world, "wren")
 
       for line <- ["time", "help", "look", "time", "help"] do
-        Process.sleep(100)
-        type(view, line)
+        Idle.presence(session, fn -> type(view, line) end)
       end
 
       Avwe.step(@world, 1)
       assert controller("wren") == :human
       refute has_element?(view, ".notice", "Your routine has you")
+    end
+
+    # This one waits for the yield, on a short window of the page's own, which
+    # a slow machine only makes later.
+    test "redrawing the look does not, and a page that only looks again loses the body",
+         %{conn: conn} do
+      Application.put_env(:avwe, :play_idle_after_ms, 300)
+      on_exit(fn -> Application.delete_env(:avwe, :play_idle_after_ms) end)
+
+      {:ok, view, _html} = live(conn, ~p"/play/hollow_play/wren")
 
       # A page that only looks again is not a player who is there.
       for _n <- 1..5 do
@@ -773,16 +778,14 @@ defmodule AvweWeb.PlayLiveTest do
     end
 
     test "is the player's presence too", %{conn: conn} do
-      Application.put_env(:avwe, :play_idle_after_ms, 300)
-      on_exit(fn -> Application.delete_env(:avwe, :play_idle_after_ms) end)
-
-      neighbour("tamsin")
       {:ok, view, _html} = live(Phoenix.ConnTest.recycle(conn), ~p"/play/hollow_play/pell")
-      scene = scene_of(view)
+      [x, y] = scene_of(view)["center"]
+      session = session_of(@world, "pell")
 
+      # Asking what is there is no act (a click on a place would go there, and
+      # an act is presence of itself), so it is presence only if it touches.
       for _n <- 1..5 do
-        Process.sleep(100)
-        click(view, thing(scene, "tamsin")["cell"])
+        Idle.presence(session, fn -> click(view, [x + 1, y + 1]) end)
       end
 
       Avwe.step(@world, 1)
