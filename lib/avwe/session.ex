@@ -85,15 +85,33 @@ defmodule Avwe.Session do
   (`rows` is `nil`) until the map is built, and the first with the ground
   follows at once.
 
-  A session without `scenes: true`, and a spectator (whose scene is for
-  later), has none, and `scene/1` gives `nil`. They behave as they always have.
+  A spectator opened with `scenes: true` (no body) is given the other lens:
+  an `Avwe.WorldScene`, the whole valley and everything in it with its fields,
+  and the same messages. It is built from the published snapshot, which has the
+  fields the step's own view leaves out, and sent only when it is the snapshot
+  of the step the percepts describe, so a spectator's scene is never ahead of the
+  words about it either. Its ground never changes, so it is not part of the
+  scene: `ground/1` gives it once, as an `Avwe.WorldGround`.
+
+  A session without `scenes: true` has none, and `scene/1` gives `nil`. A
+  telnet or MCP spectator behaves as it always has.
 
   Start sessions with `Avwe.connect/2`.
   """
 
   use GenServer, restart: :temporary
 
-  alias Avwe.{Event, GroundCache, Intent, Perception, RegionServer, Scene, Terrain}
+  alias Avwe.{
+    Event,
+    GroundCache,
+    Intent,
+    Perception,
+    RegionServer,
+    Scene,
+    Terrain,
+    WorldGround,
+    WorldScene
+  }
 
   @region {0, 0}
   @idle_after 10 * 60 * 1_000
@@ -125,12 +143,22 @@ defmodule Avwe.Session do
   @doc """
   What the body can see now, as an `Avwe.Scene`: the first draw of a session
   opened with `scenes: true`, and a fresh one whenever a client wants it.
-  Later scenes are sent when they change (see "Scenes" above). `nil` for a
-  session without scenes, a spectator, and a body that is nowhere. Marks the
-  controller present, like `look/1`.
+  Later scenes are sent when they change (see "Scenes" above). For a spectator
+  with scenes it is an `Avwe.WorldScene`. `nil` for a session without scenes
+  and a body that is nowhere. Marks the controller present, like `look/1`.
   """
-  @spec scene(pid()) :: {:ok, Scene.t() | nil} | {:error, term()}
+  @spec scene(pid()) :: {:ok, Scene.t() | WorldScene.t() | nil} | {:error, term()}
   def scene(session), do: GenServer.call(session, :scene)
+
+  @doc """
+  The ground of the whole map (`Avwe.WorldGround`), for a spectator with scenes
+  to give its client once: it never changes, so no scene carries it. `nil` for
+  any other session and for a world with no terrain. The first request for a
+  terrain builds it, which takes about a second for the Ember Reach; the
+  session goes on meanwhile.
+  """
+  @spec ground(pid()) :: {:ok, WorldGround.t() | nil} | {:error, term()}
+  def ground(session), do: GenServer.call(session, :ground, 15_000)
 
   @doc """
   Asks the body to do something. Returns the intent's ref; its result arrives
@@ -175,7 +203,7 @@ defmodule Avwe.Session do
       sink = Keyword.fetch!(opts, :sink)
       Process.monitor(sink)
       Process.monitor(world_pid)
-      scenes = opts[:scenes] == true and body != nil
+      scenes = opts[:scenes] == true
       {:ok, _owner} = Avwe.subscribe(world, steps: scenes)
 
       state = %{
@@ -235,6 +263,23 @@ defmodule Avwe.Session do
         {:reply, error, arm_idle(state)}
     end
   end
+
+  def handle_call(
+        :ground,
+        from,
+        %{scenes: true, body: nil, terrain: %Terrain{} = terrain} = state
+      ) do
+    if GroundCache.world_cached?(terrain) do
+      {:reply, {:ok, GroundCache.world(terrain)}, state}
+    else
+      {:ok, _task} =
+        Task.start(fn -> GenServer.reply(from, {:ok, GroundCache.world(terrain)}) end)
+
+      {:noreply, state}
+    end
+  end
+
+  def handle_call(:ground, _from, state), do: {:reply, {:ok, nil}, state}
 
   def handle_call(:touch, _from, state), do: {:reply, :ok, arm_idle(state)}
 
@@ -344,6 +389,8 @@ defmodule Avwe.Session do
 
   # The ground map, at once if it is built already, and otherwise in the
   # background so that connecting never waits on the first build of a big map.
+  defp load_ground(%{body: nil} = state), do: state
+
   defp load_ground(%{scenes: true, terrain: %Terrain{} = terrain} = state) do
     if GroundCache.cached?(terrain) do
       %{state | ground: GroundCache.fetch(terrain)}
@@ -356,6 +403,8 @@ defmodule Avwe.Session do
 
   defp load_ground(state), do: state
 
+  defp build_scene(%{body: nil}, snapshot), do: WorldScene.build(snapshot)
+
   defp build_scene(state, view),
     do: view |> Map.put(:ground, state.ground) |> Scene.build(state.body)
 
@@ -363,16 +412,34 @@ defmodule Avwe.Session do
   # (`scene/1`), and only when this one differs from the last it was given.
   defp push_scene(%{last_scene: nil} = state, _view), do: state
 
-  defp push_scene(state, view) do
-    scene = build_scene(state, view)
+  # A spectator's scene is made of the fields, which the step's view leaves out,
+  # so it is read from the snapshot: and only if that is the step these percepts
+  # are of. A snapshot already a step ahead is left to the next message, which
+  # comes with its own percepts, so the scene is never ahead of the words.
+  defp push_scene(%{body: nil} = state, view) do
+    case snapshot(state.world) do
+      {:ok, %{step: step} = snapshot} when step == view.step ->
+        push(state, build_scene(state, snapshot))
 
-    if scene != nil and not Scene.same_view?(scene, state.last_scene) do
+      _ahead_or_gone ->
+        state
+    end
+  end
+
+  defp push_scene(state, view), do: push(state, build_scene(state, view))
+
+  defp push(state, scene) do
+    if scene != nil and not same_view?(scene, state.last_scene) do
       send(state.sink, {:avwe_scene, self(), scene})
       %{state | last_scene: scene}
     else
       state
     end
   end
+
+  defp same_view?(%Scene{} = a, %Scene{} = b), do: Scene.same_view?(a, b)
+  defp same_view?(%WorldScene{} = a, %WorldScene{} = b), do: WorldScene.same_view?(a, b)
+  defp same_view?(_scene, _other), do: false
 
   # Control
 
