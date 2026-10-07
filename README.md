@@ -57,8 +57,10 @@ description of where you are, a log of what happens, buttons for what the body
 can do, and a command line that takes telnet's words (see "Playing in a
 browser"). M2b adds a page that only watches: the whole valley and everything in
 it, with the river, the heat and the smoke drawn over it (see "Watching in a
-browser"). Still to come in M2b is the proof, in a real browser, that it shows
-what the telnet watcher is told ([docs/m2b-spec.md](docs/m2b-spec.md)).
+browser"). M2b is done: in the tests a watcher in a browser and a telnet watcher
+watch the river's source fail, and the browser's canvas shows each reach fall
+silent as the telnet watcher is told of it, and the silt banks cool
+([docs/m2b-spec.md](docs/m2b-spec.md)).
 
 ## Playing
 
