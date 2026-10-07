@@ -13,6 +13,18 @@ defmodule AvweWeb.PlayLive do
   only letting go) is sent back to the lobby with the words telnet uses
   (`Avwe.Prose.body_taken/1`).
 
+  **Who a page is.** A page knows its browser by the id in its session
+  (`AvweWeb.BrowserId`), and registers the body it takes with it
+  (`AvweWeb.Pages`). A page that finds its body held by another page of the
+  same browser asks that page to let go, and takes the body: the latest page
+  wins, because a page whose connection dropped without a word (a laptop that
+  slept) cannot be told from one that is open, and the player is whoever has
+  just come. The page that lets go goes to the lobby, which says why, and does
+  not ask for the body back, so two open pages cannot take it from each other (a
+  page whose connection was down at the time does not hear of it, and joins as a
+  new page if it reconnects). A body held by anything else, or by a page of
+  another browser, is refused as before.
+
   The page has four parts, and each is the same thing the others are:
 
     * **the map**, a canvas drawn by the `SceneCanvas` hook from the scene the
@@ -39,7 +51,7 @@ defmodule AvweWeb.PlayLive do
   use AvweWeb, :live_view
 
   alias Avwe.{Command, Prose, Scene, Session}
-  alias AvweWeb.Hud
+  alias AvweWeb.{BrowserId, Hud, Pages}
 
   @max_lines 200
   @refresh_ms 2_000
@@ -51,8 +63,8 @@ defmodule AvweWeb.PlayLive do
   """
 
   @impl Phoenix.LiveView
-  def mount(%{"world" => world, "body" => body}, _session, socket) do
-    socket = socket |> stream(:log, []) |> assign(next_line: 1)
+  def mount(%{"world" => world, "body" => body}, session, socket) do
+    socket = socket |> stream(:log, []) |> assign(next_line: 1, browser: BrowserId.from(session))
 
     with {:ok, world} <- find_world(world),
          {:ok, body} <- find_body(world, body) do
@@ -96,8 +108,21 @@ defmodule AvweWeb.PlayLive do
         {:DOWN, monitor, :process, _session, _reason},
         %{assigns: %{monitor: monitor}} = socket
       ) do
+    Pages.release(socket.assigns.world.id, socket.assigns.body.id)
     {:noreply, assign(socket, session: nil, monitor: nil, ended: true)}
   end
+
+  # A page of this browser has asked for the body this page holds. This one goes
+  # to the lobby, which says why. Going ends the page's process, whether or not
+  # anyone is there to hear it, and that lets go of everything: the session ends
+  # with its sink, and the page's entry in `AvweWeb.Pages` goes with the process.
+  # It does not ask for the body back, so two pages cannot take it from each
+  # other.
+  def handle_info(:let_go, %{assigns: %{session: session}} = socket) when is_pid(session) do
+    {:noreply, leave(socket, replaced(socket.assigns.body))}
+  end
+
+  def handle_info(:let_go, socket), do: {:noreply, socket}
 
   @impl Phoenix.LiveView
   def render(assigns) do
@@ -231,8 +256,9 @@ defmodule AvweWeb.PlayLive do
   # `Avwe.connect/2` makes the page's own process the sink by default.
   defp take(socket, world, body) do
     opts = [body: body.id, controller: :human, scenes: true] ++ idle_after()
+    browser = socket.assigns.browser
 
-    with {:ok, session} <- retrying(fn -> Avwe.connect(world.id, opts) end),
+    with {:ok, session} <- retrying(fn -> connect(world, body, browser, opts) end),
          {:ok, look} <- Session.look(session),
          {:ok, scene} <- Session.scene(session) do
       schedule_refresh()
@@ -248,7 +274,28 @@ defmodule AvweWeb.PlayLive do
     end
   end
 
+  # A body that is taken is registered with the browser, so that a newer page of
+  # it can ask this one to let go. A body that is held may be held by an older
+  # page of this browser, which is asked to let go, and the next try finds the
+  # body free (or not, if it is held by somebody else).
+  defp connect(world, body, browser, opts) do
+    case Avwe.connect(world.id, opts) do
+      {:ok, _session} = taken ->
+        Pages.register(world.id, body.id, browser)
+        taken
+
+      {:error, :body_taken} = held ->
+        Pages.ask_to_let_go(world.id, body.id, browser)
+        held
+
+      other ->
+        other
+    end
+  end
+
   defp taken(body), do: Prose.body_taken(body.name) <> " Choose someone else."
+
+  defp replaced(body), do: "#{body.name} is now being played from another page of this browser."
 
   defp leave(socket, notice) do
     socket |> put_flash(:error, notice) |> push_navigate(to: ~p"/")
@@ -265,14 +312,15 @@ defmodule AvweWeb.PlayLive do
   end
 
   # A page that is reloaded, or that comes back after its connection dropped,
-  # asks for the body its own old page still holds, until that page's process
-  # is gone. So a body that is held is waited for a little at the socket before
-  # anyone is told it is taken (one that somebody else holds costs the wait and
-  # is refused). Only the socket can wait: a browser keeps the old page alive
-  # until the new document begins to arrive, so a plain request that waited for
-  # the old page to let go would wait for something that cannot happen until
-  # it answers. This covers a reload, not a question that is only answered by
-  # knowing who a page is (DESIGN 14, question 12). The tests make it short.
+  # asks for the body its own old page still holds. So a body that is held is
+  # waited for a little at the socket before anyone is told it is taken: a
+  # reload's old page lets go as the browser drops it, and one whose connection
+  # dropped without a word, which the server does not notice for a minute, is
+  # asked to (`connect/4`), and does so at once. A body that somebody else holds
+  # costs the wait and is refused. Only the socket can wait: a browser keeps the
+  # old page alive until the new document begins to arrive, so a plain request
+  # that waited for the old page to let go would wait for something that cannot
+  # happen until it answers. The tests make it short.
   defp retrying(fun), do: retrying(fun, now() + retry_ms())
 
   defp retrying(fun, deadline) do
