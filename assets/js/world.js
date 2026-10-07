@@ -27,7 +27,7 @@ export const GLYPH_FROM = 10
 const GROUND_SHADE = 0.6
 
 // How opaque each overlay is over the ground.
-const HEAT_ALPHA = 0.55
+const HEAT_ALPHA = 0.8
 const STEAM_ALPHA = 0.28
 
 // The levels of the heat overlay, as the server writes them (Avwe.Overlays).
@@ -294,7 +294,9 @@ function paintWater(ctx, world, geo) {
   })
 }
 
-// The dark: the valley dims at night, and the things on it do not.
+// The dark: the ground dims at night, and what is drawn over it does not. The
+// overlays are data and the things are what is looked for, and neither is made
+// harder to read by the dark.
 function paintLight(ctx, world, geo) {
   const dark = 1 - brightness(world.scene.light)
   if (dark <= 0) return
@@ -364,9 +366,9 @@ export function paintWorld(ctx, world, geo, on = DEFAULT_OVERLAYS, pixelRatio = 
   ctx.fillStyle = BACKGROUND
   ctx.fillRect(0, 0, geo.width, geo.height)
   paintGround(ctx, world, geo)
+  paintLight(ctx, world, geo)
   if (on.heat && world.heat) paintHeat(ctx, world, geo)
   if (on.water) paintWater(ctx, world, geo)
-  paintLight(ctx, world, geo)
   if (on.smoke) paintSmoke(ctx, world, geo)
   paintThings(ctx, world, geo)
 }

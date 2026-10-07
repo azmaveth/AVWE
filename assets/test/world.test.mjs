@@ -394,10 +394,11 @@ describe("painting", () => {
 
   test("draws the heat only when it is on, over the whole map, translucent", () => {
     const world = worldOf(flowing)
-    assert.equal(rects(paint(world, fit)).filter((r) => r.globalAlpha === 0.55).length, 0)
+    const translucent = (r) => r.globalAlpha === 0.8
+    assert.equal(rects(paint(world, fit)).filter(translucent).length, 0)
 
     const ctx = paint(world, fit, {...DEFAULT_OVERLAYS, heat: true})
-    const heat = rects(ctx).filter((r) => r.globalAlpha === 0.55)
+    const heat = rects(ctx).filter(translucent)
     assert.ok(heat.length > 256)
     const colours = new Set([...world.heatPalette.levels, ...Object.values(world.heatPalette.backgrounds)])
     assert.ok(heat.every((r) => colours.has(r.fillStyle)))
@@ -480,6 +481,16 @@ describe("painting", () => {
 
     const noon = paint(worldOf({...flowing, light: 1}), fit, {water: false, heat: false, smoke: false})
     assert.equal(rects(noon).filter((r) => r.fillStyle === "#000000").length, 0)
+  })
+
+  test("leaves the overlays undimmed too: the heat and the river are drawn after the dark", () => {
+    const night = worldOf({...flowing, light: 0})
+    const ctx = paint(night, fit, {water: true, heat: true, smoke: false})
+    const darkAt = ctx.calls.findIndex((call) => call.op === "fillRect" && call.fillStyle === "#000000")
+    const after = (match) => ctx.calls.findIndex((call, i) => i > darkAt && call.op === "fillRect" && match(call))
+    assert.ok(darkAt > 0)
+    assert.ok(after((call) => call.globalAlpha === 0.8) > darkAt, "the heat")
+    assert.ok(after((call) => call.fillStyle === water.flowing) > darkAt, "the river")
   })
 
   test("leaves things undimmed: they are drawn after the dark", () => {
