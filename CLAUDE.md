@@ -32,9 +32,13 @@ changing anything structural; it records the decisions and the reasons.
 - **A test does not race a short real-time window.** A test that a call keeps
   the body in hand (a session or a Mind yields it after `:idle_after` real ms
   without one) opens the session with a long window (the default is ten
-  minutes) and fires the timer itself with `Avwe.Test.Idle`: a sleep against
-  100-300 ms is overrun when the machine is busy (one busy loop per core shows
-  it). A sleep past a window, to wait for the yield, cannot be broken that way.
+  minutes) and drives the timer itself with `Avwe.Test.Idle`: `presence/2` for
+  a call that should keep the body, `expire/1` for the window running out. The
+  session of a telnet player, a page or an MCP player is `session_of/2`
+  (`Avwe.Test.WebCase`). A sleep against 100-300 ms is overrun when the
+  machine is busy (one busy loop per core shows it). A test that only waits
+  for the yield may keep a short window: a slow machine makes it later, not
+  wrong.
 - **Words are plain text.** Speech and notebook pages are cleaned in
   `Avwe.Actions` (escape sequences, line breaks, control characters) so no
   player's words can forge another's lines or reach a terminal. Anything new

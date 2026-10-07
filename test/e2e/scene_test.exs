@@ -337,10 +337,7 @@ defmodule Avwe.E2E.SceneTest do
       # Each ask is presence: it arms a new idle timer, so the one that was
       # running goes off too late to take the body.
       for _n <- 1..5 do
-        running = Idle.timer(wren)
-        assert {:ok, %Scene{}} = Session.scene(wren)
-        Idle.fire(wren, running)
-        refute Idle.yielded?(wren)
+        assert {:ok, %Scene{}} = Idle.presence(wren, fn -> Session.scene(wren) end)
       end
 
       assert [%Scene{holder: :arbor}] = step_scenes(wren)
@@ -348,7 +345,7 @@ defmodule Avwe.E2E.SceneTest do
 
       # Left alone, the timer goes off with no ask since: the session yields
       # the body to its routine, and the scene says so.
-      Idle.fire(wren, Idle.timer(wren))
+      Idle.expire(wren)
       assert [%Scene{holder: nil}] = step_scenes(wren)
       assert {:ok, [%{id: "wren", controller: :autopilot}]} = bodies("wren")
     end

@@ -644,15 +644,28 @@ defmodule Avwe.MindTest do
     end
 
     test "calls keep it from quitting" do
-      wren = mind("wren", quit_after: 500)
+      wren = mind("wren")
 
+      # Each call arms a new quit, so the one that was due goes off too late.
       for _n <- 1..6 do
-        Process.sleep(150)
+        %{quit_tag: due} = :sys.get_state(wren)
         assert {:ok, _report} = Mind.percepts(wren)
+        refute quits?(wren, due)
       end
 
-      assert Process.alive?(wren)
+      # Left alone, the quit that is due goes off with no call since.
+      %{quit_tag: due} = :sys.get_state(wren)
+      assert quits?(wren, due)
     end
+  end
+
+  # Makes the quit `tag` go off now, and says whether the Mind stopped for it.
+  defp quits?(mind, tag) do
+    send(mind, {:quit, tag})
+    :sys.get_state(mind)
+    false
+  catch
+    :exit, _stopped -> true
   end
 
   defp taken?(body) do

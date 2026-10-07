@@ -14,6 +14,10 @@ defmodule Avwe.E2E.MCPPlayTest do
 
   @world :hollow_mcp_play
   @ref :hollow_mcp_play_server
+
+  # The server's idle window. A test that waits for the body to be yielded
+  # tags itself with a short one; the rest run on the default, ten minutes, so
+  # that a busy machine cannot take a body from a player between two calls.
   @idle_after 300
   @fire_pit [
     id: "green-fire-pit",
@@ -30,7 +34,7 @@ defmodule Avwe.E2E.MCPPlayTest do
     power_w: 5_000.0
   ]
 
-  setup do
+  setup context do
     {:ok, _pid} =
       Avwe.start_world(@world,
         quire: lantern_hollow(),
@@ -41,7 +45,10 @@ defmodule Avwe.E2E.MCPPlayTest do
 
     on_exit(fn -> Avwe.stop_world(@world) end)
 
-    start_supervised!({Avwe.MCP, port: 0, world: @world, ref: @ref, idle_after: @idle_after})
+    start_supervised!(
+      {Avwe.MCP, port: 0, world: @world, ref: @ref, idle_after: context[:idle_after]}
+    )
+
     telnet = Avwe.Telnet.port(start_supervised!({Avwe.Telnet, port: 0}))
     %{port: Avwe.MCP.port(@ref), telnet: telnet}
   end
@@ -194,6 +201,7 @@ defmodule Avwe.E2E.MCPPlayTest do
     refute rest.text =~ "Dropped"
   end
 
+  @tag idle_after: @idle_after
   test "a player away from the keyboard is yielded: the routine takes the body, and the plan ends",
        %{port: port} do
     wren = player(port, "wren")
