@@ -53,7 +53,7 @@ telnet and MCP do not have.
 | Slice | Scope |
 |---|---|
 | **M2a** (this spec) | Scene, representation layers (glyph), the embodied web view, the lobby, a command line and clickable affordances |
-| **M2b** | The spectator view and its overlays (heat, water, smoke); "watch" in the lobby |
+| **M2b** | The spectator view and its overlays (heat, water, smoke); "watch" in the lobby (`docs/m2b-spec.md`) |
 | Later | Sprites; a remembered map that outlives a page load; keyboard play; Phoenix Channels for Arbor (M3) |
 
 Not in M2a: accounts or any login (the server binds to loopback), mobile
