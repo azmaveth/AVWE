@@ -43,10 +43,11 @@ changing anything structural; it records the decisions and the reasons.
   machine is busy (one busy loop per core shows it). A test that only waits
   for the yield may keep a short window: a slow machine makes it later, not
   wrong.
-- **Words are plain text.** Speech and notebook pages are cleaned in
-  `Avwe.Actions` (escape sequences, line breaks, control characters) so no
-  player's words can forge another's lines or reach a terminal. Anything new
-  that carries a player's text to other players gets the same.
+- **Words are plain text.** Speech, notebook pages and a guest's name and
+  backstory are cleaned by `Avwe.Text` (escape sequences, line breaks, control
+  characters) so no player's words can forge another's lines or reach a
+  terminal. Anything new that carries a player's text to other players gets the
+  same.
 - **Every intent ends in exactly one result event.** New verbs must keep
   this; the property tests in `test/avwe/actions_test.exs` and
   `test/avwe/journeys_test.exs` check it, autopilot's intents included. The

@@ -158,8 +158,17 @@ shows everything there is to see, so it belongs there.
 `mix run --no-halt` also serves MCP at `http://127.0.0.1:4041/mcp`.
 `.mcp.json` in this folder points Claude Code at it, so a Claude Code session
 started here (with the server running, and the `avwe` server approved) has
-the tools: `bodies`, `join`, `look`, `act`, `say`, `wait`, `write`, `read`,
-`listen` and `leave`. Ask it to play Mira.
+the tools: `bodies`, `join`, `arrive`, `look`, `act`, `say`, `wait`, `write`,
+`read`, `listen` and `leave`. Ask it to play Mira, or to arrive as a guest of
+its own making.
+
+A **guest** is a body that is not canon (docs/m3-spec.md): `arrive` takes a name
+and, if you like, a backstory, and the world makes a body at the arrival place
+(the town, in the Ember Reach, which takes eight guests). The guest has a
+pocket notebook, which is its memory, and stays in the world when you leave:
+`join` it by name to take it back, and you are told your backstory again. Nobody
+else learns the backstory unless the guest says it. Over telnet or in the web
+client a guest is a body like any other.
 
 To play over MCP by hand, or to see what Claude sees:
 
@@ -192,6 +201,10 @@ Avwe.start_world(:ember_reach, start: {812, day: 200, hour: 14}, clock: {:live, 
 Avwe.Session.look(mira)
 Avwe.Session.act(mira, :go, target: "the-dry-bend")
 flush()   # {:avwe_percepts, _, [%Avwe.Percept{summary: "You set off toward The Dry Bend."}]} ...
+
+# Or a guest of your own: its body is made at the world's next step.
+{:ok, tomas} = Avwe.connect(:ember_reach, guest: [name: "Tomas Reed", backstory: "A diver."])
+Avwe.Session.await_arrival(tomas)
 ```
 
 ## Tests and checks
