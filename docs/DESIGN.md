@@ -151,7 +151,8 @@ avwe/
                          reports (M1)
   lib/avwe_web/          Phoenix on Bandit (M2): the endpoint and the guards
                          that keep a page that is not ours out, the lobby, the
-                         play page (LiveView, with a canvas hook) and its HUD
+                         play page (LiveView, with a canvas hook) and its HUD,
+                         and the watch page, with a hook of its own
   assets/                the page's one script and one stylesheet (esbuild
                          bundles them) and Node tests of the drawing arithmetic
   worlds/<world>/<region>/   log and snapshots (dev and prod; not in git)
@@ -714,7 +715,7 @@ is as it was.
 | Transport | Used by | Notes |
 |---|---|---|
 | TCP line protocol (telnet) | Text client | Percepts rendered as prose on the server, MUD-style commands parsed into intents |
-| Phoenix LiveView (WebSocket) | Web client | The page's own socket. Percepts are rendered as lines, and the scene goes to the canvas as JSON (`Avwe.Scene.to_map/1`) in an attribute. A click on the map comes back as a cell, and a button or a typed line as a command line |
+| Phoenix LiveView (WebSocket) | Web client | The page's own socket. Percepts are rendered as lines, and the scene goes to the canvas as JSON (`Avwe.Scene.to_map/1`) in an attribute. A click on the map comes back as a cell, and a button or a typed line as a command line. The watch page is sent the world's ground once, in an attribute of its own, and the world scene (`Avwe.WorldScene.to_map/1`) in another with each step that changes it; a click comes back as a cell and how far it may miss |
 | Phoenix Channels (WebSocket) | Arbor | JSON messages as above |
 | MCP (ExMCP, streamable HTTP) | Claude | Tools described in section 12 |
 
@@ -724,7 +725,7 @@ is as it was.
 |---|---|---|
 | Text (telnet) | M0 | `look`, `go dry bend`, `go north 200`, `follow upstream`, `say ...`, `whisper`, `shout`, `wait until dusk`, `light the fire`, `douse the coal`, `write ...`, `read [n]`, `stop`, `time`, `help`. Joining tells what the body did while nobody held it. A body you leave idle for ten minutes goes back to its routine, and its doings show as "- " lines until you act again. The quickest way to be in the world |
 | MCP | M1 | Claude plays a body over streamable HTTP (built; section 12): join, look, act with plans, say, wait, write, read, listen, leave |
-| Web | M2 | LiveView pages on Phoenix and Bandit, at `127.0.0.1:4042`. A lobby lists the worlds and bodies, free or being played. The **embodied view** (built, M2a) plays a body: a canvas map of what it sees, drawn in glyphs by one hook (the 41 cells around you, or all that is in sight); the description of where you are, which is the map in words; its log, with the routine's lines in a grey of their own; buttons for what the body can do; and a command line that takes telnet's words. A button and a click are command lines, so the page can do no more than a player typing. The **spectator view**, with overlays for heat, water and smoke, is M2b |
+| Web | M2 | LiveView pages on Phoenix and Bandit, at `127.0.0.1:4042`. A lobby lists the worlds and bodies, free or being played. The **embodied view** (built, M2a) plays a body: a canvas map of what it sees, drawn in glyphs by one hook (the 41 cells around you, or all that is in sight); the description of where you are, which is the map in words; its log, with the routine's lines in a grey of their own; buttons for what the body can do; and a command line that takes telnet's words. A button and a click are command lines, so the page can do no more than a player typing. The **watch page** (built, M2b) takes no body: a spectator session with scenes, the whole valley on one canvas with the river, the heat and the smoke drawn over it (switched by the page, with the river and the smoke on to begin with), zoom and pan, the world's clock, and a log of what the telnet watcher is told. A click names what is at a cell, from the scene the page already has, and can do nothing. Any number of pages may watch a world, so the question of who a page is does not arise |
 | Arbor | M3 | Agents control villagers through a `world` capability |
 | Narrator | M4 | Reads chronicle events and writes prose: "while you were away..." |
 
