@@ -17,6 +17,7 @@ defmodule Avwe.E2E.AutopilotTest do
   import Avwe.Test.TelnetClient
 
   alias Avwe.{Percept, Prose, Session}
+  alias Avwe.Test.Idle
 
   @world :ember_autopilot
   @moduletag start: {813, day: 220, hour: 4}
@@ -176,18 +177,23 @@ defmodule Avwe.E2E.AutopilotTest do
   end
 
   test "a session that keeps looking is not yielded" do
-    {:ok, session} = Avwe.connect(@world, body: "mira-vale", idle_after: 300)
+    {:ok, session} = Avwe.connect(@world, body: "mira-vale")
 
+    # Each look is presence: it arms a new idle timer, so the one that was
+    # running goes off too late to take the body.
     for _n <- 1..5 do
-      Process.sleep(100)
+      running = Idle.timer(session)
       assert {:ok, %{spectator: false}} = Session.look(session)
+      Idle.fire(session, running)
+      refute Idle.yielded?(session)
     end
 
     Avwe.step(@world, 1)
     assert %{controller: :human, taken: true} = mira()
     refute Enum.any?(percepts(session), &(&1.type == :control_released))
 
-    Process.sleep(400)
+    # Left alone, the timer goes off with no look since: the routine has her.
+    Idle.fire(session, Idle.timer(session))
     Avwe.step(@world, 1)
     assert %{controller: :autopilot, taken: true} = mira()
   end

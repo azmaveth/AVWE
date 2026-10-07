@@ -29,6 +29,12 @@ changing anything structural; it records the decisions and the reasons.
   stepping the world after a telnet command, call `TelnetClient.sync/1`; a
   tool call that waits on world time is started with `MCPClient.calling/5`
   and stepped with `step_until_done/4`.
+- **A test does not race a short real-time window.** A test that a call keeps
+  the body in hand (a session or a Mind yields it after `:idle_after` real ms
+  without one) opens the session with a long window (the default is ten
+  minutes) and fires the timer itself with `Avwe.Test.Idle`: a sleep against
+  100-300 ms is overrun when the machine is busy (one busy loop per core shows
+  it). A sleep past a window, to wait for the yield, cannot be broken that way.
 - **Words are plain text.** Speech and notebook pages are cleaned in
   `Avwe.Actions` (escape sequences, line breaks, control characters) so no
   player's words can forge another's lines or reach a terminal. Anything new

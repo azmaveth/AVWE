@@ -7,9 +7,11 @@ defmodule Avwe.MindTest do
 
   use ExUnit.Case, async: false
 
-  import Avwe.Test.Fixtures, only: [lantern_hollow: 0, ember_reach_opts: 1, eventually: 1]
+  import Avwe.Test.Fixtures,
+    only: [lantern_hollow: 0, ember_reach_opts: 1, eventually: 1, eventually: 2]
 
   alias Avwe.{Mind, Session}
+  alias Avwe.Test.Idle
 
   @world :hollow_minds
 
@@ -367,13 +369,33 @@ defmodule Avwe.MindTest do
 
   describe "waiting" do
     test "a caller that waits is present: the body is not yielded under it" do
-      wren = mind("wren", idle_after: 100)
-      task = acting(wren, {:wait, params: %{for: 60 * 60}}, max_wait_ms: 600)
+      # The window is a minute, so no real idle timer goes off in this test:
+      # the ones that matter are fired by hand. (A window of a few hundred ms
+      # is lost to a late mark when the machine is busy.)
+      window = 60_000
+      wren = mind("wren", idle_after: window)
+      %{session: session, presence_every: every} = :sys.get_state(wren)
 
+      # The Mind marks presence at least twice a window, so a late mark still
+      # lands inside it. Here it is asked to mark every 10 ms instead, so that
+      # the test can watch it keep marking.
+      assert every * 2 <= window
+      :sys.replace_state(wren, &%{&1 | presence_every: 10})
+      task = acting(wren, {:wait, params: %{for: 60 * 60}})
+
+      # Each mark arms a new idle timer in the session, so the one that was
+      # running goes off too late to take the body.
+      for _n <- 1..3 do
+        running = Idle.timer(session)
+        eventually(fn -> Idle.timer(session) != running end, 5_000)
+        Idle.fire(session, running)
+        refute Idle.yielded?(session)
+      end
+
+      # A call made while one waits answers it, as if its wait had run out.
+      assert {:ok, %{status: :still_going}} = Mind.percepts(wren)
       assert {:ok, %{status: :still_going} = report} = Task.await(task)
       refute "You let your routine carry you." in summaries(report)
-      %{session: session} = :sys.get_state(wren)
-      refute :sys.get_state(session).yielded
 
       step(wren)
       assert holder("wren") == :mcp
