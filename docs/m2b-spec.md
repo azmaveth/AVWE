@@ -103,9 +103,11 @@ never changes for a terrain, so it is built once and kept with the ground map
     two `backgrounds` in degrees, so a client needs no table;
   - `smoke`: the puffs as `[x, y, grams]`, the position to a tenth of a cell
     and the mass to two figures;
-- `legend`: the layers of the kinds in use, and of the overlays
-  (`Avwe.Repr.overlay/1`: name, description, unit and a colour ramp), so the
-  colours belong to the server and the hook only draws what it is told.
+- `legend`: the layers of the kinds in use (`Avwe.Repr`). The overlays' are
+  `Avwe.Repr.overlay/1` (name, description, unit and a colour ramp, or the
+  colours of a river's states, or one colour for puffs), and `to_map/1` puts
+  each beside its data, so the colours belong to the server and the hook only
+  draws what it is told.
 
 `same_view?/2` ignores `time`, as the embodied scene's does. `to_map/1` gives
 plain data with string keys, as it does.
@@ -116,10 +118,15 @@ sorted order, with no clock and no randomness.
 **Session.** A session opened with `scenes: true` and no body is a spectator
 with scenes: `scene/1` gives its `WorldScene`, and from then on it sends its
 sink `{:avwe_scene, session, scene}` after a step that changed it, as an
-embodied session does. It reads the snapshot for the fields on each step. Its
-sink may also ask for the world ground (`ground/1`), since that is sent once
-and not with every scene. A spectator without `scenes: true` (telnet's, MCP's)
-and every embodied session behave as they always have.
+embodied session does. It reads the snapshot for the fields on each step, and
+pushes only when that is the snapshot of the step the percepts are of: one
+already ahead is left to the next message, which comes with its own percepts, so
+a scene is never ahead of the words about it, and a burst of steps reaches the
+page as its newest. Its sink may also ask for the world ground (`ground/1`),
+since that is sent once and not with every scene; the call returns when the
+ground is built, which takes about a second the first time for a terrain, and
+the session goes on meanwhile. A spectator without `scenes: true` (telnet's,
+MCP's) and every embodied session behave as they always have.
 
 ## 3. The page
 
@@ -198,9 +205,12 @@ Three changes, each ending with its tests and its docs, in this order:
 
 ## 7. Open questions
 
-1. **Is a whole degree enough?** The silt banks run a few degrees warmer than
-   the open ground, and the drying cools them by about six. One degree is six
-   levels there. Look at it on the page, and change `step` if it is too coarse.
+1. **Is a whole degree enough?** (Settled in M2b-1, by looking at the Ember
+   Reach.) Yes. The open ground swings 24 degrees between noon and dawn, and the
+   silt banks (2 057 cells) swing about 6, so the banks are warmer than the open
+   ground at night and cooler by day. Sixteen hours after the source fails they
+   are about three degrees cooler than if it had run on: three levels, drawn.
+   `base` and `step` are in the scene, so a finer step is a change to one number.
 2. **A world that outruns the page.** At one step a second a scene a step is
    easy. History mode (M4) steps by the hour; a session may then need to send
    at most a few scenes a second, and the newest.

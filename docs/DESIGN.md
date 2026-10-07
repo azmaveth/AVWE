@@ -138,9 +138,12 @@ avwe/
     scene.ex repr.ex ground_map.ex  what a body can see, as something a
                          client draws: the scene, the glyph layers, and the
                          ground as one binary (M2)
+    world_scene.ex world_ground.ex overlays.ex rle.ex  what a spectator sees:
+                         the whole valley, its ground once, and the river, the
+                         heat and the smoke drawn over it (M2b)
     protocol/            intent and percept structs, JSON codecs (to come)
   lib/avwe/session.ex    controller sessions and leases
-  lib/avwe/ground_cache.ex  keeps each terrain's ground map, built once (runtime)
+  lib/avwe/ground_cache.ex  keeps each terrain's ground map and world ground, built once (runtime)
   lib/avwe/mind.ex       the controller side for programs: plans, waits (M1)
   lib/avwe/quire/        importer, compiled sidecars, chronicle writer
   lib/avwe/telnet/       text client (M0)
@@ -685,6 +688,26 @@ so the page and the prose cannot disagree about who is there. A session sends
 scenes when it is opened with `scenes: true` (`Avwe.Session`), after the
 percepts of the step that changed one, and never before the first it was asked
 for. `Avwe.Scene.to_map/1` is its form as plain data.
+
+**As built (M2b).** A spectator that asks for scenes (a session with no body and
+`scenes: true`) is given the other lens: an `Avwe.WorldScene`, with no window and
+no sight, every body, hearth and place in the world (a body with who holds it),
+the world's time and light, and three overlays read from the published snapshot
+by `Avwe.Overlays`: the river by reach (silent or running, its temperature,
+whether it steams), the ground's heat in whole degrees over the whole map as
+run-length rows (a letter for each of fifty-two levels, and `.` for a cell the
+heat system does not store, which has its ground's background), and the smoke's
+puffs. How each overlay is coloured is in `Avwe.Repr.overlay/1`, and `to_map/1`
+carries it beside the data, so a client holds no table. The ground never changes,
+so no scene has it: `Avwe.Session.ground/1` gives it once, as an
+`Avwe.WorldGround` (the whole map's rows, the bed always `b`, and each reach's
+bed cells, so that a reach falling silent changes the water overlay and never the
+ground), built once for a terrain and kept (`Avwe.GroundCache`). A spectator's
+scene is built from the snapshot, which has the fields the step's view leaves
+out, and sent only when that is the step the percepts are of, so it is never
+ahead of the words about it; a burst of steps reaches it as the newest. Nothing
+is added to the region, and a spectator without `scenes: true` (telnet's, MCP's)
+is as it was.
 
 ### 8.5 Transports
 
