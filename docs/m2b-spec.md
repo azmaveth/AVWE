@@ -72,7 +72,8 @@ through `Avwe.Session` as every controller does.
 Not in M2b: sprites, a remembered map, accounts, pause or speed or replay,
 the miracle's annotation, mobile layouts, and any change to the simulation.
 
-M2b-1 is merged (GitHub #7, `c43bc85`). M2b-2 is built, and section 3 says how.
+M2b-1 is merged (GitHub #7, `c43bc85`), and M2b-2 (GitHub #9, `0433724`); section 3
+says how the page was built. M2b-3 is built, and section 4 says how it is proved.
 
 ## 2. The core
 
@@ -227,11 +228,54 @@ its real transport, and a deliberate-break check.
 - **Browser** (`test/browser`, Chromium): the page loads under the policy,
   draws the valley, toggles an overlay, zooms.
 - **The done criterion**: the Ember Reach started an hour before the source
-  fails (812 AR, day 200, hour 15), a browser watcher and a telnet watcher, and
+  fails (812 AR, day 200, 14:00), a browser watcher and a telnet watcher, and
   the world stepped through the drying: the page's water overlay turns reach
   by reach from the source down, the telnet watcher is told of each place as
   the page's log is, and the heat overlay's bank cells cool.
 - **Deliberate breaks** of each piece, one at a time, each caught.
+
+**As built (M2b-3).** Three test files and two helpers.
+
+- `test/e2e/river_watchers_test.exs`, in every `mix test`: a telnet watcher over
+  TCP and the page through `Phoenix.LiveViewTest`, watching the Ember Reach at
+  812 AR, day 200, 14:00, on a manual clock stepped five minutes at a time for
+  four hours. After each step the reaches the page's scene has silent are the
+  first so many, and more of them each time, in more than five stages, so the
+  river is seen to drain from the source down and not all at once. What the
+  telnet watcher is told then is the page's log, line for line and in order. (On
+  joining, the telnet watcher is told how things stand; the page shows that as
+  its scene, and its log is what happens after.) A second test starts a second
+  Ember Reach beside the first with no miracles, a source that never fails, and
+  steps both sixteen hours: the mean level of the silt cells in the page's heat
+  overlay is at least two degrees below the running river's, and below the page's
+  own at the start. Measured, the banks start at about 30 °C and are 3.1 degrees
+  cooler than the river that ran on sixteen hours after, 4.7 after twenty-four.
+- `test/browser/watch_test.exs`, Chromium (`mix test --only playwright`): the lobby's
+  link leads to a page that loads under the policy with nothing said to the
+  console and draws the whole valley; each overlay button switches its overlay,
+  and the canvas follows, down to the colour of a pixel (the river's bed is the
+  scene's colour of running water exactly, a bank cell is its level's colour
+  four fifths over what was there, to a rounding, and the key to the heat comes
+  and goes with its button); the zoom buttons double the cell, the wheel
+  zooms one step for a burst of turns, and the whole-valley button comes back; a
+  drag pans and is not a click; a click names what is at the cell, and what is
+  not.
+- `test/browser/watch_river_test.exs`, Chromium: the done criterion on the
+  canvas, with a telnet watcher beside it. After each five minutes the canvas
+  shows each reach as the world has it, read at one bed cell a reach, in the
+  colour of the dry bed for the first so many and of running water for the rest;
+  the page's log is what the telnet watcher is told; and, a second tab watching
+  the world with no miracles, the silt is cooler in what the page was given, and
+  each page draws each of a sample of its banks in the colour of the level it was
+  given.
+- **`Avwe.Test.PageData`** reads what a page gives its canvas (the ground and the
+  scene, from a `Phoenix.LiveViewTest` page, the browser, or the server's own
+  `to_map/1`): the reaches that are silent, the silt cells, the heat level of a
+  cell and the mean of a set, samples of bed and bank cells that nothing else is
+  drawn over, and the colour a level should have, worked out again from the
+  scene's own ramp. **`Avwe.Test.BrowserPage`** reads and drives the page in
+  Chromium: the mirror (`data-drawn-*`), the pixels, an observation of both at once
+  so that they agree, the mouse and the wheel.
 
 ## 5. Rules
 
