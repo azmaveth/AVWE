@@ -41,7 +41,7 @@ defmodule Avwe.Scene do
   `kind_at/2` decodes one.
   """
 
-  alias Avwe.{GroundMap, Perception, Repr, Space, Terrain}
+  alias Avwe.{GroundMap, Perception, Repr, Rle, Space, Terrain}
   alias Avwe.Systems.River
 
   @letters %{
@@ -122,7 +122,7 @@ defmodule Avwe.Scene do
 
   def kind_at(%__MODULE__{origin: {ox, oy}, size: size, rows: rows}, {x, y})
       when x >= ox and x < ox + size and y >= oy and y < oy + size do
-    rows |> Enum.at(y - oy) |> decode() |> Enum.at(x - ox) |> then(&Map.get(@letters, &1))
+    rows |> Enum.at(y - oy) |> Rle.decode() |> Enum.at(x - ox) |> then(&Map.get(@letters, &1))
   end
 
   def kind_at(%__MODULE__{}, _cell), do: nil
@@ -145,11 +145,11 @@ defmodule Avwe.Scene do
       "you" => %{
         "id" => scene.you.id,
         "name" => scene.you.name,
-        "glyph" => glyph(scene.you.glyph)
+        "glyph" => Repr.glyph_map(scene.you.glyph)
       },
       "holder" => scene.holder && to_string(scene.holder),
       "things" => Enum.map(scene.things, &thing_map/1),
-      "legend" => Map.new(scene.legend, &layers_map/1)
+      "legend" => Repr.legend_map(scene.legend)
     }
   end
 
@@ -159,21 +159,11 @@ defmodule Avwe.Scene do
       "kind" => Atom.to_string(thing.kind),
       "cell" => cell(thing.cell),
       "name" => thing.name,
-      "glyph" => glyph(thing.glyph)
+      "glyph" => Repr.glyph_map(thing.glyph)
     }
   end
 
-  defp layers_map({kind, layers}) do
-    {Atom.to_string(kind),
-     %{
-       "name" => layers.name,
-       "description" => layers.description,
-       "glyph" => glyph(layers.glyph)
-     }}
-  end
-
   defp cell({x, y}), do: [x, y]
-  defp glyph(%{char: char, color: color}), do: %{"char" => char, "color" => color}
 
   # The scene
 
@@ -272,14 +262,13 @@ defmodule Avwe.Scene do
 
       IO.iodata_to_binary([
         blank(first - (cx - half)),
-        segment |> codes(first, y, wet?, []) |> runs(),
+        segment |> codes(first, y, wet?, []) |> Rle.encode(),
         blank(cx + half - last)
       ])
     end
   end
 
-  defp blank(0), do: ""
-  defp blank(count), do: @blank <> Integer.to_string(count)
+  defp blank(count), do: Rle.run(@blank, count)
 
   defp codes(<<>>, _x, _y, _wet?, acc), do: Enum.reverse(acc)
 
@@ -288,21 +277,6 @@ defmodule Avwe.Scene do
 
   defp codes(<<byte, rest::binary>>, x, y, wet?, acc),
     do: codes(rest, x + 1, y, wet?, [elem(@by_byte, byte) | acc])
-
-  defp runs([]), do: []
-  defp runs([code | rest]), do: runs(rest, code, 1, [])
-
-  defp runs([], code, count, acc), do: Enum.reverse([Integer.to_string(count), code | acc])
-  defp runs([code | rest], code, count, acc), do: runs(rest, code, count + 1, acc)
-
-  defp runs([other | rest], code, count, acc),
-    do: runs(rest, other, 1, [Integer.to_string(count), code | acc])
-
-  defp decode(row) do
-    for [_whole, letter, count] <- Regex.scan(~r/([a-z.])(\d+)/, row),
-        _each <- 1..String.to_integer(count),
-        do: letter
-  end
 
   # Whether the river runs at a bed cell: its reach is not silent.
   defp wet?(view, cell) do
