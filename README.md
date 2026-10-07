@@ -119,6 +119,11 @@ Someone else can be in the same world on telnet, or Claude over MCP, at the same
 time. The page only listens on 127.0.0.1 and has no accounts, so anyone who can
 reach the port can take a free body.
 
+Your browser is known by a cookie, so if you reload, open the body in a second
+tab, or come back after your laptop slept, the newest page of that browser takes
+your body back at once and the older one goes to the lobby, which says so. Another
+browser or another device waits for the old page to time out, up to a minute.
+
 ## Playing with Claude
 
 `mix run --no-halt` also serves MCP at `http://127.0.0.1:4041/mcp`.

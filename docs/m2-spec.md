@@ -418,11 +418,35 @@ body somebody else holds costs the wait and is then refused; a free one costs
 nothing. The cost of deciding at the socket is that a body held by somebody
 else shows the page ("Joining...") for the wait before the lobby does.
 
-**Known limits.** A page that comes back after a connection the server has not
-noticed is gone (a laptop that slept) can still be refused for up to a minute,
-until the old page's process times out: that is the question of who a page is
-(DESIGN 14, question 12), which the wait does not answer. There is no keyboard
-play, no remembered map, and no zoom beyond the two views.
+**Who a page is.** A page whose connection dropped without a word (a laptop that
+slept, a network that changed) used to be refused its own body for up to a
+minute, until the server noticed; the wait above does not help, since the old
+page is not letting go. Now a page is known by its browser (decided 2026-10-06,
+DESIGN 14): the first request gives the browser a random id in its session
+cookie (`AvweWeb.BrowserId`; the cookie was already there, for the CSRF secret),
+each page of it is given the id, and a page that takes a body registers it with
+its browser (`AvweWeb.Pages`, the web client's own registry: the lease and the
+core know no browsers, and telnet and MCP are unchanged). A page that finds its
+body held by another page of the same browser asks that page to let go, and
+takes the body at its next try, inside the wait a reload has. The latest page to
+join wins, because the server cannot tell a page whose connection dropped from
+one that is open. The page that is asked goes to the lobby, which says "Wren is
+now being played from another page of this browser." (going ends its process,
+whether or not anyone hears, and the session ends with its sink), and does not
+ask for the body back. The lobby offers a body that a page of the browser holds
+as a link to take over, in place of "(being played)". A body held by anything
+else, or by a page of another browser, is refused as before.
+
+**Known limits.** The browser is the identity, not the person: a page of another
+browser or another device, or of one whose cookie was cleared, that comes back
+after a connection the server has not noticed is gone is still refused for up to
+a minute, until the old page's process times out, and a browser that keeps no
+cookies has no identity to be known by. A reconnect is a join, so a tab whose
+connection was down when it was let go of, and which reconnects later, takes the
+body from the page that took it, which goes to the lobby with the notice; two
+tabs of one body that reconnect together race. Nothing oscillates, and the
+player is one click from the body again. There is no keyboard play, no
+remembered map, and no zoom beyond the two views.
 
 ### 3.4 Security
 
@@ -460,10 +484,18 @@ img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self';
 form-action 'self'; frame-ancestors 'none'`, written as a literal in the
 router because Sobelow reads it there (a module attribute makes its check
 "missing, low confidence"). The root layout has no inline script or style, and
-a test holds that. The one cookie, the session's, is `HttpOnly; SameSite=Lax`
-and carries only the CSRF secret. `.sobelow-conf` no longer says
-`router: :none`; `Config.HTTPS` stays ignored, now with its reason. Sobelow
-finds nothing else.
+a test holds that. The one cookie, the session's, is `HttpOnly; SameSite=Lax`,
+ends when the browser closes, and carries the CSRF secret and the browser's id.
+`.sobelow-conf` no longer says `router: :none`; `Config.HTTPS` stays ignored,
+now with its reason. Sobelow finds nothing else.
+
+The browser's id is a key: whoever has it can take the bodies that pages of its
+browser hold, and nothing more (a body that is free can be taken by anyone who
+can reach the port, as above). It is 16 random bytes, and goes only where the
+browser's own cookie and its own pages' signed tokens go: it is not written into
+a page, the lobby or a log line of ours, and not given to another browser. A
+page of another browser, or something that is not a page, cannot take a body
+from a page, as before.
 
 ## 4. Tests
 
@@ -523,6 +555,24 @@ its real transport.
   and so do the scene's JSON form and `Avwe.warm_ground/1`. Twenty-six
   deliberate breaks of the page, the HUD and the drawing were each caught by the
   test meant for them.
+  *Built with who a page is:* the id (a session without one is given a random
+  one, one that it has is kept, what is not an id is replaced; the cookie is
+  `HttpOnly; SameSite=Lax` and has no max-age), the registry (a page is asked to
+  let go only by a page of its own browser, never by itself, never for a page
+  that has no browser to name, and what a browser holds is not what another's
+  does), a new page taking the body from an old one that is open and answering,
+  and the old one told why and not taking it back, another browser's page
+  refused while the old page keeps the body, a body held by a neighbour not
+  taken, a browser with two bodies and a newer page for one, the lobby offering
+  a browser its own body and showing it taken to another, and the registry
+  cleared when the session ends or the page closes. `test/e2e/web_test.exs`
+  does it over a real socket with the old page silent and its socket open, as a
+  dropped one is to the server, and `test/browser` with a second tab (which
+  takes the body, and gives it back from the lobby) and a second browser context
+  (which is refused). Eighteen deliberate breaks were run: sixteen were caught,
+  and the other two were code that did nothing (closing the session and
+  releasing the entry before going to the lobby, which ending the page's process
+  already does), which was removed.
 - **The done criterion** (`test/e2e/three_controllers_test.exs`), in Lantern
   Hollow: a telnet player, a web player and an MCP player. Each hears the
   others speak within earshot; the web scene shows the other two at their
