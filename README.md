@@ -55,8 +55,10 @@ in the world at once. A lobby lists the worlds and their bodies, and a page
 plays one: a map of what the body can see, drawn in glyphs on a canvas, the
 description of where you are, a log of what happens, buttons for what the body
 can do, and a command line that takes telnet's words (see "Playing in a
-browser"). The spectator view and the overlays for heat, water and smoke are
-next, as M2b ([docs/m2-spec.md](docs/m2-spec.md)).
+browser"). M2b adds a page that only watches: the whole valley and everything in
+it, with the river, the heat and the smoke drawn over it (see "Watching in a
+browser"). Still to come in M2b is the proof, in a real browser, that it shows
+what the telnet watcher is told ([docs/m2b-spec.md](docs/m2b-spec.md)).
 
 ## Playing
 
@@ -123,6 +125,31 @@ Your browser is known by a cookie, so if you reload, open the body in a second
 tab, or come back after your laptop slept, the newest page of that browser takes
 your body back at once and the older one goes to the lobby, which says so. Another
 browser or another device waits for the old page to time out, up to a minute.
+
+## Watching in a browser
+
+Each world in the lobby also has a "Watch" link. A watcher takes no body, sees
+everything, and can act on nothing, so any number of pages may watch one world,
+whoever else is in it. The page shows:
+
+- **The valley**, the whole of it fitted to the page: the ground in its
+  colours, and its people, hearths and places as markers, which become glyphs
+  once you zoom in. The buttons or the wheel zoom (up to eight times as large),
+  a drag pans, and "Whole valley" starts again. At night the ground is dimmed.
+- **Three overlays**, switched with the buttons: **River** draws each reach of
+  the river's bed as running or silent, with a haze on the banks of a reach
+  that steams (on to begin with); **Heat** colours the ground by its
+  temperature in whole degrees, with its key beside it (off to begin with);
+  **Smoke** is a disc for each puff, bigger for more (on to begin with). When
+  the river's source fails, its reaches fall silent one after another down the
+  valley, and the page draws each as the log tells of it.
+- **The clock** of the world, and **the log**: what a telnet watcher is told,
+  line by line, the last two hundred.
+- **A click** on a person, a hearth or a place says what it is, and who holds the
+  body if somebody does.
+
+Like the rest of the page it listens on 127.0.0.1 and has no accounts, and it
+shows everything there is to see, so it belongs there.
 
 ## Playing with Claude
 

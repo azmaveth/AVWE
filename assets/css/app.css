@@ -117,11 +117,13 @@ h3 {
   color: var(--alert);
 }
 
-.page.play {
+.page.play,
+.page.watch {
   max-width: 72rem;
 }
 
-.play header {
+.play header,
+.watch header {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -130,11 +132,13 @@ h3 {
   border-bottom: 1px solid var(--line);
 }
 
-.play header a {
+.play header a,
+.watch header a {
   margin-left: auto;
 }
 
-.play .clock {
+.play .clock,
+.watch .clock {
   margin: 0;
   color: var(--muted);
 }
@@ -165,6 +169,61 @@ h3 {
   border: 1px solid var(--line);
   border-radius: 0.4rem;
   cursor: pointer;
+}
+
+/* The valley is dragged to pan and clicked to pick; a page can still be
+   scrolled past it. */
+#world {
+  display: block;
+  max-width: 100%;
+  background: #0e0c09;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  cursor: grab;
+  touch-action: pan-y pinch-zoom;
+}
+
+#world:active {
+  cursor: grabbing;
+}
+
+.map-tools .tools {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.readout h2 {
+  margin: 0 0 0.4rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.readout p {
+  margin: 0.35rem 0;
+}
+
+.heat-ramp {
+  margin: 1rem 0 0;
+}
+
+.heat-ramp svg {
+  display: block;
+  width: 100%;
+  max-width: 17rem;
+  height: auto;
+  fill: var(--muted);
+}
+
+/* The key to the heat is there while the heat is drawn: the page's own button
+   says whether it is, and the server never hears of it. */
+.page.watch:has(#overlay-heat[aria-pressed="false"]) .heat-ramp {
+  display: none;
+}
+
+.world .watch {
+  margin: 0.5rem 0;
 }
 
 .map-tools {

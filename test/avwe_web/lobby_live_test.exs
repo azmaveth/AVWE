@@ -46,6 +46,26 @@ defmodule AvweWeb.LobbyLiveTest do
       assert html =~ "You are Wren, at Hollow Green."
     end
 
+    test "offers the world to watch, which a click opens, and which takes nobody's body",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, ~p"/")
+
+      assert has_element?(view, ~s(a[href="/watch/hollow_lobby"]), "Watch Lantern Hollow")
+      assert has_element?(view, ".watch .state", "see everything, and take no part")
+
+      {:ok, page, html} =
+        view
+        |> element(~s(a[href="/watch/hollow_lobby"]))
+        |> render_click()
+        |> follow_redirect(conn)
+
+      assert html =~ "Lantern Hollow"
+      assert has_element?(page, "canvas#world")
+
+      {:ok, bodies} = Avwe.bodies(@world)
+      assert Enum.all?(bodies, &(not &1.taken))
+    end
+
     test "shows a body somebody holds, and does not offer it", %{conn: conn} do
       {:ok, _session} = Avwe.connect(@world, body: "wren", controller: :arbor)
       {:ok, view, _html} = live(conn, ~p"/")

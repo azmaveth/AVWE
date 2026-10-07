@@ -31,10 +31,11 @@ const LAYERS = {place: 0, hearth: 1, hearth_burning: 1, smoke: 2, glow: 2, body:
 const DARKEST = 0.35
 const FOGGIEST = 0.45
 
-// "g3s2.4" is three grass, two silt and four cells that are not seen.
+// "g3s2.4" is three grass, two silt and four cells that are not seen. A
+// symbol is a letter of either case (the heat's levels use both) or a dot.
 export function decodeRow(row) {
   const letters = []
-  for (const [, letter, count] of row.matchAll(/([a-z.])(\d+)/g)) {
+  for (const [, letter, count] of row.matchAll(/([a-zA-Z.])(\d+)/g)) {
     for (let n = 0; n < Number(count); n++) letters.push(letter)
   }
   return letters

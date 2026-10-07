@@ -72,6 +72,8 @@ through `Avwe.Session` as every controller does.
 Not in M2b: sprites, a remembered map, accounts, pause or speed or replay,
 the miracle's annotation, mobile layouts, and any change to the simulation.
 
+M2b-1 is merged (GitHub #7, `c43bc85`). M2b-2 is built, and section 3 says how.
+
 ## 2. The core
 
 **World ground** (`Avwe.WorldGround`, pure; static). The map's ground, which
@@ -153,6 +155,53 @@ MCP's) and every embodied session behave as they always have.
 - **Security.** The policy is unchanged. The page shows everything, by design:
   it belongs on loopback, where the endpoint is, and DESIGN 9 says so of
   spectators.
+
+**As built (M2b-2).** What differs from, or is settled beyond, the above:
+
+- **The ground has a legend.** `Avwe.WorldGround` carries the grounds its rows
+  use, each with its glyph and colour from `Avwe.Repr`, so the page holds no
+  table of them, and the page's own legend is those and the things'.
+- **Defaults.** The river and the smoke are on to begin with, the heat is off:
+  it covers the ground it explains. The buttons are the page's own
+  (`aria-pressed`, flipped by `JS.toggle_attribute`, and the hook told by a
+  `map:overlay` event), so the server never hears which are on. The key to the
+  heat is an SVG gradient (the policy forbids inline styles) and is hidden by
+  CSS while the Heat button is not pressed.
+- **Zoom and pan.** Zoom is ×1, ×2, ×4 and ×8 of the size that fits the whole
+  valley to the width; the buttons, the wheel (around the cursor, one step each
+  150 ms) and "Whole valley" set it, and a drag pans, with four pixels before a
+  press is a drag and not a click. The pan cannot leave the map.
+- **Drawing.** In this order: the ground, dimmed by the light (only the ground:
+  the overlays are drawn at full strength, so the heat can be read at night);
+  the heat, at 80% opacity; the river's bed, running or silent, with a haze on
+  the banks of a reach that steams; the smoke as discs of radius
+  `min(6, 1 + 4√g)` cells; the things, as markers while a cell is under ten
+  pixels and as glyphs from ten, a ring on a body somebody holds. A cell that
+  the heat does not store is coloured as its ground's background temperature,
+  grass's or stone's.
+- **A click** sends `"cell"` with `{x, y, r}`: the cell, and how many cells a
+  click may miss by, about eight pixels' worth at this zoom, so none at a big
+  cell (the server keeps `r` to 0 to 4 and ignores anything that is not three
+  integers). The server finds the nearest cell with
+  anything on it, within `r`, and tells everything there, a body first, then a
+  hearth that burns, a hearth, a place: "Mira Vale (person), on its routine;
+  the kiln-house hearth (cold hearth); Ember Reach (place)." A body somebody
+  holds says by whom, and a click on nothing says "Nothing there."
+- **Joining.** A plain request is the page, "Joining...", and starts no session;
+  its socket opens the spectator, takes the scene at once and asks for the
+  ground beside it (the first page for a terrain waits about a second for it,
+  and sees "Drawing the valley..." meanwhile). A world that is not running sends
+  the visitor to the lobby with a notice; one that stops while it is watched
+  leaves the page standing with a notice and a way back. A world with no
+  terrain says it has no map to draw, and still has its log.
+- **The log** is the session's percepts as lines, the last two hundred (a
+  stream), in the order the telnet watcher is told them.
+- **Tests.** `Avwe.Test.WebPage` is a page's side of the LiveView protocol over
+  a real socket (the plain request, the join, an event, the frames that follow),
+  shared by `test/e2e/web_test.exs` and `test/e2e/web_watch_test.exs`;
+  `test/avwe_web/watch_live_test.exs` is the page through `Avwe.Test.WebCase`;
+  the hook's arithmetic is `world.js`, with its Node tests on fixtures that the
+  server writes (`AVWE_UPDATE_FIXTURES=1`).
 
 ## 4. Tests
 

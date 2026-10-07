@@ -32,5 +32,6 @@ defmodule AvweWeb.Router do
 
     live "/", LobbyLive
     live "/play/:world/:body", PlayLive
+    live "/watch/:world", WatchLive
   end
 end

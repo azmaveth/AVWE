@@ -1,7 +1,7 @@
 defmodule Avwe.WorldGroundTest do
   use ExUnit.Case, async: true
 
-  alias Avwe.{GroundCache, GroundMap, Region, Rle, Scene, Terrain, WorldGround}
+  alias Avwe.{GroundCache, GroundMap, Region, Repr, Rle, Scene, Terrain, WorldGround}
   alias Avwe.Test.Ember
 
   @mira "mira-vale"
@@ -157,14 +157,49 @@ defmodule Avwe.WorldGroundTest do
     end
   end
 
+  describe "the legend" do
+    test "has the layers of the grounds the rows use, and no others" do
+      ground = world_ground(small())
+      letters = ground.rows |> Enum.flat_map(&Rle.decode/1) |> Enum.uniq() |> Enum.sort()
+
+      assert letters == ~w(b c g r s t)
+
+      assert ground.legend |> Map.keys() |> Enum.sort() ==
+               ~w(channel_bed clay grass reeds silt stone)a
+
+      assert ground.legend == Repr.legend(Map.keys(ground.legend))
+    end
+
+    test "has only what a land has: a land with no river has no bed, and no clay if it has none" do
+      terrain = Terrain.new(width: 8, height: 6, seed: 1)
+      kinds = terrain |> world_ground() |> Map.fetch!(:legend) |> Map.keys()
+
+      refute :channel_bed in kinds
+      assert :grass in kinds
+    end
+
+    test "never has water, which is the river's and not the ground's" do
+      refute :water in (small() |> world_ground() |> Map.fetch!(:legend) |> Map.keys())
+    end
+  end
+
   describe "as plain data" do
     test "is JSON, with a cell as [x, y]" do
       terrain = small()
       map = terrain |> world_ground() |> WorldGround.to_map()
 
       assert map |> Jason.encode!() |> Jason.decode!() == map
-      assert Map.keys(map) |> Enum.sort() == ["height", "reaches", "rows", "width"]
+      assert Map.keys(map) |> Enum.sort() == ["height", "legend", "reaches", "rows", "width"]
       assert [[_x, _y] | _] = hd(map["reaches"])
+    end
+
+    test "carries the legend as a client reads it, a glyph and its colour for each ground" do
+      legend = small() |> world_ground() |> WorldGround.to_map() |> Map.fetch!("legend")
+
+      assert legend["grass"] == Repr.legend_map(Repr.legend([:grass]))["grass"]
+
+      assert %{"glyph" => %{"char" => _, "color" => "#" <> _}, "name" => "grass"} =
+               legend["grass"]
     end
   end
 
