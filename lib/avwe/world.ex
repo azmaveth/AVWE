@@ -40,6 +40,15 @@ defmodule Avwe.World do
     |> Enum.sort()
   end
 
+  @doc "What a running world says of itself (`Avwe.worlds/0`), or `:error`."
+  @spec info(term()) :: {:ok, map()} | :error
+  def info(id) do
+    case Registry.lookup(Avwe.Registry, {:world, id}) do
+      [{_pid, info}] -> {:ok, info}
+      [] -> :error
+    end
+  end
+
   @doc "The supervisor pid of a running world."
   @spec whereis(term()) :: pid() | nil
   def whereis(id), do: GenServer.whereis(via(id))

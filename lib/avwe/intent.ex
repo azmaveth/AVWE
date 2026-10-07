@@ -46,6 +46,13 @@ defmodule Avwe.Intent do
       without a controller.
     * `:release` - the body is nobody's again and goes back to its routine.
       Succeeds with `:already` when nobody held it.
+    * `:arrive` - a guest comes into the world (`Avwe.Guests`): the intent's
+      `body` is the id the guest will have, and its `params` are `%{name:,
+      backstory:, arrival:, max:}`, cleaned and checked. The one verb for a
+      body that does not exist yet; the body is made at the arrival place.
+      `Avwe.Session` submits it when a controller asks to arrive as a guest.
+      Blocked with `:invalid_name`, `:invalid_backstory`, `:name_taken`,
+      `:full`, `:no_guests` or `:no_arrival_place`.
 
   `controller` names the kind of controller behind the intent: `:human`,
   `:mcp`, `:arbor` or `:autopilot`.
@@ -67,6 +74,7 @@ defmodule Avwe.Intent do
           | :read
           | :control
           | :release
+          | :arrive
           | atom()
 
   @type t :: %__MODULE__{

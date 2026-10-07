@@ -120,7 +120,7 @@ defmodule Avwe.Mind do
   alias Avwe.{Command, Session}
 
   @controllers [:mcp, :arbor]
-  @reserved_verbs [:control, :release]
+  @reserved_verbs [:control, :release, :arrive]
   @named_verbs [:go, :kindle, :douse, :write, :read]
   @buffer 500
   @quit_after 30 * 60 * 1_000
@@ -140,7 +140,10 @@ defmodule Avwe.Mind do
         }
 
   @doc """
-  Starts a Mind playing `body` in `world`.
+  Starts a Mind playing `body` in `world`, or, with a `nil` body and a
+  `:guest` (`[name: ..., backstory: ...]`), a guest of its own making
+  (`Avwe.Guests`): the body exists after the world's next step, and
+  `await_arrival/2` waits for it.
 
   Options: `:controller` (`:mcp`, the default, or `:arbor`), `:idle_after`
   (passed to the session: real ms without a call before the body is yielded
@@ -148,7 +151,8 @@ defmodule Avwe.Mind do
   call before the Mind stops and releases the body; default 30 minutes).
 
   Fails as `Avwe.connect/2` does (`:no_such_world`, `:no_such_body`,
-  `:body_taken`), or with `:invalid_controller`.
+  `:body_taken`, and for a guest `:no_guests`, `:invalid_name`, `:invalid_backstory`,
+  `:name_taken` or `:full`), or with `:invalid_controller`.
   """
   @spec start(atom(), String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
   def start(world, body, opts \\ []) do
@@ -166,6 +170,20 @@ defmodule Avwe.Mind do
   """
   @spec look(pid()) :: {:ok, map()} | {:error, term()}
   def look(mind), do: GenServer.call(mind, :look)
+
+  @doc """
+  Waits, up to `timeout` real milliseconds, for a guest's body to exist
+  (`Avwe.Session.await_arrival/2`); `:ok` at once for any other body. Until it
+  does, `look/1` answers `{:error, :arriving}`.
+  """
+  @spec await_arrival(pid(), timeout()) :: :ok | {:error, :timeout | :refused}
+  def await_arrival(mind, timeout \\ 10_000) do
+    GenServer.call(
+      mind,
+      {:await_arrival, timeout},
+      if(is_integer(timeout), do: timeout + 2_000, else: :infinity)
+    )
+  end
 
   @doc """
   Runs one step or a plan (a list of steps) and waits.
@@ -242,15 +260,15 @@ defmodule Avwe.Mind do
   @impl GenServer
   def init(opts) do
     controller = Keyword.get(opts, :controller, :mcp)
-    body = Keyword.fetch!(opts, :body)
 
     connect =
-      [body: body, controller: controller, sink: self()] ++
-        Keyword.take(opts, [:idle_after])
+      [body: Keyword.fetch!(opts, :body), controller: controller, sink: self()] ++
+        Keyword.take(opts, [:idle_after, :guest])
 
     with :ok <- check_controller(controller),
          {:ok, session} <- Avwe.connect(Keyword.fetch!(opts, :world), connect) do
       Process.monitor(session)
+      body = Session.body(session)
       idle_after = Keyword.get(opts, :idle_after, Session.default_idle_after())
 
       state = %{
@@ -293,6 +311,9 @@ defmodule Avwe.Mind do
   end
 
   def handle_call(:body, _from, state), do: {:reply, state.body, state}
+
+  def handle_call({:await_arrival, timeout}, _from, state),
+    do: {:reply, Session.await_arrival(state.session, timeout), state}
 
   def handle_call(:percepts, _from, state) do
     state = answer_waiter(state)
