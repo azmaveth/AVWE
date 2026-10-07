@@ -1,0 +1,908 @@
+{
+  "legend": {
+    "body": {
+      "description": "Somebody.",
+      "glyph": {
+        "char": "@",
+        "color": "#e8d9a0"
+      },
+      "name": "person"
+    },
+    "hearth": {
+      "description": "A hearth with no fire in it.",
+      "glyph": {
+        "char": "o",
+        "color": "#8a8078"
+      },
+      "name": "cold hearth"
+    },
+    "hearth_burning": {
+      "description": "A hearth with a fire in it.",
+      "glyph": {
+        "char": "*",
+        "color": "#ff9a3c"
+      },
+      "name": "burning hearth"
+    },
+    "place": {
+      "description": "A place you know.",
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "name": "place"
+    }
+  },
+  "light": 0.9,
+  "overlays": {
+    "heat": {
+      "air_c": 24.9,
+      "backgrounds": {
+        "grass": 35.0,
+        "stone": 42.2
+      },
+      "base": -10,
+      "description": "How warm the ground is. Each cell near the river, on clay and at a hearth has its own; open grass and open stone share one each.",
+      "name": "ground temperature",
+      "ramp": [
+        {
+          "at": 0,
+          "color": "#27408b"
+        },
+        {
+          "at": 8,
+          "color": "#2f7fb5"
+        },
+        {
+          "at": 14,
+          "color": "#4fb3a0"
+        },
+        {
+          "at": 18,
+          "color": "#8cc86a"
+        },
+        {
+          "at": 22,
+          "color": "#d6d65a"
+        },
+        {
+          "at": 30,
+          "color": "#f0953a"
+        },
+        {
+          "at": 40,
+          "color": "#d6382b"
+        }
+      ],
+      "rows": [
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".256",
+        ".182T2N1T2.69",
+        ".180T1N1O5N1T1.67",
+        ".179T1N1O1P2Q1P2O1N1T1.66",
+        ".178T1N1O1P1Q1R3Q1P1O1N1.66",
+        ".178N1O1P1Q1R1S1U1S1R1Q1P1O1T1.65",
+        ".177T1O1P1Q1R1S1U1W1U1S1R1P1O1T1.65",
+        ".177N1O1P1R1S1U1W3U1R1Q1O1N1.65",
+        ".176T1O1P1Q1R1U1W3U1S1R1P1O1T1.65",
+        ".176N1O1P1R1S1U1W3U1R1Q1P1O1T1.65",
+        ".175T1O1P1Q1R1U1W3U1S1R1P1O1N1.66",
+        ".174T1N1O1P1R1S1U1W3U1R1Q1P1O1T1.66",
+        ".174N1O1P1Q1R1U1W3U1S1R1P1O1N1.67",
+        ".173T1O1P1Q1R1S1U1W3U1R1Q1P1O1T1.67",
+        ".173N1O1P1R1S1U1W3U1S1R1P1O1N1.68",
+        ".172T1O1P1Q1R1U1W3U1S1R1Q1P1O1T1.68",
+        ".172N1O1P1R1S1U1W3U1R1Q1P1O1N1.69",
+        ".171T1O1P1Q1R1U1W3U1S1R1P1O1N1T1.69",
+        ".171T1O1P1R1S1U1W3U1R1Q1P1O1T1.70",
+        ".171N1O1P1R1U1W3U1S1R1P1O1N1.71",
+        ".171N1O1P1R1U1W3U1R1Q1P1O1T1.71",
+        ".171N1O1P1R1U1W3U1R1P1O1N1.72",
+        ".171N1O1P1R1U1W3U1R1P1O1N1.72",
+        ".171N1O1P1R1U1W3U1R1P1O1N1.72",
+        ".171N1O1P1R1U1W3U1R1P1O1N1.72",
+        ".171N1O1P1R1U1W3U1R1P1O1N1.72",
+        ".171N1O1P1R1U1W3U1R1P1O1N1.72",
+        ".171N1O1P1R1U1W3U1R1P1O1N1.72",
+        ".171N1O1P1R1U1W3U1R1P1O1N1.72",
+        ".171N1O1P1R1U1W3U1R1P1O1N1.72",
+        ".171N1O1P1R1U1W3U1R1P1O1N1.72",
+        ".170T1O1P1Q1R1U1W3U1R1P1O1N1.72",
+        ".170N1O1P1Q1S1U1W3U1R1P1O1N1.72",
+        ".169T1O1P1Q1R1U1W3U1S1Q1P1O1T1.72",
+        ".169N1O1P1Q1S1U1W3U1R1Q1P1O1T1.72",
+        ".168T1O1P1Q1R1U1W3U1S1Q1P1O1N1.73",
+        ".167T1N1O1P1Q1R1T1W3U1R1Q1P1O1T1.73",
+        ".167N1O1P1Q1R1T1W3U1S1Q1P1O1N1.74",
+        ".166T1O1P1Q1R2T1W3T1R1Q1P1O1T1.74",
+        ".166N1O1P1Q1R1T1W3T1R1Q1P1O1N1.75",
+        ".165T1O1P1Q1R1T1W3T1R2Q1P1O1T1.75",
+        ".164T1N1O1P1Q1R1T1W3T1R1Q1P1O1N1.76",
+        ".164N1O1P1Q1R1T1W3T1R1Q1P1O1N1T1.76",
+        ".163T1O1P1Q1R2T1W3T1R1Q1P1O1T1.77",
+        ".162T1N1O1P1Q1R1T1W3T1R1Q1P1O1N1.78",
+        ".162N1O1P1Q1R1T1W3T1R2Q1P1O1T1.78",
+        ".161T1N1P1Q1R2T1W3T1R1Q1P1O1N1.79",
+        ".161N1O1P1Q1R1T1W3T1R1Q1P1O1N1T1.79",
+        ".160T1N1P1Q1R1T1W3T1R2Q1P1O1T1.80",
+        ".159T1N1O1P1Q1R1T1W3T1R1Q1P1O1N1.81",
+        ".159N1O1P1Q1R1T1W3T1R1Q1P1O1N1T1.81",
+        ".157T1N2P1Q1R2T1W3T1R1Q1P1N1T1.82",
+        ".156T1N1O2P1Q1R1T1W3T1R1Q1P1O1N1.83",
+        ".154T1N2O1P1Q2R1T1W3T1R2Q1P1N1T1.83",
+        ".153T1N1O2P1Q2R1T2W3T1R1Q1P1O1N1.84",
+        ".151T1N2O1P1Q3R1T1V1W3T1R1Q1P1O1N1T1.84",
+        ".150T1N1O2P1Q2R1T2V2W2T1R2Q1P1N1T1.85",
+        ".148T1N2O1P1Q3R1T1V4W1T1R2Q1P1O1N1.86",
+        ".147T1N1O2P1Q2R1T2V4T2R2Q1P1O1N1T1.86",
+        ".145T1N2O1P1Q3R1T1V5T1R1Q3P1O1N1T1.87",
+        ".144T1N1O2P2Q1R1T2V4T2R1Q2P2O1N1T1.88",
+        ".143T1N1O1P2Q2R1T1V5T1R1Q3P1O1N2T1.89",
+        ".142T1N1O1P2Q1R1T2V4T2R1Q2P1O2N1T1.91",
+        ".142N1O1P2Q1R1T1V5T1R1Q3P1O1N2T1.92",
+        ".141T1N1O1P1Q1R1T1V4T2R1Q2P1O2N1T1.94",
+        ".141N1O1P1Q1R1T1V4T1R1Q3P1O1N2T1.95",
+        ".140T1N1O1P1Q1T1V3T2R1Q1P2O2N1T1.97",
+        ".139T1N1O1P1Q1R1T1V3T1Q2P2O1N2T1.98",
+        ".139N1O1P2Q1T1V3T1R1Q1P1O2N1T1.100",
+        ".138T1N1O1P1Q1R1T1V3T1Q1P1O1N2T1.101",
+        ".137T1N1O1P1Q1R1T1V3T1R1Q1P1O1N1.103",
+        ".137N1O1P2Q1T1V3T1R1Q1P1O1N1T1.103",
+        ".136T1N1O1P1Q1R1T1V3T1Q1P2O1N1.104",
+        ".136N1O1P1Q1R1T1V3T1R1Q1P1O1N1T1.104",
+        ".135T1N1O1P1Q1T1V3T1R1Q1P1O1N1T1.105",
+        ".134T1N1O1P1Q1R1T1V3T1Q1P2O1N1.106",
+        ".134N1O1P2Q1T1V3T1R1Q1P1O1N1T1.106",
+        ".133T1N1O1P1Q1R1T1V3T1Q1P1O1N1T1.107",
+        ".132T1N1O1P1Q1R1T1V3T1R1Q1P1O1N1.108",
+        ".132N2O1P1Q1T1V3T1R1Q1P1O1N1T1.108",
+        ".131T1N1O1P1Q1R1T1V3T1Q1P2O1N1.109",
+        ".130T1N2P1Q1R1T1V3T1R1Q1P1O1N1T1.109",
+        ".94T1.35N2O1P1Q1T1V3T1R1Q1P1O1N1T1.110",
+        ".129T1N1O1P1Q1R1T1V3T1Q1P2O1N1.111",
+        ".128T1N2P1Q1R1T1V3T1R1Q1P1O1N1T1.111",
+        ".128N2O1P1Q1T1V3T1R1Q1P1O1N1T1.112",
+        ".127T1N1O1P1Q1R1T1V3T1Q1P1O1N2.113",
+        ".126T1N2P1Q1R1T1V3T1R1Q1P1N2T1.113",
+        ".126N2O1P1Q1T1V3T1R1Q1P1O1N1T1.114",
+        ".125T1N1O1P1Q1R1T1V3T1Q1P1O1N2.115",
+        ".124T1N2P1Q1R1T1V3T1R1Q1P1N2T1.115",
+        ".124M1N1O1P1Q1T1V3T1R1Q1P1O1N1T1.116",
+        ".123T1N1O1P1Q1R1T1V3T1Q1P1O1N2.117",
+        ".123M1N1O1Q1R1T1V3T1R1Q1O1N2T1.117",
+        ".122T1N1O1P1Q1T1V3T1R1Q1P1O1N1T1.118",
+        ".122T1N1O1Q1R1T1V3T1Q1P1O1N1M1.119",
+        ".122M1N1P1Q1T1V3T1R1Q1O1N2T1.119",
+        ".122M1N1P1Q1T1V3T1Q1P1O1N1T1.120",
+        ".122M1N1P1Q1T1V3T1Q1P1N1M1.121",
+        ".122M1N1P1Q1T1V3T1Q1P1N1M1.121",
+        ".122M1N1P1Q1T1V3T1Q1P1N1M1.121",
+        ".122M1N1P1Q1T1V3T1Q1P1N1M1.121",
+        ".122M1N1P1Q1T1V3T1Q1P1N1M1.121",
+        ".122M1N1P1Q1T1V3T1Q1P1N1M1.121",
+        ".121T1N1O1P1Q1T1V3T1Q1P1N1M1.121",
+        ".121T1N1O1P1R1T1V3T1Q1P1N1M1.121",
+        ".121M1N1P1Q1T1V3T1R1P1O1N1T1.121",
+        ".121M1N1P1Q1T1V3T1Q1P1O1N1T1.121",
+        ".121M1N1P1Q1T1V3T1Q1P1N1M1.122",
+        ".121M1N1P1Q1T1V3T1Q1P1N1M1.122",
+        ".121M1N1P1Q1T1V3T1Q1P1N1M1.122",
+        ".121T1N1P1Q1T1V3T1Q1P1N1M1.122",
+        ".119T5Q1S1V3S1Q1O1N1M1.122",
+        ".118T7S1V3S1Q1O1N1M1.122",
+        ".118T7S1V3S1Q1O1N1M1.122",
+        ".117T8S1V3S1Q1O1N1M1.122",
+        ".118T7S1V3S1Q1O1N1M1.122",
+        ".118T7S1V3S1Q1P1O1N1T1.121",
+        ".119T5Q1S1V3S1Q1P1O1N1T1.121",
+        ".121T1N1O1P1Q1S1V3S1Q1O1N1M1.121",
+        ".121T1N1O1P1Q1S1V3S1Q1O1N1M1T1.120",
+        ".122M1N1O1Q1S1V3S1Q1P1O1N1M1.120",
+        ".122M1N1O1P1S1U3S1Q2P1O1N1T1.119",
+        ".122T1N1O1P1Q1S1U3S1Q1P1O1N1M1T1.118",
+        ".122T1N1O1P1Q2S1U3S1Q1P1O1N1M1T1.117",
+        ".123M1N1O1P1Q1S1U3S1Q2P1O1N1M1.117",
+        ".123T1M1N1O1P1Q1S1U3S1Q2P1O1N1T1.116",
+        ".124T1N1O1P1Q2S1U3S1Q1P1O1N1M1T1.115",
+        ".125M1N1O1P1Q2S1U3S1Q1P1O1N1M1.115",
+        ".125T1M1N1O1P1Q1S1U3S1Q2P1O1N1T1.114",
+        ".126T1M1N1O1P1Q1S1U3S1Q1P1O1N1M1.114",
+        ".127T1N1O1P1Q2S1U3S1Q1P1O1N1T1.113",
+        ".128M1N1O1P1Q1S1U3S1Q1P1O1N1M1.113",
+        ".128T1M1N1O1P1Q1S1U3S1Q1P1O1N1T1.112",
+        ".129T1N1O1P1Q1S1U3S1Q1P1O1N1T1.112",
+        ".130M1N1O1P1Q1S1U3S1P1O1N1M1.112",
+        ".130T1N1O1P1Q1S1U3S1Q1P1O1N1T1.111",
+        ".131M1N1O1P1S1U3S1Q1P1O1N1T1.111",
+        ".131T1N1O1P1Q1S1U3S1P1O1N1M1.111",
+        ".131T1N1O1P1Q1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".132M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".131T1M1N1O1P1S1U3S1P1O1N1M1.111",
+        ".131M1N1O1P1Q1S1U3S1P1O1N1M1.111",
+        ".130T1M1N1O1P1S1U3S1Q1P1O1N1T1.111",
+        ".130M1N1O1P1Q1S1U3S1P1O1N1M1T1.111",
+        ".129T1M1N1O1P1S1U3S1Q1P1O1N1M1.112",
+        ".129M1N1O1P1Q1S1U3S1P1O1N1M1T1.112",
+        ".128T1M1N1O1P1S1U3S1Q1P1O1N1M1.113",
+        ".128M1N1O1P1Q1S1U3S1P1O1N1M1T1.113",
+        ".127T1M1N1O1P1S1U3S1Q1P1O1N1M1.114",
+        ".127M1N1O1P1Q1S1U3S1P1O1N1M1T1.114",
+        ".126T1M1N1O1P1S1U3S1Q1P1O1N1M1.115",
+        ".126M1N1O1P1Q1S1U3S1P1O1N1M1T1.115",
+        ".125T1M1N1O1P1S1U3S1Q1P1O1N1M1.116",
+        ".125M1N1O1P1Q1S1U3S1P1O1N1M1T1.116",
+        ".124T1M1N1O1P1S1U3S1Q1P1O1N1M1.117",
+        ".124M1N1O1P1Q1S1U3S1P1O1N1M1T1.117",
+        ".123T1M1N1O1P1S1U3S1Q1P1O1N1M1.118",
+        ".123M1N1O1P1Q1S1U3S1P1O1N1M1T1.118",
+        ".122T1M1N1O1P1S1U3S1Q1P1O1N1M1.119",
+        ".122M1N1O1P1Q1S1U3S1P1O1N1M1T1.119",
+        ".121T1M1N1O1P1S1U3S1Q1P1O1N1M1.120",
+        ".121T1N1O1P1Q1S1U3S1P1O1N1M1T1.120",
+        ".121M1N1O1P1S1U3S1Q1P1O1N1M1.121",
+        ".121M1N1O1P1S1U3S1Q1P1O1N1M1.121",
+        ".121T1N1O1P1Q1S1U3S1P1O1N1M1T1.120",
+        ".121T1M1N1O1P1S1U3S1Q1P1O1N1T1.120",
+        ".122M1N1O1P1Q1S1U3S1P1O1N1M1.120",
+        ".122T1M1N1O1P1S1U3S1P1O1N1M1T1.119",
+        ".123M1N1O1P1S1U3S1P2O1N1M1.119",
+        ".123T1N1O1P1Q1S1U1T2S1P1O1N1M1T1.118",
+        ".123T1M1N1O1P1S1T3S1P2O1M1T1.118",
+        ".124M1N1O1P2S1T3S1P1O1N1M1.118",
+        ".124T1M1N1O1P1S1T3S1P1O1N1M1T1.117",
+        ".125M1N1O1P1S1T3S1P2O1M1T1.117",
+        ".125T1M1O1P2S1T3S1P1O1N1M1.117",
+        ".125T1M1N1O1P1S1T3S1P1O1N1M1T1.116",
+        ".126M1N1O1P1S1T3S1P2O1M2.116",
+        ".126T1M1O1P2S1T3S1P1O1N1M1T1.115",
+        ".126T1M1N1O1P1S1T3R1P1O1N1M1T1.115",
+        ".127M1N1O1P2S1T3R1P1O1M2.115",
+        ".127T1M1N1O1P1R1T3R1P1O1N1M1T1.114",
+        ".128M1N1O1P1R1T3R1P1O1N1M2.114",
+        ".128T1M1N1O1P1R1T3R1P1O1N1M1T1.113",
+        ".128T1M1N1O1P1R1T3R1P1O1N1M1T1.113",
+        ".129M2N1O1P1R1T3R1P1O1M1L1.113",
+        ".129T1M1N1O1P1R1T3R1P1O1M1L1.113",
+        ".130M2O1P1R1T3R1P1O1M1L1.113",
+        ".129T1M1N1O1P1R1T3R1P1O1M1L1.113",
+        ".129T1M1N1O1P1R1T3R1P1O1M1L1.113",
+        ".129L1M1N1P1R1T3R1P1O1N1M1T1.113",
+        ".129L1M1N1P1R1T3R1P1O1N1M1T1.113",
+        ".129L1M1N1P1R1T3R1P1N1M2.114",
+        ".129M2N1P1R1T3R1P1N1M1L1.114",
+        ".128T1M1N1O1P1R1T3R1P1N1M1L1.114",
+        ".128T1M1N1O1P1R1T3R1P1N1M1L1.114",
+        ".128L1M1N1P1R1T3R1P1O1N1M1T1.114",
+        ".128L1M1N1P1R1T3R1P1O1N1M1T1.114",
+        ".128L1M1N1P1R1T3R1P1N1M2.115",
+        ".128L1M1N1P1R1T3R1P1N1M1L1.115",
+        ".127T1M1N1O1P1R1T3R1O1N1M1L1.115",
+        ".127T1M1N1O1P1R1T3R1O1N1M1L1.115",
+        ".127L1M1N1O1R1T3R1P1O1N1M1T1.115",
+        ".127L1M1N1O1R1T3R1P1O1N1M1T1.115",
+        ".127L1M1N1O1R1T3R1O1N1M1L1.116",
+        ".127L1M1N1O1R1T3R1O1N1M1L1.116",
+        ".126T1M1N1O1P1R1T3R1O1N1M1L1.116",
+        ".126T1M1N1O1P1R1T3R1O1N1M1L1.116",
+        ".126L1M1N1O1R1T3R1P1O1N1M1T1.116",
+        ".126L1M1N1O1R1T3R1P1O1N1M1T1.116",
+        ".126L1M1N1O1R1T3R1O1N1M1L1.117"
+      ],
+      "step": 1,
+      "unit": "°C"
+    },
+    "smoke": {
+      "color": "#b8b8b8",
+      "description": "Woodsmoke drifting from lit hearths, in puffs: the more grams, the larger.",
+      "name": "smoke",
+      "puffs": [
+        [
+          122.6,
+          137.4,
+          0.046
+        ],
+        [
+          124.7,
+          135.3,
+          0.046
+        ],
+        [
+          126.8,
+          133.2,
+          0.045
+        ],
+        [
+          128.9,
+          131.1,
+          0.044
+        ],
+        [
+          131.0,
+          129.0,
+          0.043
+        ],
+        [
+          133.2,
+          126.8,
+          0.043
+        ],
+        [
+          135.3,
+          124.7,
+          0.042
+        ],
+        [
+          137.4,
+          122.6,
+          0.041
+        ],
+        [
+          139.5,
+          120.5,
+          0.041
+        ],
+        [
+          141.6,
+          118.4,
+          0.04
+        ],
+        [
+          143.8,
+          116.2,
+          0.039
+        ],
+        [
+          145.9,
+          114.1,
+          0.039
+        ],
+        [
+          148.0,
+          112.0,
+          0.038
+        ],
+        [
+          150.1,
+          109.9,
+          0.037
+        ],
+        [
+          152.3,
+          107.7,
+          0.037
+        ],
+        [
+          154.4,
+          105.6,
+          0.036
+        ],
+        [
+          156.5,
+          103.5,
+          0.036
+        ],
+        [
+          158.6,
+          101.4,
+          0.035
+        ],
+        [
+          160.7,
+          99.3,
+          0.034
+        ],
+        [
+          162.9,
+          97.1,
+          0.034
+        ],
+        [
+          165.0,
+          95.0,
+          0.033
+        ],
+        [
+          167.1,
+          92.9,
+          0.033
+        ],
+        [
+          169.2,
+          90.8,
+          0.032
+        ],
+        [
+          171.3,
+          88.7,
+          0.032
+        ],
+        [
+          173.5,
+          86.5,
+          0.031
+        ],
+        [
+          175.6,
+          84.4,
+          0.031
+        ],
+        [
+          177.7,
+          82.3,
+          0.03
+        ],
+        [
+          179.8,
+          80.2,
+          0.03
+        ],
+        [
+          182.0,
+          78.0,
+          0.029
+        ],
+        [
+          184.1,
+          75.9,
+          0.029
+        ],
+        [
+          186.2,
+          73.8,
+          0.028
+        ],
+        [
+          188.3,
+          71.7,
+          0.028
+        ],
+        [
+          190.4,
+          69.6,
+          0.027
+        ],
+        [
+          192.6,
+          67.4,
+          0.027
+        ],
+        [
+          194.7,
+          65.3,
+          0.026
+        ],
+        [
+          196.8,
+          63.2,
+          0.026
+        ],
+        [
+          198.9,
+          61.1,
+          0.026
+        ],
+        [
+          201.0,
+          59.0,
+          0.025
+        ],
+        [
+          203.2,
+          56.8,
+          0.025
+        ],
+        [
+          205.3,
+          54.7,
+          0.024
+        ],
+        [
+          207.4,
+          52.6,
+          0.024
+        ],
+        [
+          209.5,
+          50.5,
+          0.023
+        ],
+        [
+          211.7,
+          48.3,
+          0.023
+        ],
+        [
+          213.8,
+          46.2,
+          0.023
+        ],
+        [
+          215.9,
+          44.1,
+          0.022
+        ],
+        [
+          218.0,
+          42.0,
+          0.022
+        ],
+        [
+          220.1,
+          39.9,
+          0.022
+        ],
+        [
+          222.3,
+          37.7,
+          0.021
+        ],
+        [
+          224.4,
+          35.6,
+          0.021
+        ],
+        [
+          226.5,
+          33.5,
+          0.021
+        ],
+        [
+          228.6,
+          31.4,
+          0.02
+        ],
+        [
+          230.7,
+          29.3,
+          0.02
+        ],
+        [
+          232.9,
+          27.1,
+          0.02
+        ],
+        [
+          235.0,
+          25.0,
+          0.019
+        ],
+        [
+          237.1,
+          22.9,
+          0.019
+        ],
+        [
+          239.2,
+          20.8,
+          0.019
+        ],
+        [
+          241.4,
+          18.6,
+          0.018
+        ],
+        [
+          243.5,
+          16.5,
+          0.018
+        ],
+        [
+          245.6,
+          14.4,
+          0.018
+        ],
+        [
+          247.7,
+          12.3,
+          0.017
+        ],
+        [
+          249.8,
+          10.2,
+          0.017
+        ],
+        [
+          252.0,
+          8.0,
+          0.017
+        ],
+        [
+          254.1,
+          5.9,
+          0.017
+        ]
+      ]
+    },
+    "water": {
+      "colors": {
+        "flowing": "#3b82c4",
+        "silent": "#7a6850",
+        "steam": "#e8eef2"
+      },
+      "description": "The river, reach by reach: running, or fallen silent. A pale haze along a bank is steam off warm silt.",
+      "name": "river",
+      "reaches": [
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 39.9
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 39.7
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 39.6
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 39.5
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 39.3
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 39.1
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 38.9
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 38.8
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 38.6
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 38.4
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 38.2
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 38.1
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 37.9
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 37.7
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 37.5
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 37.4
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 37.2
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 37.0
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 36.9
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 36.7
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 36.5
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 36.4
+        },
+        {
+          "silent": false,
+          "steaming": false,
+          "temp_c": 36.2
+        }
+      ]
+    }
+  },
+  "things": [
+    {
+      "cell": [
+        121,
+        138
+      ],
+      "glyph": {
+        "char": "@",
+        "color": "#e8a07a"
+      },
+      "holder": "human",
+      "id": "mira-vale",
+      "kind": "body",
+      "name": "Mira Vale"
+    },
+    {
+      "cell": [
+        94,
+        105
+      ],
+      "glyph": {
+        "char": "o",
+        "color": "#8a8078"
+      },
+      "id": "lodge-hearth",
+      "kind": "hearth",
+      "name": "the lodge hearth"
+    },
+    {
+      "cell": [
+        94,
+        105
+      ],
+      "glyph": {
+        "char": "*",
+        "color": "#ff9a3c"
+      },
+      "id": "the-last-coal",
+      "kind": "hearth_burning",
+      "name": "The Last Coal"
+    },
+    {
+      "cell": [
+        121,
+        138
+      ],
+      "glyph": {
+        "char": "*",
+        "color": "#ff9a3c"
+      },
+      "id": "town-hearth",
+      "kind": "hearth_burning",
+      "name": "the kiln-house hearth"
+    },
+    {
+      "cell": [
+        94,
+        105
+      ],
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "id": "ashwarden-lodge",
+      "kind": "place",
+      "name": "Ashwarden Lodge"
+    },
+    {
+      "cell": [
+        121,
+        138
+      ],
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "id": "ember-reach",
+      "kind": "place",
+      "name": "Ember Reach"
+    },
+    {
+      "cell": [
+        184,
+        30
+      ],
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "id": "river-source",
+      "kind": "place",
+      "name": "The Source"
+    },
+    {
+      "cell": [
+        163,
+        78
+      ],
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "id": "the-dry-bend",
+      "kind": "place",
+      "name": "The Dry Bend"
+    },
+    {
+      "cell": [
+        138,
+        162
+      ],
+      "glyph": {
+        "char": "#",
+        "color": "#d8c8a8"
+      },
+      "id": "willow-docks",
+      "kind": "place",
+      "name": "Willow Docks"
+    }
+  ],
+  "time": 25624477200
+}

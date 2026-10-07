@@ -116,17 +116,18 @@ defmodule Avwe do
   defp store_dir(id, data_dir), do: data_dir |> Path.expand() |> Path.join(to_string(id))
 
   @doc """
-  Builds the ground map of a world's terrain in the background, if it has any
-  and the map is not kept yet (`Avwe.GroundCache`), so that the first page to
-  ask for a scene finds it ready and does not draw its first scene bare. It
-  takes about a second for the Ember Reach, and returns at once. A world that
-  is not running, or has no terrain, has nothing to build.
+  Builds the ground of a world's terrain in the background, if it has any and
+  it is not kept yet (`Avwe.GroundCache`): the map a body's scene reads, and the
+  world ground a spectator's page is given. So the first page to ask for a
+  scene finds them ready and does not draw its first scene bare. It takes about
+  a second for the Ember Reach, and returns at once. A world that is not
+  running, or has no terrain, has nothing to build.
   """
   @spec warm_ground(atom()) :: :ok
   def warm_ground(world) do
     with {:ok, %{terrain: %Terrain{} = terrain}} <- snapshot(world),
-         false <- GroundCache.cached?(terrain) do
-      {:ok, _task} = Task.start(fn -> GroundCache.fetch(terrain) end)
+         false <- GroundCache.world_cached?(terrain) do
+      {:ok, _task} = Task.start(fn -> GroundCache.world(terrain) end)
     end
 
     :ok
@@ -217,10 +218,12 @@ defmodule Avwe do
     * `:idle_after` - real milliseconds without a call on the session
       (`Avwe.Session.act/3` or `Avwe.Session.look/1`) after which it yields
       the body to autopilot until its next act. Default: ten minutes.
-    * `:scenes` - `true` for a client that draws what the body sees: it asks
-      for the first `Avwe.Scene` with `Avwe.Session.scene/1`, and is sent each
-      one that follows as `{:avwe_scene, session, scene}`. Default: `false`.
-      A spectator has no scenes.
+    * `:scenes` - `true` for a client that draws: it asks for the first scene
+      with `Avwe.Session.scene/1`, and is sent each one that follows as
+      `{:avwe_scene, session, scene}`. A body's scene is what it sees
+      (`Avwe.Scene`); a spectator's, with no `:body`, is the whole valley and its
+      fields (`Avwe.WorldScene`), and its ground, which never changes, is
+      `Avwe.Session.ground/1`. Default: `false`.
 
   Fails with `:no_such_world`, `:no_such_body`, `:body_taken` or
   `:invalid_controller`.

@@ -26,8 +26,18 @@ defmodule Avwe.Repr do
   @type ground :: Terrain.ground() | :water
   @type thing :: :body | :hearth | :hearth_burning | :place | :smoke | :glow
   @type kind :: ground() | thing()
+  @type overlay :: :water | :heat | :smoke
   @type glyph :: %{char: String.t(), color: String.t()}
   @type layers :: %{name: String.t(), description: String.t(), glyph: glyph()}
+  @type stop :: %{at: number(), color: String.t()}
+  @type overlay_layers :: %{
+          required(:name) => String.t(),
+          required(:description) => String.t(),
+          optional(:unit) => String.t(),
+          optional(:ramp) => [stop()],
+          optional(:colors) => %{atom() => String.t()},
+          optional(:color) => String.t()
+        }
 
   @layers %{
     grass: %{
@@ -97,6 +107,46 @@ defmodule Avwe.Repr do
     }
   }
 
+  # What a spectator's scene draws over the ground, layer by layer. An overlay is
+  # not a kind of thing: it is a field (the river's reaches, the ground's heat,
+  # the smoke), and how to colour it belongs here with the rest of the layers,
+  # so that a client only draws what it is told. The river's colours are the
+  # water's and the dry bed's, so a reach looks as it does in a body's scene.
+  @overlays %{
+    water: %{
+      name: "river",
+      description:
+        "The river, reach by reach: running, or fallen silent. A pale haze along " <>
+          "a bank is steam off warm silt.",
+      colors: %{
+        flowing: @layers.water.glyph.color,
+        silent: @layers.channel_bed.glyph.color,
+        steam: "#e8eef2"
+      }
+    },
+    heat: %{
+      name: "ground temperature",
+      description:
+        "How warm the ground is. Each cell near the river, on clay and at a " <>
+          "hearth has its own; open grass and open stone share one each.",
+      unit: "°C",
+      ramp: [
+        %{at: 0, color: "#27408b"},
+        %{at: 8, color: "#2f7fb5"},
+        %{at: 14, color: "#4fb3a0"},
+        %{at: 18, color: "#8cc86a"},
+        %{at: 22, color: "#d6d65a"},
+        %{at: 30, color: "#f0953a"},
+        %{at: 40, color: "#d6382b"}
+      ]
+    },
+    smoke: %{
+      name: "smoke",
+      description: "Woodsmoke drifting from lit hearths, in puffs: the more grams, the larger.",
+      color: "#b8b8b8"
+    }
+  }
+
   # What two bodies in a scene are told apart by when nobody has chosen.
   @body_palette ~w(#e8d9a0 #e8a07a #a0c8e8 #c8e8a0 #e8a0c8 #a0e8d0 #d0a0e8 #e8e8a0)
 
@@ -121,6 +171,43 @@ defmodule Avwe.Repr do
   """
   @spec legend([kind()]) :: %{kind() => layers()}
   def legend(kinds), do: kinds |> Enum.uniq() |> Map.new(&{&1, layers(&1)})
+
+  @doc "A glyph as plain data: strings, with string keys."
+  @spec glyph_map(glyph()) :: map()
+  def glyph_map(%{char: char, color: color}), do: %{"char" => char, "color" => color}
+
+  @doc "A legend as plain data, keyed by the kind's name."
+  @spec legend_map(%{kind() => layers()}) :: map()
+  def legend_map(legend) do
+    Map.new(legend, fn {kind, layers} ->
+      {Atom.to_string(kind),
+       %{
+         "name" => layers.name,
+         "description" => layers.description,
+         "glyph" => glyph_map(layers.glyph)
+       }}
+    end)
+  end
+
+  @doc "An overlay's layers as plain data: strings, numbers, lists and maps with string keys."
+  @spec overlay_map(overlay()) :: map()
+  def overlay_map(kind), do: kind |> overlay() |> plain()
+
+  defp plain(%{} = map), do: Map.new(map, fn {key, value} -> {to_string(key), plain(value)} end)
+  defp plain(list) when is_list(list), do: Enum.map(list, &plain/1)
+  defp plain(other), do: other
+
+  @doc "Every overlay there is a layer for."
+  @spec overlays() :: [overlay()]
+  def overlays, do: @overlays |> Map.keys() |> Enum.sort()
+
+  @doc """
+  The layers of one overlay: its name and description, and how to colour it: a
+  `ramp` of colours at values in `unit` for a field of numbers, `colors` for
+  one of states, a single `color` for one of puffs.
+  """
+  @spec overlay(overlay()) :: overlay_layers()
+  def overlay(kind), do: Map.fetch!(@overlays, kind)
 
   @doc """
   The glyph of the body `id`, whose entity's `repr` is `repr`: the one its
