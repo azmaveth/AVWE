@@ -168,6 +168,7 @@ mix lint                  # format, unused deps, compiler warnings, credo: about
 mix dialyzer              # types; the first run builds the PLTs, about a minute
 scripts/sobelow           # security scan
 npm test --prefix assets  # the page's drawing arithmetic, with Node (nothing to install)
+mix test --only playwright   # the page in a real browser; see below for the one-time install
 mix hex.audit             # known advisories in the dependencies; needs the network
 ```
 
@@ -180,6 +181,21 @@ git config core.hooksPath .githooks
 
 `pre-commit` runs `mix lint`; `pre-push` runs Dialyzer and Sobelow.
 `git commit --no-verify` skips a hook once; CI does not skip.
+
+The browser tests (`test/browser`) drive Chromium through Playwright against the
+page: they click the map, type a line, reload, and fail on anything the page
+writes to the console. `mix test` leaves them out, so nothing below is needed
+for it. To run them, install Playwright once, then build the page's script:
+
+```bash
+npm ci --prefix assets
+(cd assets && npx playwright install chromium)
+mix assets.build
+mix test --only playwright     # PW_TRACE=true PW_SCREENSHOT=true keeps a trace and a
+                               # screenshot of every test in tmp/playwright
+```
+
+CI runs them as the `Browser` workflow, which master does not require yet.
 
 End-to-end tests in `test/e2e/` play through the real transports: telnet over
 TCP, sessions as agents use them, MCP over real HTTP, and the web client over a

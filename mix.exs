@@ -83,6 +83,8 @@ defmodule Avwe.MixProject do
       {:jason, "~> 1.4"},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:lazy_html, ">= 0.1.0", only: :test},
+      {:phoenix_test, "~> 0.12.1", only: :test, runtime: false},
+      {:phoenix_test_playwright, "~> 0.18.0", only: :test, runtime: false},
       {:stream_data, "~> 1.4", only: [:dev, :test]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

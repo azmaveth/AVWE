@@ -1,0 +1,80 @@
+name: Browser
+
+# The play page in a real browser: Chromium, driven by Playwright, against the
+# endpoint (test/browser). It brings Node packages and a downloaded browser, and
+# it is new, so it is not one of the checks that master requires. It is its own
+# workflow so that the required CI run never goes red for it; once it has run
+# stably for a while it can be added to the required checks (CLAUDE.md).
+#
+# What the browser saw is kept as an artifact: the screenshots the tests take,
+# and, for a test that failed, a trace (a failure is run again with PW_TRACE=true
+# PW_SCREENSHOT=true, which is cheap, so that a passing run keeps nothing big).
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    name: Browser
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # A runner has two slow cores; the tests wait on a page, not on a clock.
+      PW_TIMEOUT_S: "15"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-elixir
+        with:
+          mix-env: test
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: assets/package-lock.json
+      - name: Install Playwright
+        run: npm ci
+        working-directory: assets
+
+      - name: Cache the browser
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('assets/package-lock.json') }}
+      # With the browser cached this only fetches the system libraries it needs.
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+        working-directory: assets
+
+      - name: Build the web client's assets
+        run: mix assets.setup && mix assets.build
+
+      - name: Browser tests
+        run: mix test --only playwright --warnings-as-errors
+      - name: The failures again, with a trace
+        if: failure()
+        continue-on-error: true
+        run: mix test --only playwright --failed
+        env:
+          PW_TRACE: "true"
+          PW_SCREENSHOT: "true"
+
+      - name: Keep what the browser saw
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser
+          path: tmp/playwright
+          if-no-files-found: ignore

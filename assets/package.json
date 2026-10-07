@@ -2,11 +2,14 @@
   "name": "avwe-web",
   "private": true,
   "type": "module",
-  "description": "The web client's script. esbuild bundles it (mix assets.build); there is nothing to install to build it. Its drawing arithmetic is tested with Node's own runner: npm test.",
+  "description": "The web client's script. esbuild bundles it (mix assets.build); there is nothing to install to build it. Its drawing arithmetic is tested with Node's own runner (npm test). Playwright is only for the browser tests (mix test --only playwright), after `npm ci`.",
   "scripts": {
     "test": "node --test"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
   }
 }

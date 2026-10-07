@@ -34,3 +34,6 @@ avwe-*.tar
 
 # What esbuild builds for the web client (mix assets.build).
 /priv/static/assets/
+
+# Playwright, for the browser tests (npm ci in assets/), and what they leave.
+/assets/node_modules/

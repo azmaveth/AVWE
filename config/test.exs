@@ -22,3 +22,23 @@ config :avwe, play_refresh_ms: nil
 # A page does not wait for a held body to be let go of, except in the test
 # that is about it.
 config :avwe, play_retry_ms: 0
+
+# The browser tests (test/browser, `mix test --only playwright`) drive Chromium
+# through Playwright against the endpoint. Playwright is installed from
+# assets/package.json (`npm ci --prefix assets`, then `npx playwright install
+# chromium` there). A failed test leaves a trace and a screenshot when asked to
+# (PW_TRACE=true, PW_SCREENSHOT=true: CI runs the failures again that way), and
+# what the page says to the browser's console goes to Avwe.Test.BrowserConsole,
+# so that a test can fail on an error.
+config :phoenix_test,
+  otp_app: :avwe,
+  playwright: [
+    assets_dir: "assets",
+    browser: :chromium,
+    timeout: :timer.seconds(String.to_integer(System.get_env("PW_TIMEOUT_S", "5"))),
+    js_logger: Avwe.Test.BrowserConsole,
+    screenshot_dir: "tmp/playwright/screenshots",
+    trace_dir: "tmp/playwright/traces",
+    screenshot: System.get_env("PW_SCREENSHOT", "false") in ~w(t true),
+    trace: System.get_env("PW_TRACE", "false") in ~w(t true)
+  ]
