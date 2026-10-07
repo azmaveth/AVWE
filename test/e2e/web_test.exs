@@ -13,7 +13,9 @@ defmodule Avwe.E2E.WebTest do
   import Avwe.Test.Fixtures
   import ExUnit.CaptureLog
 
-  alias Avwe.Test.{HTTPClient, WebSocketClient}
+  import Avwe.Test.WebPage, only: [header: 2]
+
+  alias Avwe.Test.{HTTPClient, WebPage, WebSocketClient}
 
   @world :hollow_web
   @assets Path.expand("../../priv/static/assets", __DIR__)
@@ -25,10 +27,6 @@ defmodule Avwe.E2E.WebTest do
 
     {:ok, {ip, port}} = AvweWeb.Endpoint.server_info(:http)
     %{ip: ip, port: port}
-  end
-
-  defp header(response, name) do
-    for {^name, value} <- response.headers, do: value
   end
 
   defp taken?(body) do
@@ -178,40 +176,7 @@ defmodule Avwe.E2E.WebTest do
       {socket, topic, reply}
     end
 
-    defp open_page(port, path, cookie) do
-      sent = if cookie, do: [{"cookie", cookie}], else: []
-      page = HTTPClient.request(port, "GET", path, sent)
-      assert page.status == 200
-
-      cookie =
-        case for(set <- header(page, "set-cookie"), do: set |> String.split(";") |> hd()) do
-          [given] -> given
-          [] -> cookie
-        end
-
-      [_, csrf] = Regex.run(~r/name="csrf-token" content="([^"]+)"/, page.body)
-      [_, id] = Regex.run(~r/<div[^>]* id="(phx-[^"]+)"[^>]*data-phx-main/s, page.body)
-      [_, session] = Regex.run(~r/data-phx-session="([^"]+)"/, page.body)
-      [_, static] = Regex.run(~r/data-phx-static="([^"]+)"/, page.body)
-
-      {:ok, socket} =
-        WebSocketClient.open(port, "/live/websocket?vsn=2.0.0&_csrf_token=#{csrf}", [
-          {"origin", "http://127.0.0.1:#{port}"},
-          {"cookie", cookie}
-        ])
-
-      join = %{
-        "url" => "http://127.0.0.1:#{port}#{path}",
-        "params" => %{"_csrf_token" => csrf, "_mounts" => 0},
-        "session" => session,
-        "static" => static
-      }
-
-      topic = "lv:" <> id
-      WebSocketClient.push(socket, Jason.encode!(["4", "4", topic, "phx_join", join]))
-      assert {:ok, reply} = WebSocketClient.recv(socket)
-      {socket, topic, Jason.decode!(reply), cookie}
-    end
+    defp open_page(port, path, cookie), do: WebPage.open(port, path, cookie)
 
     # What the page was told to do, once the server says to go elsewhere.
     defp redirect_of(socket, frames \\ 10) do
