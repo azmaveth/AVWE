@@ -7,6 +7,12 @@ defmodule AvweWeb.LobbyLiveTest do
     setup do
       {:ok, _pid} = Avwe.start_world(@world, quire: lantern_hollow(), start: {1, hour: 12})
       on_exit(fn -> Avwe.stop_world(@world) end)
+
+      # The registry of pages is shared by every test, and the last test's pages
+      # are still being cleared out of it as this one begins, so each test has
+      # browsers of its own.
+      unique = System.unique_integer([:positive])
+      %{mine: "mine-#{unique}", yours: "yours-#{unique}"}
     end
 
     test "lists the world with its tagline and the time, and each body with who it is", %{
@@ -83,6 +89,61 @@ defmodule AvweWeb.LobbyLiveTest do
       # And again, and again: each look arranges the next.
       {:ok, _pell} = Avwe.connect(@world, body: "pell", controller: :arbor)
       assert eventually(fn -> has_element?(view, "li.taken", "Pell") end)
+    end
+
+    test "offers a body that a page of this browser holds as its own, and takes it over",
+         %{conn: conn, mine: mine} do
+      Application.put_env(:avwe, :play_retry_ms, 2_000)
+      on_exit(fn -> Application.put_env(:avwe, :play_retry_ms, 0) end)
+
+      browser = in_browser(conn, mine)
+      {:ok, old, _html} = live(browser, ~p"/play/hollow_lobby/wren")
+      {:ok, view, _html} = live(browser, ~p"/")
+
+      assert has_element?(view, "li.yours .state", "open on another page of this browser")
+      assert has_element?(view, ~s(li.yours a[href="/play/hollow_lobby/wren"]), "Wren")
+      refute has_element?(view, "li.taken")
+
+      {:ok, page, html} =
+        view |> element("a", "Wren") |> render_click() |> follow_redirect(browser)
+
+      assert html =~ "You are Wren, at Hollow Green."
+      assert has_element?(page, "#look p", "You are Wren, at Hollow Green.")
+      assert_redirect(old, "/", 5_000)
+    end
+
+    test "shows it as taken to a browser whose pages do not hold it",
+         %{conn: conn, mine: mine, yours: yours} do
+      {:ok, _page, _html} = live(in_browser(conn, mine), ~p"/play/hollow_lobby/wren")
+      {:ok, view, _html} = live(in_browser(conn, yours), ~p"/")
+
+      assert has_element?(view, "li.taken", "Wren")
+      assert has_element?(view, "li.taken .state", "(being played)")
+      refute has_element?(view, "li.yours")
+      refute has_element?(view, "a", "Wren")
+    end
+
+    test "shows what no page holds as taken, to every browser, though it has pages of its own",
+         %{conn: conn, mine: mine} do
+      {:ok, _session} = Avwe.connect(@world, body: "pell", controller: :arbor)
+      {:ok, _page, _html} = live(in_browser(conn, mine), ~p"/play/hollow_lobby/wren")
+      {:ok, view, _html} = live(in_browser(conn, mine), ~p"/")
+
+      assert has_element?(view, "li.taken", "Pell")
+      refute has_element?(view, "a", "Pell")
+      assert has_element?(view, "li.yours", "Wren")
+    end
+
+    test "shows a body as the browser's own when it looks again, once its page has taken it",
+         %{conn: conn, mine: mine} do
+      browser = in_browser(conn, mine)
+      {:ok, view, _html} = live(browser, ~p"/")
+      refute has_element?(view, "li.yours")
+
+      {:ok, _page, _html} = live(browser, ~p"/play/hollow_lobby/wren")
+      send(view.pid, :refresh)
+
+      assert has_element?(view, "li.yours", "Wren")
     end
 
     test "follows worlds as they start and stop", %{conn: conn} do
