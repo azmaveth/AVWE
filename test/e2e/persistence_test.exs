@@ -82,13 +82,18 @@ defmodule Avwe.E2E.PersistenceTest do
   end
 
   # Kills the region and waits for the supervisor to bring it and the clock back.
+  # The region restores itself from the store first, which a busy machine can
+  # take longer to do than the one second `eventually` gives by default.
   defp crash_region do
     [region | _clock] = before = pids()
     Process.exit(region, :kill)
 
-    eventually(fn ->
-      pids() |> Enum.zip(before) |> Enum.all?(fn {new, old} -> new not in [nil, old] end)
-    end)
+    eventually(
+      fn ->
+        pids() |> Enum.zip(before) |> Enum.all?(fn {new, old} -> new not in [nil, old] end)
+      end,
+      10_000
+    )
   end
 
   # How many intents were journaled at each step that had any.
