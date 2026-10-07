@@ -51,6 +51,9 @@ changing anything structural; it records the decisions and the reasons.
 ```bash
 mix test
 mix test --include perf     # also runs the per-step cost bound (< 10 ms)
+mix test --only playwright  # the page in a real browser (test/browser); needs
+                            # `npm ci --prefix assets` and, in assets/, `npx playwright
+                            # install chromium` once, and `mix assets.build`
 mix setup                   # once: deps, esbuild, and the web client's bundle
 npm test --prefix assets    # the page's drawing arithmetic, with Node's own runner
                             # (CI runs it; nothing to install, Node 20 or later)
@@ -70,6 +73,11 @@ Everything above runs in CI (`.github/workflows/`) for every pull request and
 push to master: Lint, Test, Dialyzer and Sobelow in `ci.yml`, and
 `mix hex.audit` in `audit.yml`, which also runs weekly because advisories
 appear without any change here. A change is not done until they all pass.
+`browser.yml` runs the Playwright tests the same way, but it is new and
+heavy (Node packages, a downloaded Chromium), so master does not require it
+yet; when it fails, look anyway, and its artifact `browser` has a trace and a
+screenshot of each test that failed. When a Node script is changed, run it
+under CI's Node (24) first: `cd assets && npx -y node@24 --test`.
 
 `.githooks/` has the same checks for local use; turn them on once per clone
 with `git config core.hooksPath .githooks`. `pre-commit` runs `mix lint` when

@@ -250,8 +250,8 @@ at most.
 Dependencies: `phoenix ~> 1.8`, `phoenix_live_view ~> 1.2`,
 `phoenix_html ~> 4.3`, `bandit`, `esbuild` (dev: it bundles one JavaScript file
 and one stylesheet) and, in test, `lazy_html` (what `Phoenix.LiveViewTest` reads
-HTML with). `phoenix_test` and `phoenix_test_playwright` come with the Browser
-job (open question 2). No Ecto, mailer, gettext or Tailwind: the app has no
+HTML with), and `phoenix_test` and `phoenix_test_playwright` for the Browser job
+(4 and open question 2). No Ecto, mailer, gettext or Tailwind: the app has no
 database and the pages are simple, so styling is one plain stylesheet. The
 modules are hand-written under `lib/avwe_web/` rather than generated, so
 nothing is imported that is not used, and the endpoint has only what it
@@ -397,7 +397,7 @@ in `assets/`, nothing to install; CI runs it) on scenes the server builds. Those
 scenes are `assets/test/fixtures/*.json`, written by the scene's Elixir test,
 which fails if the server's format drifts from them and says how to write them
 again. The hooks themselves (`assets/js/hooks.js`) are glue over the DOM and
-are for the browser job.
+are held by the browser tests (section 4).
 
 **Warm ground.** The application builds the ground map of each world it
 autostarts (`Avwe.warm_ground/1`), so the first page does not draw its first
@@ -529,18 +529,51 @@ its real transport.
   cells and moves them as they walk; the MCP player's `listen` and the telnet
   lines report the web player's arrival and speech; releasing one body
   frees it for the routine in all three views.
-- **The browser**, in two layers (the arithmetic is built, the browser job is
-  the fourth change). The canvas drawing arithmetic (cell to
-  pixel, fog, glyph colour by light) is plain functions in their own module
-  with `node --test` unit tests and no dependencies; CI runs them (Node is on
-  the runners). And a headless-browser end-to-end test of the play page, in
-  its own CI job: it opens the page against a running endpoint, waits for the
-  first scene, checks the canvas was drawn (the hook also mirrors the scene
-  into `data-` attributes, so the test reads state, not pixels), clicks a
-  place and sees the walk begin in the log, and keeps a screenshot as a CI
-  artifact. That job stays off the required list until it has run stably for a
-  while. The page is also driven by hand in a real browser during
-  development, with screenshots in the PR.
+- **The browser**, in two layers, both built. The canvas drawing arithmetic
+  (cell to pixel, fog, glyph colour by light) is plain functions in their own
+  module with `node --test` unit tests and no dependencies; CI runs them (Node is
+  on the runners). And a headless-browser end-to-end test of the play page
+  (`test/browser/play_test.exs`), in its own CI job (`.github/workflows/browser.yml`),
+  which stays off the required list until it has run stably for a while. It
+  drives Chromium through Playwright against the endpoint, over a real socket,
+  with the world on a manual clock that the test steps as a waiting player would:
+
+  * the lobby leads to a page that draws the map: the hook's own
+    `data-drawn-*` say it drew the scene the server sent (center, radius, light,
+    the things, the cells), and something is on the canvas;
+  * a real mouse click on a place on the map, at the pixel computed from the
+    scene, walks there: the log, the look and the canvas center all follow;
+  * a click on somebody names them and goes nowhere;
+  * a line typed and sent with Enter reaches the world, and the line clears and
+    keeps focus;
+  * a button does what typing it would (it lights the fire pit);
+  * the wider view shows all that is in sight and the page keeps it as the page
+    changes under it;
+  * a body somebody else holds is refused in the lobby, in telnet's words;
+  * reloading takes the body again, four times in a row, though the old page is
+    only letting go (the regression test for the plain request that waited, 3.3).
+
+  Whatever the page writes to the browser's console, an error fails the test
+  (`Avwe.Test.BrowserConsole`): a content security policy violation, a script that
+  did not load, an exception nobody caught. The tests keep screenshots, and a
+  failure is run again with a trace (`PW_TRACE=true PW_SCREENSHOT=true`); both
+  are uploaded as the artifact `browser`. The page is also driven by hand in a
+  real browser during development, with screenshots in the PR.
+
+  The tests are tagged `:playwright`, not `:browser`, which the library reads as
+  the name of the browser to use; `mix test` leaves them out, so the Test job needs
+  neither Node packages nor a browser. To run them: `npm ci --prefix assets`, then
+  `npx playwright install chromium` in `assets/`, then `mix assets.build` and
+  `mix test --only playwright`. Playwright is pinned (`assets/package.json`,
+  1.63.0) with its lockfile, so the browser is the same on a laptop and on the
+  runner. **Nine deliberate breaks** of the hook, the script and the policy
+  (a click never reported, x and y swapped, nothing painted, nothing mirrored,
+  the line not cleared, the wider view doing nothing, a script that throws, a
+  policy that lets no script load, and the plain request refusing a held body
+  again) were each caught; a socket that does not wait for an old page that is
+  slow to let go is not, because a real browser on a local machine lets go too
+  fast to need it, and the in-process tests hold that. Ten runs in a row, and
+  the same from a fresh `npm ci`, were clean.
 
 ## 5. Rules
 
@@ -555,7 +588,7 @@ PLT (Phoenix and LiveView add several hundred modules, so a cold build is
 slower; it is cached); `@impl Phoenix.LiveView` and a `@spec` on every public
 function in `lib/avwe_web/`, as Credo requires; the weekly dependency audit
 now also covers Phoenix; an assets step (esbuild) plus the Node tests; and a
-separate Browser job (Node and a headless Chromium).
+separate Browser workflow (Node and a headless Chromium), not required.
 
 ## 6. Delivery
 
@@ -574,11 +607,11 @@ first:
    of the routine's lines), the done-criterion test, and the DESIGN.md updates:
    5 (layout), 8.4 (layers and the scene as built), 8.5 and 9 (the web row), 13
    (M2 split into M2a and M2b), 14.
-4. **The Browser job**: Playwright (open question 2), a headless-browser test of
-   the page against a running endpoint, and its own CI job, off the required
-   list until it has run stably for a while. It was split from the third change
-   because it brings Node packages and a downloaded browser, and the page is
-   complete, and played by hand in a browser, without it.
+4. **The Browser job** (built): Playwright (open question 2), a headless-browser
+   test of the page against a running endpoint, and its own CI workflow, off the
+   required list until it has run stably for a while. It was split from the
+   third change because it brings Node packages and a downloaded browser, and the
+   page was complete, and played by hand in a browser, without it.
 
 Order inside the work: 2.1 first (a pure refactor with its own tests), then
 2.2 to 2.5, then the web.
@@ -604,8 +637,10 @@ Order inside the work: 2.1 first (a pure refactor with its own tests), then
    file freezes it, and `mix.exs` pins the minor (`~> 0.18.0`) so an update is
    a choice. Wallaby 0.31 (older, steadier, using the Chrome and ChromeDriver
    already on the runners) is the fallback if the job proves flaky or heavy:
-   the browser test is one file. Browser tests are tagged `:browser` and
+   the browser test is one file. Browser tests are tagged `:playwright` and
    excluded from `mix test`; the Test job needs neither Node nor a browser.
+   Built as described here: `phoenix_test ~> 0.12.1` and `phoenix_test_playwright
+   ~> 0.18.0` (test only), Playwright 1.63.0, Chromium only.
 3. **MCP and the web endpoint.** The MCP server keeps its own listener (4041)
    in M2. With ArborMCP 2's `Arbor.MCP.HttpPlug` mounts it could later live in
    the Phoenix router: one port, one origin policy. Revisit when the MCP
