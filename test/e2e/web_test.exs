@@ -170,12 +170,25 @@ defmodule Avwe.E2E.WebTest do
 
   describe "a page's LiveView" do
     # What a browser does with a page: keep its cookie, and join the LiveView
-    # with the tokens in it, over a socket from its own origin.
+    # with the tokens in it, over a socket from its own origin. A browser that
+    # has been here before sends the cookie it has (a page of the same browser),
+    # and keeps the one it is given; one that has not is a browser of its own.
     defp open_page(port, path) do
-      page = HTTPClient.request(port, "GET", path)
+      {socket, topic, reply, _cookie} = open_page(port, path, nil)
+      {socket, topic, reply}
+    end
+
+    defp open_page(port, path, cookie) do
+      sent = if cookie, do: [{"cookie", cookie}], else: []
+      page = HTTPClient.request(port, "GET", path, sent)
       assert page.status == 200
 
-      [cookie] = for set <- header(page, "set-cookie"), do: set |> String.split(";") |> hd()
+      cookie =
+        case for(set <- header(page, "set-cookie"), do: set |> String.split(";") |> hd()) do
+          [given] -> given
+          [] -> cookie
+        end
+
       [_, csrf] = Regex.run(~r/name="csrf-token" content="([^"]+)"/, page.body)
       [_, id] = Regex.run(~r/<div[^>]* id="(phx-[^"]+)"[^>]*data-phx-main/s, page.body)
       [_, session] = Regex.run(~r/data-phx-session="([^"]+)"/, page.body)
@@ -197,7 +210,31 @@ defmodule Avwe.E2E.WebTest do
       topic = "lv:" <> id
       WebSocketClient.push(socket, Jason.encode!(["4", "4", topic, "phx_join", join]))
       assert {:ok, reply} = WebSocketClient.recv(socket)
-      {socket, topic, Jason.decode!(reply)}
+      {socket, topic, Jason.decode!(reply), cookie}
+    end
+
+    # What the page was told to do, once the server says to go elsewhere.
+    defp redirect_of(socket, frames \\ 10) do
+      case WebSocketClient.recv(socket, 5_000) do
+        {:ok, frame} ->
+          case Jason.decode!(frame) do
+            [_join_ref, _ref, _topic, "live_redirect", redirect] -> redirect
+            _other when frames > 1 -> redirect_of(socket, frames - 1)
+            other -> flunk("no redirect, but #{inspect(other)}")
+          end
+
+        :closed ->
+          flunk("the socket closed without a word of where to go")
+      end
+    end
+
+    defp lease do
+      Registry.lookup(Avwe.Registry, {:lease, @world, "wren"})
+    end
+
+    defp waiting(ms) do
+      Application.put_env(:avwe, :play_retry_ms, ms)
+      on_exit(fn -> Application.put_env(:avwe, :play_retry_ms, 0) end)
     end
 
     test "joins the lobby, which has the world in it", %{port: port} do
@@ -257,6 +294,86 @@ defmodule Avwe.E2E.WebTest do
       {third, _topic, reply} = open_page(port, "/play/hollow_web/wren")
       assert [_, _, _, "phx_reply", %{"status" => "ok"}] = reply
       WebSocketClient.close(third)
+    end
+
+    test "gives a body to a new page of the same browser while its old page is silent",
+         %{port: port} do
+      waiting(1_500)
+      {old, _topic, _reply, cookie} = open_page(port, "/play/hollow_web/wren", nil)
+      [{first, _lease}] = lease()
+
+      # The old page says nothing from here on, and its socket is not closed: it
+      # is a page whose connection dropped without a word, which the server
+      # does not know of for a minute. The new page is of the same browser.
+      {new, topic, reply, _cookie} = open_page(port, "/play/hollow_web/wren", cookie)
+
+      assert [
+               "4",
+               "4",
+               ^topic,
+               "phx_reply",
+               %{"status" => "ok", "response" => %{"rendered" => rendered}}
+             ] = reply
+
+      assert Jason.encode!(rendered) =~ "You are Wren, at Hollow Green."
+      assert [{second, _lease}] = lease()
+      refute second == first
+
+      # The old page is told, if it is there to hear, to go to the lobby.
+      assert %{"to" => "/"} = redirect_of(old)
+
+      WebSocketClient.close(new)
+      WebSocketClient.close(old)
+      assert eventually(fn -> not taken?("wren") end)
+    end
+
+    test "turns away a page of another browser, and the old page keeps its body",
+         %{port: port} do
+      waiting(300)
+      {old, _topic, _reply, _cookie} = open_page(port, "/play/hollow_web/wren", nil)
+      [{first, _lease}] = lease()
+
+      # No cookie: a browser of its own, which is nobody the old page belongs to.
+      {other, _topic, reply, _cookie} = open_page(port, "/play/hollow_web/wren", nil)
+
+      assert [_, _, _, "phx_reply", %{"status" => "error", "response" => response}] = reply
+      assert response["live_redirect"]["to"] == "/"
+      WebSocketClient.close(other)
+
+      assert [{^first, _lease}] = lease()
+      assert {:error, :timeout} = :gen_tcp.recv(old, 0, 200)
+
+      WebSocketClient.close(old)
+      assert eventually(fn -> not taken?("wren") end)
+    end
+
+    test "offers a browser its own body in the lobby, and shows it as taken to another",
+         %{port: port} do
+      {page, _topic, _reply, cookie} = open_page(port, "/play/hollow_web/wren", nil)
+
+      {mine, _topic, reply, _cookie} = open_page(port, "/", cookie)
+
+      assert [_, _, _, "phx_reply", %{"status" => "ok", "response" => %{"rendered" => mine_now}}] =
+               reply
+
+      assert Jason.encode!(mine_now) =~ "open on another page of this browser"
+      refute Jason.encode!(mine_now) =~ "(being played)"
+
+      {others, _topic, reply, _cookie} = open_page(port, "/", nil)
+
+      assert [
+               _,
+               _,
+               _,
+               "phx_reply",
+               %{"status" => "ok", "response" => %{"rendered" => others_now}}
+             ] = reply
+
+      assert Jason.encode!(others_now) =~ "(being played)"
+      refute Jason.encode!(others_now) =~ "open on another page of this browser"
+
+      for socket <- [mine, others, page], do: WebSocketClient.close(socket)
+      assert eventually(fn -> not taken?("wren") end)
     end
   end
 end

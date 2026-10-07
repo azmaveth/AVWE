@@ -941,6 +941,17 @@ core. A feature isn't done until its end-to-end test exists.
   forgotten.
 - *Should AVWE build on Jido or Ash?* Not now, and in neither case in the
   core. Open questions 10 and 11 say where each could come in.
+- *Who is a page whose connection dropped without a word?* (Was question 12.)
+  The browser it is open in: a random id in the session cookie
+  (`AvweWeb.BrowserId`), kept with each page that holds a body
+  (`AvweWeb.Pages`). A new page of the same browser asks the old one to let go
+  and takes the body at once; the latest page to join wins, since the server
+  cannot tell a dropped page from an open one. It lives in the web client and
+  not in the lease, so the core, telnet and MCP are unchanged. It names a
+  browser and not a person: another browser or device, or a cleared cookie,
+  waits out the minute as before, and accounts stay question 11. Two tabs that
+  reconnect together race, and the one that loses goes to the lobby with a
+  notice (docs/m2-spec.md, 3.3).
 
 **Open**
 
@@ -990,19 +1001,6 @@ core. A feature isn't done until its end-to-end test exists.
     world is an event-sourced simulation whose journal, snapshots and tick
     pipeline need exact replay and a per-step budget of a few milliseconds,
     which a resource and action layer would only get in the way of.
-
-12. **Who a page is.** A page that loses its connection and comes back (a
-    laptop that slept, a network that changed) joins as a new page, and the
-    body is still held by the old one until the server notices the old
-    connection is gone, which can take up to a minute. The new page is told
-    the body is being played, and it was the same player. (A reload is the
-    common case, and is covered: a page waits a second and a half for a held
-    body before it is refused. A connection that dropped without a word is not.)
-    The fix needs a
-    controller identity the lease understands (a token in the page's session,
-    so that the same player may take the body back from their own old page),
-    and that is the start of the accounts the web client does not have
-    (question 11).
 
 ## 15. Prior art
 

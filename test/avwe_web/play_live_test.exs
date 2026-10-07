@@ -2,6 +2,7 @@ defmodule AvweWeb.PlayLiveTest do
   use Avwe.Test.WebCase, async: false
 
   alias Avwe.{GroundCache, Percept, Session}
+  alias AvweWeb.Pages
 
   @world :hollow_play
   @terrain [clay: [{"hollow-green", radius_cells: 3}]]
@@ -199,6 +200,128 @@ defmodule AvweWeb.PlayLiveTest do
         conn |> live(~p"/play/hollow_play/nobody") |> follow_redirect(conn, ~p"/")
 
       assert html =~ "There is nobody by that name in Lantern Hollow."
+    end
+  end
+
+  describe "who a page is" do
+    defp wren, do: ~p"/play/hollow_play/wren"
+
+    defp waiting(ms) do
+      Application.put_env(:avwe, :play_retry_ms, ms)
+      on_exit(fn -> Application.put_env(:avwe, :play_retry_ms, 0) end)
+    end
+
+    # The pages that `browser` has registered for a body. The registry is shared
+    # by every test, and the pages of the test before are still being cleared out
+    # of it as this one begins, so each test has browsers of its own and asks
+    # about them only.
+    defp pages_of(body, browser) do
+      for {page, ^browser} <- Registry.lookup(Pages, {@world, body}), do: page
+    end
+
+    setup do
+      unique = System.unique_integer([:positive])
+      %{mine: "mine-#{unique}", yours: "yours-#{unique}"}
+    end
+
+    test "a new page of the browser takes the body from the old one, which goes to the lobby",
+         %{conn: conn, mine: mine} do
+      waiting(3_000)
+      {:ok, old, _html} = live(in_browser(conn, mine), wren())
+      first = session_of(@world, "wren")
+
+      # The old page is open and answering, as one whose connection has
+      # dropped without the server noticing is to the server. It is not
+      # waited out: it is asked.
+      {:ok, new, _html} = live(in_browser(conn, mine), wren())
+
+      assert has_element?(new, "#look p", "You are Wren, at Hollow Green.")
+      refute session_of(@world, "wren") == first
+
+      flash = assert_redirect(old, "/", 5_000)
+      assert flash["error"] == "Wren is now being played from another page of this browser."
+
+      # The registry follows: the new page holds it, and the old one does not
+      # once its process has ended.
+      assert eventually(fn -> pages_of("wren", mine) == [new.pid] end)
+    end
+
+    test "the page that was let go of does not take the body back", %{conn: conn, mine: mine} do
+      waiting(3_000)
+      {:ok, old, _html} = live(in_browser(conn, mine), wren())
+      {:ok, new, _html} = live(in_browser(conn, mine), wren())
+      assert_redirect(old, "/", 5_000)
+      taker = session_of(@world, "wren")
+
+      # Nothing it can do or is sent makes it ask again, and it is not a page
+      # that holds anything.
+      send(old.pid, :refresh)
+      send(old.pid, :let_go)
+      Process.sleep(300)
+
+      assert session_of(@world, "wren") == taker
+      assert has_element?(new, "#look p", "You are Wren, at Hollow Green.")
+      assert eventually(fn -> pages_of("wren", mine) == [new.pid] end)
+    end
+
+    test "a page of another browser does not take the body, and the old page keeps it",
+         %{conn: conn, mine: mine, yours: yours} do
+      waiting(300)
+      {:ok, old, _html} = live(in_browser(conn, mine), wren())
+      first = session_of(@world, "wren")
+
+      other = in_browser(conn, yours)
+      {:ok, _lobby, html} = other |> live(wren()) |> follow_redirect(other, ~p"/")
+
+      assert html =~ "Wren is already being played. Choose someone else."
+      assert session_of(@world, "wren") == first
+      refute_redirected(old, "/")
+      assert pages_of("wren", mine) == [old.pid]
+      assert pages_of("wren", yours) == []
+    end
+
+    test "a page does not take a body from something that is not a page of its browser",
+         %{conn: conn, mine: mine} do
+      waiting(300)
+      held = neighbour("wren")
+
+      assert {:error, {:live_redirect, %{to: "/"}}} = live(in_browser(conn, mine), wren())
+
+      assert session_of(@world, "wren") == held
+    end
+
+    test "a browser can hold several bodies, each by its own page", %{conn: conn, mine: mine} do
+      waiting(3_000)
+      {:ok, wren, _html} = live(in_browser(conn, mine), wren())
+      {:ok, tamsin, _html} = live(in_browser(conn, mine), ~p"/play/hollow_play/tamsin")
+
+      assert Pages.held_by(mine) == [{@world, "tamsin"}, {@world, "wren"}]
+
+      # A newer page for one of them does not disturb the other.
+      {:ok, _newer, _html} = live(in_browser(conn, mine), wren())
+      assert_redirect(wren, "/", 5_000)
+      refute_redirected(tamsin, "/")
+      assert taken?("tamsin")
+    end
+
+    test "is no longer registered once its session has ended", %{conn: conn, mine: mine} do
+      {:ok, view, _html} = live(in_browser(conn, mine), wren())
+      assert pages_of("wren", mine) == [view.pid]
+
+      Avwe.stop_world(@world)
+
+      assert eventually(fn -> has_element?(view, ".notice.error", "has ended") end)
+      assert pages_of("wren", mine) == []
+    end
+
+    test "is no longer registered once the page has closed", %{conn: conn, mine: mine} do
+      {:ok, view, _html} = live(in_browser(conn, mine), wren())
+      assert pages_of("wren", mine) == [view.pid]
+
+      GenServer.stop(view.pid)
+
+      assert eventually(fn -> pages_of("wren", mine) == [] end)
+      assert Pages.held_by(mine) == []
     end
   end
 

@@ -19,7 +19,7 @@ defmodule Avwe.Browser.PlayTest do
 
   alias Avwe.{GroundCache, Session}
   alias Avwe.Test.BrowserConsole
-  alias PlaywrightEx.Frame
+  alias PlaywrightEx.{Browser, BrowserContext, Frame, Page}
 
   @moduletag :playwright
 
@@ -105,6 +105,37 @@ defmodule Avwe.Browser.PlayTest do
   defp neighbour(body) do
     {:ok, session} = Avwe.connect(@world, body: body, controller: :arbor)
     session
+  end
+
+  # Another page of the same browser: a tab, which has the same cookies.
+  defp another_tab(conn) do
+    {:ok, page} = BrowserContext.new_page(conn.context_id, timeout: 5_000)
+    tab(conn.context_id, page, conn.tracing_id)
+  end
+
+  # A page of a browser of its own: a new context has no cookies, so it is
+  # nobody the first tab's pages belong to.
+  defp another_browser(browser_id) do
+    base_url = Application.fetch_env!(:phoenix_test, :base_url)
+    {:ok, context} = Browser.new_context(browser_id, base_url: base_url, timeout: 5_000)
+    on_exit(fn -> BrowserContext.close(context.guid, timeout: 5_000) end)
+
+    {:ok, page} = BrowserContext.new_page(context.guid, timeout: 5_000)
+    tab(context.guid, page, context.tracing.guid)
+  end
+
+  # What the library gives a test for its one page, made for one more, and what
+  # that says to the console is caught as for the first.
+  defp tab(context_id, page, tracing_id) do
+    {:ok, _} = Page.update_subscription(page.guid, event: :console, enabled: true, timeout: 5_000)
+
+    PhoenixTest.Playwright.build(%{
+      context_id: context_id,
+      page_id: page.guid,
+      frame_id: page.main_frame.guid,
+      tracing_id: tracing_id,
+      config: []
+    })
   end
 
   test "the lobby leads to a page that draws the map of what Wren can see", %{conn: conn} do
@@ -272,5 +303,64 @@ defmodule Avwe.Browser.PlayTest do
       end)
 
     assert_path(conn, @page)
+  end
+
+  test "a second tab of the browser takes the body from the first, which goes to the lobby",
+       %{conn: conn} do
+    Application.put_env(:avwe, :play_retry_ms, 1_500)
+    on_exit(fn -> Application.put_env(:avwe, :play_retry_ms, 0) end)
+
+    first = visit(conn, @page) |> assert_has("#map[data-drawn-center]")
+
+    second =
+      first
+      |> another_tab()
+      |> visit(@page)
+      |> assert_has("#map[data-drawn-center]")
+      |> assert_has("#look p", text: "You are Wren, at Hollow Green.")
+
+    # The first tab is told why, and is in the lobby, where the body is the
+    # browser's own to take back.
+    first
+    |> assert_has(".notice.error",
+      text: "Wren is now being played from another page of this browser."
+    )
+    |> assert_path("/")
+    |> visit("/")
+    |> assert_has("li.yours", text: "Wren")
+
+    # The second tab is playing: what it types reaches the world.
+    second |> type("#command-line", "say still here") |> press("#command-line", "Enter")
+    step_until_logged(second, ~s(You say, "still here"))
+
+    # And the body goes back the other way, with a click in the lobby.
+    first |> click_link("Wren") |> assert_has("#map[data-drawn-center]")
+
+    second
+    |> assert_has(".notice.error",
+      text: "Wren is now being played from another page of this browser."
+    )
+    |> assert_path("/")
+  end
+
+  test "a tab of another browser is turned away, and the first tab keeps its body",
+       %{conn: conn, browser_id: browser_id} do
+    Application.put_env(:avwe, :play_retry_ms, 300)
+    on_exit(fn -> Application.put_env(:avwe, :play_retry_ms, 0) end)
+
+    first = visit(conn, @page) |> assert_has("#map[data-drawn-center]")
+
+    browser_id
+    |> another_browser()
+    |> visit(@page)
+    |> assert_has(".notice.error", text: "Wren is already being played. Choose someone else.")
+    |> assert_path("/")
+    |> assert_has("li.taken", text: "Wren")
+    |> refute_has("li.yours")
+
+    first
+    |> assert_has("#look p", text: "You are Wren, at Hollow Green.")
+    |> refute_has(".notice.error")
+    |> assert_path(@page)
   end
 end
