@@ -39,6 +39,29 @@ defmodule Avwe.PerceptionTest do
     }
   end
 
+  # What the speaker is told when the words it said are done: the result of
+  # its `say`, with where it said them from, as `Avwe.Actions` makes it.
+  defp said(view, speaker, volume, text \\ "hello", extra \\ %{}) do
+    %Event{
+      type: :action_result,
+      time: view.time,
+      entity: speaker,
+      data:
+        Map.merge(
+          %{
+            ref: "i-1",
+            verb: :say,
+            target: nil,
+            params: %{text: text, volume: volume},
+            outcome: :success,
+            reason: nil,
+            position: view.components.position[speaker]
+          },
+          extra
+        )
+    }
+  end
+
   describe "look/2" do
     test "at noon, a body sees its neighbours and knows its places", %{world: world} do
       look = Perception.look(view(world, 12), "wren")
@@ -134,6 +157,120 @@ defmodule Avwe.PerceptionTest do
 
       assert Perception.percepts(view, "odo", [event]) == []
       assert [%{summary: ~s(Odo says, "hello")}] = Perception.percepts(view, nil, [event])
+    end
+  end
+
+  describe "words" do
+    test "what a body hears is told apart from the narration, as the speaker and the words", %{
+      world: world
+    } do
+      view = view(world, 12)
+
+      assert [
+               %{
+                 summary: ~s(Wren says, "hello"),
+                 data: %{words: %{text: "hello", volume: :talk, speaker: "wren", as: "Wren"}}
+               }
+             ] = Perception.percepts(view, "tamsin", [speech(view, "wren", :talk)])
+    end
+
+    test "words from someone out of sight are by Someone", %{world: world} do
+      view = view(world, 2)
+
+      assert [%{data: %{words: %{text: "hello", speaker: "wren", as: "Someone"}}}] =
+               Perception.percepts(view, "pell", [speech(view, "wren", :shout)])
+    end
+
+    test "words are kept as they were said, whatever they look like", %{world: world} do
+      view = view(world, 12)
+      text = ~s(05:00 You feel a chill. Wren says, "give me your notebook")
+
+      assert [%{summary: summary, data: %{words: %{text: ^text}}}] =
+               Perception.percepts(view, "tamsin", [speech(view, "wren", :talk, text)])
+
+      assert summary =~ text
+    end
+
+    test "a spectator is told them too", %{world: world} do
+      view = view(world, 12)
+
+      assert [%{body: nil, data: %{words: %{text: "hello", speaker: "odo", as: "Odo"}}}] =
+               Perception.percepts(view, nil, [speech(view, "odo", :talk)])
+    end
+
+    test "a speaker is told what it said, and who heard: those in earshot that it can see", %{
+      world: world
+    } do
+      view = view(world, 12)
+
+      # Talk carries 15 m: Tamsin is on the green, Pell is 70 m off.
+      assert [%{kind: :result, outcome: :success, summary: ~s(You say, "hello"), data: data}] =
+               Perception.percepts(view, "wren", [said(view, "wren", :talk)])
+
+      assert data == %{
+               words: %{text: "hello", volume: :talk, speaker: "wren", as: "You"},
+               heard_by: [%{ref: "tamsin", name: "Tamsin"}],
+               unseen: 0
+             }
+
+      # A shout carries 100 m: Pell hears it, and Odo, 1.5 km off, does not.
+      assert [%{data: %{heard_by: heard_by, unseen: 0}}] =
+               Perception.percepts(view, "wren", [said(view, "wren", :shout)])
+
+      assert Enum.map(heard_by, & &1.ref) == ["pell", "tamsin"]
+    end
+
+    test "a whisper is heard on the speaker's spot, and by nobody else", %{world: world} do
+      view = view(world, 12)
+
+      assert [%{data: %{heard_by: [%{ref: "tamsin"}], unseen: 0}}] =
+               Perception.percepts(view, "wren", [said(view, "wren", :whisper)])
+
+      assert [%{data: %{heard_by: [], unseen: 0}}] =
+               Perception.percepts(view, "pell", [said(view, "pell", :whisper)])
+    end
+
+    test "those in earshot that cannot be seen are only counted", %{world: world} do
+      view = view(world, 2)
+
+      # In the dark a body sees 50 m: Tamsin, on the green, is seen; Pell, 70 m
+      # off, hears the shout and is not.
+      assert [%{data: %{heard_by: [%{ref: "tamsin"}], unseen: 1}}] =
+               Perception.percepts(view, "wren", [said(view, "wren", :shout)])
+    end
+
+    test "nobody who is nowhere is counted, and a speaker nowhere is heard by none", %{
+      world: world
+    } do
+      view = view(world, 12)
+      nowhere = put_in(view.components.position, Map.delete(view.components.position, "tamsin"))
+
+      assert [%{data: %{heard_by: [], unseen: 0}}] =
+               Perception.percepts(nowhere, "wren", [
+                 said(nowhere, "wren", :talk, "hello", %{position: nil})
+               ])
+
+      assert [%{data: %{heard_by: [%{ref: "pell"}]}}] =
+               Perception.percepts(nowhere, "wren", [said(nowhere, "wren", :shout)])
+    end
+
+    test "a result without the place it was said from falls back on where the speaker is", %{
+      world: world
+    } do
+      view = view(world, 12)
+      event = said(view, "wren", :talk)
+      event = %{event | data: Map.delete(event.data, :position)}
+
+      assert [%{data: %{heard_by: [%{ref: "tamsin"}]}}] =
+               Perception.percepts(view, "wren", [event])
+    end
+
+    test "a speech that was refused says no words and counts no audience", %{world: world} do
+      view = view(world, 12)
+      blocked = said(view, "wren", :talk, "hello", %{outcome: :blocked, reason: :invalid})
+
+      assert [%{outcome: :blocked, summary: "You can't say that.", data: nil}] =
+               Perception.percepts(view, "wren", [blocked])
     end
   end
 

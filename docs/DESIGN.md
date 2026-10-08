@@ -657,6 +657,22 @@ Percept kinds: `sensed`, `self` (the body's own state: tired, cold, hungry),
 **affordances**: the verbs this body can perform right now and their valid
 targets.
 
+**As built (M3a, `Avwe.Protocol`; `docs/m3-spec.md`, 3).** The wire form of a
+percept is one map, the same for every adapter (the MCP server's
+`structuredContent` is it now): `id`, `kind` (`sensed`, `progress`, `result`),
+`type`, `time` (told against now), `summary`, `modality`, `salience`,
+`confidence`, `source` (`ref`, `distance_m`, `direction`), `ref` with `outcome`,
+`reason` and `issuer` for an intent's, and `data`; a key with no value is left
+out. The `summary` is the world's narration with other players' words quoted
+inside it. What a client that must tell the two apart reads is in `data`:
+`words` on speech (`text`, `volume`, `speaker`, `as`: how the listener names
+the speaker, a name or "Someone"), on what a body heard, on what it said itself
+(`as` is "You"; and `heard_by`, the bodies in earshot it could see, each `{ref,
+name}`, and `unseen`, how many more it could not) and on what a spectator is
+told; `pages` (`time`, `text`, `by`, the kind of controller that wrote the page
+when there was one) on a notebook read. Every character another player chose is
+in a `summary`, a `words`, a page, or a name; no other field is a player's text.
+
 ### 8.3 Perception
 
 Senses are capabilities on the body, each with a range and conditions:

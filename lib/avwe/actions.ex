@@ -162,7 +162,9 @@ defmodule Avwe.Actions do
         )
 
       said = %{intent | params: %{text: text, volume: volume}}
-      {region, [speech, result(said, :success, nil)]}
+      %Event{data: data} = event = result(said, :success, nil)
+      # Where it was said from, so that who heard it can be told (`Avwe.Perception`).
+      {region, [speech, %{event | data: Map.put(data, :position, position)}]}
     else
       {region, [result(intent, :blocked, :invalid)]}
     end
@@ -229,7 +231,7 @@ defmodule Avwe.Actions do
             {region, [result(intent, :blocked, :full)]}
 
           true ->
-            pages = notebook.pages ++ [%{time: Tick.end_time(tick), text: text}]
+            pages = notebook.pages ++ [page(Tick.end_time(tick), text, intent.controller)]
 
             {Region.put_component(region, id, :notebook, %{notebook | pages: pages}),
              [result(%{intent | params: %{text: text}}, :success, nil)]}
@@ -299,6 +301,12 @@ defmodule Avwe.Actions do
       [] -> {:error, :no_notebook}
     end
   end
+
+  # A page says what kind of controller wrote it, when there was one: a page is
+  # its body's, and whoever holds the body next reads it, so this is as much
+  # as the world can say of whose it is.
+  defp page(time, text, nil), do: %{time: time, text: text}
+  defp page(time, text, controller), do: %{time: time, text: text, by: controller}
 
   defp read_last(nil), do: {:ok, @read_last}
   defp read_last(last) when is_integer(last) and last in @read_most, do: {:ok, last}

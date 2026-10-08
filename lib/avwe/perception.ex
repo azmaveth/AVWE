@@ -300,7 +300,26 @@ defmodule Avwe.Perception do
     }
   end
 
-  defp own(view, body, %Event{type: :action_result, data: data} = event) do
+  # A body's own speech says what was said, as the listeners are told it, and
+  # who heard (`audience/4`).
+  defp own(
+         view,
+         body,
+         %Event{
+           type: :action_result,
+           data: %{verb: :say, outcome: :success, params: %{text: _, volume: _}} = data
+         } = event
+       ) do
+    percept = result_percept(view, body, event)
+    at = Map.get(data, :position) || position(view, body)
+    said = words(data.params, body, "You")
+    %{percept | data: Map.put(audience(view, body, at, data.params.volume), :words, said)}
+  end
+
+  defp own(view, body, %Event{type: :action_result} = event),
+    do: result_percept(view, body, event)
+
+  defp result_percept(view, body, %Event{data: data} = event) do
     %Percept{
       kind: :result,
       type: :action_result,
@@ -313,6 +332,32 @@ defmodule Avwe.Perception do
       salience: 1.0,
       summary:
         Prose.result(data.verb, data.outcome, data.reason, name(view, data.target), data.params)
+    }
+  end
+
+  # Who hears a body speak at `volume` from `at`: the other bodies within
+  # earshot that the speaker can see, each by ref and name, and how many more
+  # are within earshot and not in sight. A speaker is told no more than its
+  # eyes give it; a client that needs the whole audience takes `unseen > 0`
+  # as an audience it cannot count. Hearing is as `hear/3` has it.
+  defp audience(_view, _speaker, nil, _volume), do: %{heard_by: [], unseen: 0}
+
+  defp audience(view, speaker, at, volume) do
+    sight = sight_cells(light(view))
+
+    heard =
+      for id <- ids(view, :body),
+          id != speaker,
+          there = position(view, id),
+          distance = Space.distance(there, at),
+          distance <= @earshot_cells[volume],
+          do: {id, distance}
+
+    {seen, unseen} = Enum.split_with(heard, fn {_id, distance} -> distance <= sight end)
+
+    %{
+      heard_by: for({id, _distance} <- seen, do: %{ref: id, name: name(view, id)}),
+      unseen: length(unseen)
     }
   end
 
@@ -332,14 +377,9 @@ defmodule Avwe.Perception do
   defp hear(_view, body, %Event{entity: body}) when body != nil, do: []
 
   defp hear(view, nil, %Event{entity: speaker, data: data} = event) do
-    [
-      speech_percept(
-        nil,
-        event,
-        nil,
-        Prose.heard(name(view, speaker), data.volume, data.text, nil)
-      )
-    ]
+    as = name(view, speaker)
+    summary = Prose.heard(as, data.volume, data.text, nil)
+    [speech_percept(nil, event, nil, summary, words(data, speaker, as))]
   end
 
   defp hear(view, body, %Event{entity: speaker, data: data} = event) do
@@ -352,8 +392,8 @@ defmodule Avwe.Perception do
       who = if in_sight?, do: name(view, speaker), else: "Someone"
       source = %{ref: speaker, distance_m: Space.meters(distance), direction: direction}
 
-      percept =
-        speech_percept(body, event, source, Prose.heard(who, data.volume, data.text, direction))
+      summary = Prose.heard(who, data.volume, data.text, direction)
+      percept = speech_percept(body, event, source, summary, words(data, speaker, who))
 
       [%{percept | confidence: if(in_sight?, do: 1.0, else: 0.6)}]
     else
@@ -361,7 +401,15 @@ defmodule Avwe.Perception do
     end
   end
 
-  defp speech_percept(body, event, source, summary) do
+  # What was said, apart from the narration around it, in `data.words`: the
+  # text is somebody's own, and a client that labels what other players wrote
+  # as untrusted labels this and nothing else of the percept (`as` is how the
+  # listener names the speaker: a name, which is a player's text too, or
+  # "Someone" out of sight).
+  defp words(%{text: text, volume: volume}, speaker, as),
+    do: %{text: text, volume: volume, speaker: speaker, as: as}
+
+  defp speech_percept(body, event, source, summary, words) do
     %Percept{
       kind: :sensed,
       type: :speech,
@@ -370,7 +418,8 @@ defmodule Avwe.Perception do
       modality: :hearing,
       source: source,
       salience: @speech_salience[event.data.volume],
-      summary: summary
+      summary: summary,
+      data: %{words: words}
     }
   end
 
