@@ -18,7 +18,7 @@ defmodule Avwe.MCP.Report do
   Mind could not submit (`problem`) is explained.
   """
 
-  alias Avwe.{Calendar, Prose}
+  alias Avwe.{Calendar, Prose, Protocol}
 
   @shown_steps 3
 
@@ -210,7 +210,7 @@ defmodule Avwe.MCP.Report do
       abandoned: Enum.map(Map.get(report, :abandoned, []), &step/1),
       problem: problem_data(Map.get(report, :problem)),
       dropped: report.dropped,
-      percepts: Enum.map(report.percepts, &percept(&1, now))
+      percepts: Enum.map(report.percepts, &Protocol.percept(&1, now))
     }
   end
 
@@ -245,54 +245,13 @@ defmodule Avwe.MCP.Report do
   # A planned step's target as given: an id, or a name not yet resolved.
   defp step_target(opts), do: opts[:target] || opts[:target_name]
 
-  defp percept(percept, now) do
-    percept
-    |> Map.take([:kind, :type, :summary, :outcome, :reason, :issuer, :salience, :source, :data])
-    |> Map.put(:time, Prose.stamp(percept.time, now))
-    |> Map.put(:ref, percept.intent)
-    |> Map.reject(fn {_key, value} -> is_nil(value) end)
-    |> jsonable()
-  end
-
   @doc """
-  A look as JSON-ready data: its time formatted (and a wait's end), and
-  its measures rounded, temperatures (`*_c`) to 0.1 degree and the rest to
-  two places.
+  A look as JSON-ready data (`Avwe.Protocol.look/1`).
   """
   @spec look(map()) :: map()
-  def look(look) do
-    look
-    |> Map.drop([:away])
-    |> Map.put(:time, Calendar.format(look.time))
-    |> Map.update(:action, nil, &look_action/1)
-    |> rounded()
-    |> jsonable()
-  end
+  defdelegate look(look), to: Protocol
 
-  defp look_action(%{until: until} = action) when is_integer(until),
-    do: %{action | until: Calendar.format(until)}
-
-  defp look_action(action), do: action
-
-  defp rounded(map) when is_map(map) and not is_struct(map),
-    do: Map.new(map, fn {key, value} -> {key, rounded(key, value)} end)
-
-  defp rounded(list) when is_list(list), do: Enum.map(list, &rounded/1)
-  defp rounded(other), do: other
-
-  defp rounded(key, value) when is_float(value) do
-    if key |> to_string() |> String.ends_with?("_c"),
-      do: Float.round(value, 1),
-      else: Float.round(value, 2)
-  end
-
-  defp rounded(_key, value), do: rounded(value)
-
-  @doc "Makes a term encodable as JSON: tuples become lists."
+  @doc "Makes a term encodable as JSON (`Avwe.Protocol.jsonable/1`)."
   @spec jsonable(term()) :: term()
-  def jsonable(%{__struct__: _} = struct), do: struct |> Map.from_struct() |> jsonable()
-  def jsonable(map) when is_map(map), do: Map.new(map, fn {k, v} -> {k, jsonable(v)} end)
-  def jsonable(list) when is_list(list), do: Enum.map(list, &jsonable/1)
-  def jsonable(tuple) when is_tuple(tuple), do: tuple |> Tuple.to_list() |> jsonable()
-  def jsonable(other), do: other
+  defdelegate jsonable(term), to: Protocol
 end
