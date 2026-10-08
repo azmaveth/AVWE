@@ -226,10 +226,7 @@ defmodule Avwe.Session do
          :ok <- check_body(view, body, guest),
          :ok <- claim(world, world_pid, body, controller, guest),
          scenes = opts[:scenes] == true,
-         # Subscribed before the arrival is asked for, so that the step that
-         # makes the guest is heard of.
-         {:ok, _owner} <- Avwe.subscribe(world, steps: scenes),
-         {:ok, arrival} <- arrive(world, body, guest, controller) do
+         {:ok, arrival} <- subscribe_and_arrive(world, body, guest, controller, scenes) do
       sink = Keyword.fetch!(opts, :sink)
       Process.monitor(sink)
       Process.monitor(world_pid)
@@ -675,6 +672,29 @@ defmodule Avwe.Session do
   # Somebody else is that guest, or arriving as one: the name is not free.
   defp taken(nil), do: :body_taken
   defp taken(_guest), do: :name_taken
+
+  # Subscribed before the arrival is asked for, so that the step that makes
+  # the guest is heard of. If either fails the session never starts, and the
+  # lease it has just claimed is let go of here, before the caller is told: left
+  # to the Registry, which notices that a process has gone only a little later,
+  # the name would still be taken for a retry made at that moment.
+  defp subscribe_and_arrive(world, body, guest, controller, scenes) do
+    with {:ok, _owner} <- Avwe.subscribe(world, steps: scenes),
+         {:ok, arrival} <- arrive(world, body, guest, controller) do
+      {:ok, arrival}
+    else
+      {:error, _reason} = refused ->
+        unclaim(world, body)
+        refused
+    end
+  end
+
+  defp unclaim(_world, nil), do: :ok
+
+  defp unclaim(world, body) do
+    Registry.unregister(Avwe.Registry, {:lease, world, body})
+    :ok
+  end
 
   # Asks the region for the guest's arrival: refused with the reason before
   # anything is journaled if the name is not free or the world is full.
