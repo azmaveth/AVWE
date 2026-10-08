@@ -170,6 +170,14 @@ pocket notebook, which is its memory, and stays in the world when you leave:
 else learns the backstory unless the guest says it. Over telnet or in the web
 client a guest is a body like any other.
 
+To run an agent that plays without anyone at the keyboard (a local model, or a
+CLI over MCP), see [docs/inhabitants.md](docs/inhabitants.md): the pace to set,
+what to tell it, and what to take away from it, since what other players say is
+untrusted text. The structured results say which part of a percept that is
+(`data.words`, `data.pages`; [docs/DESIGN.md](docs/DESIGN.md), 8.2), and
+`test/e2e/reference_agent_test.exs` is a scripted player that reads them, against
+an adversary.
+
 To play over MCP by hand, or to see what Claude sees:
 
 ```bash

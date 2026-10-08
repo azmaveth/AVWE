@@ -115,6 +115,15 @@ do reaches outside the world. What the narration does hold is names and quotes:
 a guest named like an instruction is still a name, and a client that labels
 words should label names too.
 
+A client that reads the structured results (`structuredContent`) can do that
+labelling by structure and not by reading prose: another body's words are in
+`data.words.text` on a speech percept and in `data.pages[].text` on a read of the
+notebook; a body's name is in `data.words.as`, in `data.heard_by` and in a
+look's bodies; and every other field of a percept (`kind`, `type`, `source`,
+`outcome`, `ref`, ...) is the world's own (`docs/DESIGN.md`, 8.2). The scripted
+player in `test/e2e/reference_agent_test.exs` does exactly that, against an
+adversary.
+
 ## A driver loop
 
 A CLI agent is not a daemon: its context fills, and its quota and its terms are

@@ -29,7 +29,10 @@ changing anything structural; it records the decisions and the reasons.
   `river_watchers_test.exs` M2b's), the page in a real browser (`test/browser`,
   Chromium through Playwright, which `Avwe.Test.BrowserPage` reads and drives
   down to the canvas's pixels, against what `Avwe.Test.PageData` says they
-  should be), and later Arbor. Before
+  should be), an agent as a framework would write one (`Avwe.Test.ReferenceAgent`:
+  a scripted MCP player that sorts what it is told by structure, which
+  `reference_agent_test.exs` runs through a world day against an adversary), and
+  later Arbor. Before
   stepping the world after a telnet command, call `TelnetClient.sync/1`; a
   tool call that waits on world time is started with `MCPClient.calling/5`
   and stepped with `step_until_done/4`.

@@ -309,3 +309,48 @@ guest told of by telnet as anyone who arrives, held and released and taken back,
 over MCP with and without a session, a name and a backstory that are an attack,
 and replay of a world with a guest reproducing its state hash, a world started
 again keeping the guest whatever it is told of guests.
+
+## 10. As built: M3a-2
+
+Where words, audience, the wire form and the reference agent as built differ from,
+or go past, section 3. `Avwe.Protocol`'s moduledoc and DESIGN 8.2 are the reference
+for the form.
+
+- **Words.** `data.words` is `text`, `volume`, `speaker` (the speaker's ref, as
+  `source.ref` already told it) and `as`: on what a body heard (`as` is a name, or
+  "Someone" for a speaker out of sight, the narration's own rule), on what a
+  spectator is told, and on a body's own `say` result (`as` is "You"). The
+  summary keeps the quote inline.
+- **Who heard.** `Avwe.Perception` works it out in the speaker's own result: the
+  other bodies within the volume's earshot of where the words were said from
+  (`Avwe.Actions` now puts that place in the say result's event; a result without it
+  falls back on where the speaker stands), the ones the speaker's own sight reaches
+  as `heard_by: [{ref, name}]`, in id order, and the rest as `unseen`. A body that
+  is nowhere is nobody's audience. A refused `say` has neither words nor audience.
+- **A page's author.** `by` is the kind of controller on the `write` intent
+  (`:human`, `:mcp`, `:arbor`), left out when there was none, so a page written
+  before this has none either. It says what kind of mind wrote a page, which is as
+  much as the world knows (the notebook is read only by whoever holds the body);
+  a client that needs "was it me" keeps its own record.
+- **The wire form.** `Avwe.Protocol` has `percept/2`, `look/1` and `jsonable/1`,
+  which `Avwe.MCP.Report` now delegates to. A percept is told with `id`,
+  `modality` and `confidence` as well as what it had, and a key with no value is
+  left out. Its moduledoc says which fields can hold a player's text.
+- **The reference agent** is `Avwe.Test.ReferenceAgent` (test support): an MCP player
+  that sorts what it is told into the world's narration, what it said and what
+  others said by structure alone (`classify/1`), writes down what it heard in
+  quotation (`remember_heard/1`), and can say where a string appears in what it
+  was given (`where/2`). Its harness steps the world and knows which player to wait
+  for with AVWE's own functions; the agent does not.
+- **What `reference_agent_test.exs` holds.** A guest lives a world day over real MCP
+  HTTP (arrives, speaks and is told who heard, walks to the pond and waits for
+  dusk, writes, goes back and waits for dawn, is let go and comes back by name, told
+  its backstory, and reads its notebook with its pages' author); who heard is told as
+  the speaker's senses give it (a whisper to the spot, a shout across the valley, and
+  in the dark those it cannot see are counted); and an adversary's injection and
+  forged lines arrive as one percept of another body's words, in `data.words.text`
+  and `summary` and nowhere else, one line over MCP and over telnet, her forged
+  backstory cleaned and told to nobody, and her hands and her words unable to reach
+  his notebook, his name or his body.
+- **Left for later**, as in section 8: a controller identity for pages, and, on
+  Arbor's side (M3b), what a client does with the labels.
