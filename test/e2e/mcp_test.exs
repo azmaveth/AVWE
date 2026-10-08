@@ -238,7 +238,7 @@ defmodule Avwe.E2E.MCPTest do
     tools = Map.new(tools, &{&1["name"] || &1[:name], &1})
 
     assert tools |> Map.keys() |> Enum.sort() ==
-             ~w(act bodies join leave listen look read say wait write)
+             ~w(act arrive bodies join leave listen look read say wait write)
 
     schema = fn name -> tools[name]["inputSchema"] || tools[name][:inputSchema] end
 
@@ -249,6 +249,9 @@ defmodule Avwe.E2E.MCPTest do
 
     for name <- Map.keys(tools) -- ["join"],
         do: assert(%{"player" => %{"type" => "string"}} = schema.(name)["properties"])
+
+    assert %{"required" => ["name"], "properties" => %{"name" => _, "backstory" => _}} =
+             schema.("arrive")
 
     assert %{"minutes" => _, "hours" => _, "until" => %{"enum" => ["dawn", "dusk"]}} =
              schema.("wait")["properties"]

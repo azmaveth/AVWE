@@ -57,6 +57,11 @@ defmodule Avwe do
     * `:systems` - systems to run, in order. Default: `#{inspect(@default_systems)}`.
     * `:terrain`, `:hearths`, `:miracles`, `:climate` and `:characters` -
       AVWE's own settings for the world. See `Avwe.Worldgen`.
+    * `:guests` - `[arrival: place_id, max: n]`: the world takes guests
+      (`Avwe.Guests`), who arrive at that place, `n` of them at most. Without
+      it the world takes none. It is how the world is run, not what is saved
+      of it: a world that resumes from its saved state takes the guests it is
+      started to take, and keeps the ones it has.
     * `:data_dir` - where worlds keep their logs and snapshots; this world's
       go under `<data_dir>/<id>`. Default: `config :avwe, :data_dir`. `nil`
       means no persistence. A world whose state is already there resumes
@@ -103,12 +108,36 @@ defmodule Avwe do
            name: quire_world.name,
            tagline: quire_world.tagline,
            clock: Keyword.get(opts, :clock, :manual),
-           dt: region.dt
+           dt: region.dt,
+           guests: guests!(region, Keyword.get(opts, :guests))
          },
          store: store_dir(id, Keyword.get(opts, :data_dir, Application.get_env(:avwe, :data_dir))),
          snapshot_every: Keyword.get(opts, :snapshot_every, 1_000),
          snapshot_keep: Keyword.get(opts, :snapshot_keep, 5)}
       )
+    end
+  end
+
+  # The settings guests arrive under, checked here where a bad one is easiest
+  # to explain, as a bad hearth is: the place must be a place of the world.
+  defp guests!(_region, nil), do: nil
+
+  defp guests!(region, settings) do
+    if not Keyword.keyword?(settings),
+      do: raise(ArgumentError, "guests must be a keyword list, got #{inspect(settings)}")
+
+    arrival = settings[:arrival]
+    max = settings[:max]
+
+    cond do
+      not is_binary(arrival) or Avwe.Region.get(region, arrival, :place) == nil ->
+        raise ArgumentError, "guests: arrival #{inspect(arrival)} is not a place of the world"
+
+      not (is_integer(max) and max > 0) ->
+        raise ArgumentError, "guests: max must be a positive integer, got #{inspect(max)}"
+
+      true ->
+        %{arrival: arrival, max: max}
     end
   end
 
@@ -173,23 +202,26 @@ defmodule Avwe do
   @doc """
   Every running world as `{id, info}`: its `name` and `tagline`, and how
   its time passes, its `clock` (`:manual` or `{:live, interval_ms}`) and
-  `dt`, the world seconds of each step.
+  `dt`, the world seconds of each step, and the `guests` it takes, `nil` or
+  `%{arrival: place, max: n}`.
   """
   @spec worlds() :: [{atom(), map()}]
   def worlds, do: Avwe.World.list()
 
   @doc """
   The bodies in a world that a controller could take, with whether each is
-  already `taken` (a session holds its lease) and who its `controller` is in
+  already `taken` (a session holds its lease), who its `controller` is in
   the simulation: the holder written on the body's `:control` component, or
   `:autopilot` when nobody holds it (a taken body whose session has gone
-  idle is autopilot's until the session acts again).
+  idle is autopilot's until the session acts again), and whether it is a
+  `guest` (`Avwe.Guests`).
   """
   @spec bodies(atom()) :: {:ok, [map()]} | {:error, :not_found}
   def bodies(world) do
     with {:ok, snapshot} <- snapshot(world) do
       repr = Map.get(snapshot.components, :repr, %{})
       control = Map.get(snapshot.components, :control, %{})
+      guests = Map.get(snapshot.components, :guest, %{})
 
       bodies =
         for id <- snapshot.components |> Map.get(:body, %{}) |> Map.keys() |> Enum.sort() do
@@ -198,7 +230,8 @@ defmodule Avwe do
             name: get_in(repr, [id, :name]) || id,
             description: get_in(repr, [id, :description]),
             taken: Registry.lookup(Avwe.Registry, {:lease, world, id}) != [],
-            controller: get_in(control, [id, :holder]) || :autopilot
+            controller: get_in(control, [id, :holder]) || :autopilot,
+            guest: Map.has_key?(guests, id)
           }
         end
 
@@ -212,6 +245,11 @@ defmodule Avwe do
   Options:
 
     * `:body` - the body to control. Leave it out to watch as a spectator.
+    * `:guest` - `[name: ..., backstory: ...]` instead of a body: arrive in the
+      world as a guest of your own making (`Avwe.Guests`), if the world takes
+      guests (`:guests` of `start_world/2`). The body exists after the world's
+      next step; `Avwe.Session.await_arrival/2` waits for it, and
+      `Avwe.Session.look/1` answers `{:error, :arriving}` until then.
     * `:sink` - the process that receives percepts. Default: the caller.
     * `:controller` - `:human` (default), `:mcp` or `:arbor`; anything else
       fails with `:invalid_controller`.
@@ -226,7 +264,10 @@ defmodule Avwe do
       `Avwe.Session.ground/1`. Default: `false`.
 
   Fails with `:no_such_world`, `:no_such_body`, `:body_taken` or
-  `:invalid_controller`.
+  `:invalid_controller`; and for a guest with `:body_and_guest`, `:no_guests`,
+  `:invalid_name`, `:invalid_backstory`, `:name_taken` (the name is the name or
+  id of something in the world, or of a guest who is there or arriving) or
+  `:full`.
   """
   @spec connect(atom(), keyword()) :: {:ok, pid()} | {:error, term()}
   def connect(world, opts \\ []) do

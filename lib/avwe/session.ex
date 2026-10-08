@@ -52,6 +52,17 @@ defmodule Avwe.Session do
   show the world's own: empty while held, what the routine did since the
   session yielded while yielded.
 
+  **Guests.** A session opened with `guest: [name: ..., backstory: ...]` and no
+  body is for a body that does not exist yet (`Avwe.Guests`, `docs/m3-spec.md`):
+  it claims the lease for the guest's id, asks the region to take its arrival
+  (`:arrive`, refused at once with the reason if the name is not free or the
+  world is full) and then takes the body as for any. The body exists after the
+  next step. Until then `look/1` answers `{:error, :arriving}`, and
+  `await_arrival/2` waits for it; the arrival's result, like the lease's, is
+  the session's own and never reaches the controller. `body:` and `guest:`
+  together are `{:error, :body_and_guest}`, and a world that takes no guests
+  (`Avwe.start_world/2`, `:guests`) answers `{:error, :no_guests}`.
+
   **The world.** A session lives no longer than its world: when the world
   stops, the session stops too, so its lease and its subscription, both
   keyed by the world's name, are not left behind for a world started again
@@ -104,11 +115,13 @@ defmodule Avwe.Session do
   alias Avwe.{
     Event,
     GroundCache,
+    Guests,
     Intent,
     Perception,
     RegionServer,
     Scene,
     Terrain,
+    World,
     WorldGround,
     WorldScene
   }
@@ -116,7 +129,7 @@ defmodule Avwe.Session do
   @region {0, 0}
   @idle_after 10 * 60 * 1_000
   @controllers [:human, :mcp, :arbor]
-  @reserved_verbs [:control, :release]
+  @reserved_verbs [:control, :release, :arrive]
   @reserved_ref "auto-"
   @announced %{control_released: :yield, control_taken: :retake}
 
@@ -185,6 +198,18 @@ defmodule Avwe.Session do
   @spec body(pid()) :: String.t() | nil
   def body(session), do: GenServer.call(session, :body)
 
+  @doc """
+  Waits, up to `timeout` real milliseconds, for the session's guest to arrive:
+  the step after its arrival was asked for, which on a clock stepped by hand
+  is whenever the world is stepped. `:ok` at once for any body that exists.
+  """
+  @spec await_arrival(pid(), timeout()) :: :ok | {:error, :timeout}
+  def await_arrival(session, timeout \\ 10_000),
+    do: GenServer.call(session, {:await_arrival, timeout}, add_second(timeout))
+
+  defp add_second(:infinity), do: :infinity
+  defp add_second(timeout), do: timeout + 1_000
+
   @doc "Ends the session and releases its body."
   @spec close(pid()) :: :ok
   def close(session), do: GenServer.stop(session)
@@ -192,19 +217,22 @@ defmodule Avwe.Session do
   @impl GenServer
   def init(opts) do
     world = Keyword.fetch!(opts, :world)
-    body = opts[:body]
     controller = Keyword.get(opts, :controller, :human)
 
     with :ok <- check_controller(controller),
          {:ok, world_pid} <- whereis(world),
          {:ok, view} <- snapshot(world),
-         :ok <- check_body(view, body),
-         :ok <- claim(world, world_pid, body, controller) do
+         {:ok, body, guest} <- body_or_guest(world, opts),
+         :ok <- check_body(view, body, guest),
+         :ok <- claim(world, world_pid, body, controller, guest),
+         scenes = opts[:scenes] == true,
+         # Subscribed before the arrival is asked for, so that the step that
+         # makes the guest is heard of.
+         {:ok, _owner} <- Avwe.subscribe(world, steps: scenes),
+         {:ok, arrival} <- arrive(world, body, guest, controller) do
       sink = Keyword.fetch!(opts, :sink)
       Process.monitor(sink)
       Process.monitor(world_pid)
-      scenes = opts[:scenes] == true
-      {:ok, _owner} = Avwe.subscribe(world, steps: scenes)
 
       state = %{
         world: world,
@@ -218,8 +246,11 @@ defmodule Avwe.Session do
         idle_after: Keyword.get(opts, :idle_after, @idle_after),
         idle_tag: nil,
         yielded: false,
-        lease_refs: %{},
-        away: body && Perception.away(view, body),
+        lease_refs: if(arrival, do: %{arrival => :arrive}, else: %{}),
+        arrival: arrival,
+        arrived: arrival == nil,
+        waiting: %{},
+        away: if(body != nil and guest == nil, do: Perception.away(view, body)),
         scenes: scenes,
         ground: nil,
         last_scene: nil
@@ -232,6 +263,9 @@ defmodule Avwe.Session do
   end
 
   @impl GenServer
+  def handle_call(:look, _from, %{arrived: false} = state),
+    do: {:reply, {:error, :arriving}, arm_idle(state)}
+
   def handle_call(:look, _from, state) do
     reply =
       with {:ok, view} <- snapshot(state.world) do
@@ -240,6 +274,9 @@ defmodule Avwe.Session do
 
     {:reply, reply, arm_idle(%{state | away: nil})}
   end
+
+  def handle_call(:peek, _from, %{arrived: false} = state),
+    do: {:reply, {:error, :arriving}, state}
 
   def handle_call(:peek, _from, state) do
     reply =
@@ -251,6 +288,9 @@ defmodule Avwe.Session do
   end
 
   def handle_call(:scene, _from, %{scenes: false} = state),
+    do: {:reply, {:ok, nil}, arm_idle(state)}
+
+  def handle_call(:scene, _from, %{arrived: false} = state),
     do: {:reply, {:ok, nil}, arm_idle(state)}
 
   def handle_call(:scene, _from, state) do
@@ -280,6 +320,14 @@ defmodule Avwe.Session do
   end
 
   def handle_call(:ground, _from, state), do: {:reply, {:ok, nil}, state}
+
+  def handle_call({:await_arrival, _timeout}, _from, %{arrived: true} = state),
+    do: {:reply, :ok, state}
+
+  def handle_call({:await_arrival, timeout}, from, state) do
+    waiting = Map.put(state.waiting, from, timer(from, timeout))
+    {:noreply, %{state | waiting: waiting}}
+  end
 
   def handle_call(:touch, _from, state), do: {:reply, :ok, arm_idle(state)}
 
@@ -322,15 +370,34 @@ defmodule Avwe.Session do
 
   @impl GenServer
   def handle_info({:avwe_events, world, events, view}, %{world: world} = state) do
-    view = Map.put(view, :terrain, state.terrain)
-    events = Enum.reject(events, &foreign_lease?(&1, state.lease_refs))
-    percepts = Perception.percepts(view, state.body, events)
-    {own, percepts} = Enum.split_with(percepts, &Map.has_key?(state.lease_refs, &1.intent))
-    settled = Enum.map(own, &Map.fetch!(state.lease_refs, &1.intent))
-    percepts = Enum.filter(percepts, &announced?(&1, settled))
-    state = %{state | lease_refs: Map.drop(state.lease_refs, Enum.map(own, & &1.intent))}
+    if exists?(view, state.body) do
+      view = Map.put(view, :terrain, state.terrain)
+      events = Enum.reject(events, &foreign_lease?(&1, state.lease_refs))
+      percepts = Perception.percepts(view, state.body, events)
+      {own, percepts} = Enum.split_with(percepts, &Map.has_key?(state.lease_refs, &1.intent))
+      settled = Enum.map(own, &Map.fetch!(state.lease_refs, &1.intent))
+      percepts = Enum.filter(percepts, &announced?(&1, settled))
+      state = %{state | lease_refs: Map.drop(state.lease_refs, Enum.map(own, & &1.intent))}
 
-    {:noreply, state |> deliver(percepts) |> push_scene(view)}
+      case settle_arrival(state, own) do
+        {:ok, state} -> {:noreply, state |> deliver(percepts) |> push_scene(view)}
+        {:refused, state} -> {:stop, :normal, state}
+      end
+    else
+      # A guest's body is not in the world until the step of its arrival.
+      {:noreply, state}
+    end
+  end
+
+  def handle_info({:arrival_timeout, from}, state) do
+    case Map.fetch(state.waiting, from) do
+      {:ok, _timer} ->
+        GenServer.reply(from, {:error, :timeout})
+        {:noreply, %{state | waiting: Map.delete(state.waiting, from)}}
+
+      :error ->
+        {:noreply, state}
+    end
   end
 
   # The ground map is built: the first scene with ground follows.
@@ -367,6 +434,42 @@ defmodule Avwe.Session do
   end
 
   def terminate(_reason, _state), do: :ok
+
+  # A guest arrives with the step that applies its `:arrive`, whose result is
+  # the session's own: the waiters are answered, or the session ends if the
+  # world refused after all (what `Avwe.RegionServer` checked has changed
+  # in between, which only a world restarted under other settings can do).
+  defp settle_arrival(%{arrival: nil} = state, _own), do: {:ok, state}
+
+  defp settle_arrival(%{arrival: ref} = state, own) do
+    case Enum.find(own, &(&1.intent == ref)) do
+      nil ->
+        {:ok, state}
+
+      %{outcome: :success} ->
+        {:ok, answer_waiting(%{state | arrival: nil, arrived: true}, :ok)}
+
+      _refused ->
+        {:refused, answer_waiting(state, {:error, :refused})}
+    end
+  end
+
+  defp answer_waiting(state, reply) do
+    for {from, timer} <- state.waiting do
+      if timer, do: Process.cancel_timer(timer)
+      GenServer.reply(from, reply)
+    end
+
+    %{state | waiting: %{}}
+  end
+
+  defp timer(_from, :infinity), do: nil
+  defp timer(from, ms), do: Process.send_after(self(), {:arrival_timeout, from}, ms)
+
+  # Whether the body is in the world: a spectator has none, and a guest has
+  # none until its arrival's step.
+  defp exists?(_view, nil), do: true
+  defp exists?(view, body), do: Map.has_key?(Map.get(view.components, :body, %{}), body)
 
   # The first look tells what happened before the session took the body.
   defp arrival(look, nil), do: look
@@ -515,23 +618,72 @@ defmodule Avwe.Session do
   defp check_controller(controller) when controller in @controllers, do: :ok
   defp check_controller(_controller), do: {:error, :invalid_controller}
 
-  defp check_body(_view, nil), do: :ok
+  # The body a session is for, or the guest it asks to be: `{:ok, body,
+  # guest}`, where `guest` is the offer with the world's settings
+  # (`Avwe.Guests`), or `nil` for a body that is there already.
+  defp body_or_guest(world, opts) do
+    case {opts[:body], opts[:guest]} do
+      {body, nil} -> {:ok, body, nil}
+      {nil, guest} -> offered(world, guest)
+      {_body, _guest} -> {:error, :body_and_guest}
+    end
+  end
 
-  defp check_body(view, body) do
+  defp offered(world, guest) when is_list(guest) or is_map(guest) do
+    with {:ok, info} <- world_info(world),
+         %{arrival: arrival, max: max} <- info[:guests] || {:error, :no_guests},
+         {:ok, offer} <- Guests.offer(guest[:name], guest[:backstory]) do
+      {:ok, offer.id, Map.merge(offer, %{arrival: arrival, max: max})}
+    end
+  end
+
+  defp offered(_world, _guest), do: {:error, :invalid_name}
+
+  defp world_info(world) do
+    case World.info(world) do
+      {:ok, info} -> {:ok, info}
+      :error -> {:error, :no_such_world}
+    end
+  end
+
+  defp check_body(_view, nil, _guest), do: :ok
+  defp check_body(_view, _body, guest) when guest != nil, do: :ok
+
+  defp check_body(view, body, nil) do
     if Map.has_key?(Map.get(view.components, :body, %{}), body),
       do: :ok,
       else: {:error, :no_such_body}
   end
 
-  defp claim(_world, _world_pid, nil, _controller), do: :ok
+  defp claim(_world, _world_pid, nil, _controller, _guest), do: :ok
 
   # The lease names the world it was taken in, by pid, so a world started
   # again under the same name can tell a session of its own from one of the
   # world before that has not ended yet (`Avwe.RegionServer`).
-  defp claim(world, world_pid, body, controller) do
+  defp claim(world, world_pid, body, controller, guest) do
     case Registry.register(Avwe.Registry, {:lease, world, body}, {controller, world_pid}) do
       {:ok, _owner} -> :ok
-      {:error, {:already_registered, _holder}} -> {:error, :body_taken}
+      {:error, {:already_registered, _holder}} -> {:error, taken(guest)}
+    end
+  end
+
+  # Somebody else is that guest, or arriving as one: the name is not free.
+  defp taken(nil), do: :body_taken
+  defp taken(_guest), do: :name_taken
+
+  # Asks the region for the guest's arrival: refused with the reason before
+  # anything is journaled if the name is not free or the world is full.
+  defp arrive(_world, _body, nil, _controller), do: {:ok, nil}
+
+  defp arrive(world, body, guest, controller) do
+    ref = "arrive-#{System.unique_integer([:positive])}"
+    params = Map.take(guest, [:name, :backstory, :arrival, :max])
+    intent = Intent.new(body, :arrive, ref: ref, controller: controller, params: params)
+
+    case RegionServer.submit(world, @region, intent) do
+      :ok -> {:ok, ref}
+      {:error, :not_found} -> {:error, :no_such_world}
+      {:error, _reason} = refused -> refused
     end
   end
 end

@@ -5,6 +5,10 @@ config :avwe, :worlds,
     quire: "ember-reach",
     # Late summer 813 AR, before dawn: the year Mira Vale begins her survey.
     start: {813, day: 220, hour: 4},
+    # Anyone may arrive as a guest, in the town, up to eight of them
+    # (docs/m3-spec.md): a way in for a controller with a mind of its own
+    # before the world has more characters.
+    guests: [arrival: "ember-reach", max: 8],
     terrain: [
       river: [
         name: "the Ember",

@@ -138,6 +138,9 @@ avwe/
     scene.ex repr.ex ground_map.ex  what a body can see, as something a
                          client draws: the scene, the glyph layers, and the
                          ground as one binary (M2)
+    guests.ex text.ex    a controller's own body and words: a guest who arrives
+                         with a name and a backstory, and the plain text both
+                         are made of (M3a)
     world_scene.ex world_ground.ex overlays.ex rle.ex  what a spectator sees:
                          the whole valley, its ground once, and the river, the
                          heat and the smoke drawn over it (M2b)
@@ -464,6 +467,22 @@ Built.
 - Autopilot acts only through intents, like any controller, but it runs
   inside the tick as a system, so its intents are derived state: not
   journaled, regenerated on replay.
+- **Guests (M3a, built; `docs/m3-spec.md`, 2).** Canon has the characters Quire
+  gives it, so a controller with a mind of its own can **arrive** as a guest:
+  `Avwe.connect(world, guest: [name:, backstory:])`, or the MCP `arrive` tool.
+  A world takes guests when it is started with `guests: [arrival: place,
+  max: n]` (run-time information of the world, not of its saved state). The
+  session claims the lease for the guest's id, and the region is asked for the
+  arrival, which it checks against the guests there and those arriving and
+  refuses at once with a reason (`:name_taken`, `:full`, ...); then an
+  `:arrive` intent, journaled like any other, makes the body at the next step,
+  at the arrival place, knowing the pinned places, with a pocket notebook, and
+  the controller takes it. It is not a game-master spawn (section 9): it makes
+  only a guest, only through a session, and never touches Quire. A name is the
+  controller's, one line of plain text, and nothing in the world has it
+  already (nobody poses as Mira Vale); a backstory is its own and is told to
+  nobody else. A guest stays when its controller goes, idle where it stands,
+  and is taken back like any free body.
 
 ### 7.2 Autopilot
 
@@ -724,7 +743,7 @@ is as it was.
 | Client | Milestone | Description |
 |---|---|---|
 | Text (telnet) | M0 | `look`, `go dry bend`, `go north 200`, `follow upstream`, `say ...`, `whisper`, `shout`, `wait until dusk`, `light the fire`, `douse the coal`, `write ...`, `read [n]`, `stop`, `time`, `help`. Joining tells what the body did while nobody held it. A body you leave idle for ten minutes goes back to its routine, and its doings show as "- " lines until you act again. The quickest way to be in the world |
-| MCP | M1 | Claude plays a body over streamable HTTP (built; section 12): join, look, act with plans, say, wait, write, read, listen, leave |
+| MCP | M1, M3a | Claude, or any MCP client, plays a body over streamable HTTP (built; section 12): join or arrive as a guest, look, act with plans, say, wait, write, read, listen, leave |
 | Web | M2 | LiveView pages on Phoenix and Bandit, at `127.0.0.1:4042`. A lobby lists the worlds and bodies, free or being played. The **embodied view** (built, M2a) plays a body: a canvas map of what it sees, drawn in glyphs by one hook (the 41 cells around you, or all that is in sight); the description of where you are, which is the map in words; its log, with the routine's lines in a grey of their own; buttons for what the body can do; and a command line that takes telnet's words. A button and a click are command lines, so the page can do no more than a player typing. The **watch page** (built, M2b) takes no body: a spectator session with scenes, the whole valley on one canvas with the river, the heat and the smoke drawn over it (switched by the page, with the river and the smoke on to begin with), zoom and pan, the world's clock, and a log of what the telnet watcher is told. A click names what is at a cell, from the scene the page already has, and can do nothing. Any number of pages may watch a world, so the question of who a page is does not arise |
 | Arbor | M3 | Agents control villagers through a `world` capability |
 | Narrator | M4 | Reads chronicle events and writes prose: "while you were away..." |
@@ -906,8 +925,9 @@ most one body, and a client cannot choose its own token. Each player has one
 
 | Tool | Behavior |
 |---|---|
-| `bodies` | Who can be played, and who plays each |
-| `join(body)` | Take a body; the first look opens with "While you were away" |
+| `bodies` | Who can be played, and who plays each; a guest is marked |
+| `join(body)` | Take a body; the first look opens with "While you were away", and a guest is told its backstory |
+| `arrive(name, backstory?)` | Arrive as a guest of one's own making, where the world takes guests; the first look follows the next world step (M3a) |
 | `look` | The look as prose; the structured look (places with distances, bodies in sight, hearths, affordances, measures rounded) in `structuredContent` |
 | `act(verb, target?, params?, steps?, interrupt_at?, max_wait_seconds?)` | One action or a plan of up to 50 steps. Waits up to 25 real seconds and answers done, failed, interrupted, yielded or still going, with what was perceived since the last call, one line each with its world time |
 | `say`, `wait`, `write`, `read` | Shorthands for `act` |
@@ -945,7 +965,7 @@ core. A feature isn't done until its end-to-end test exists.
 | **M1** | Claude walks the banks | MCP adapter (built: section 12). Plans for controllers, interrupts and salience (built: `Avwe.Mind`, 7.3 and 7.4; `until` conditions beyond a wait's still to come). Notebook item and body memory (built) | Claude plays Mira across two sessions and finds the notes from the first (met: end to end in `mcp_journey_test.exs`, and live on 2026-10-06, when Claude followed the channel to The Source, wrote it down, and read the page back in a new session) |
 | **M2a** | A window onto the world | Representation layers (glyphs), the scene, Phoenix on Bandit with a lobby, and the embodied view on a LiveView canvas (all built: 8.4 and 9) | A telnet player, a web player and Claude are in the world at once and each perceives the others (met: end to end in `three_controllers_test.exs`, with the page, telnet and MCP; and the page itself is held in a real browser by `test/browser`, a CI job of its own) |
 | **M2b** | Many lenses | The spectator view with field overlays (heat, water, smoke), and "watch" in the lobby (all built: 8.4 and 9, `docs/m2b-spec.md`). Sprites and a remembered map are left for later: sprites need art, and a remembered map is body memory, which is simulation state | A watcher in a browser sees the river's reaches fall silent one after another, and the silt cool, as the telnet watcher is told of them (met: end to end in `river_watchers_test.exs`, with the page and a telnet watcher, and in a real browser, on the canvas pixel by pixel, in `test/browser/watch_river_test.exs`) |
-| **M3** | Agents move in | Arbor `world` capability over Channels. `world-player` trust profile. Percept mapping. Earshot engagements. Taint | Two Arbor agents live in the Reach for a world week unattended. Conversation engagements are scoped correctly. An injection attempt through in-world speech stays contained |
+| **M3** | Agents move in | Scoped with Hysun on 2026-10-07 (`docs/m3-spec.md`, which wins where it differs): agents play over **MCP first**, with Channels left until something consumes pushed percepts; **guests** (3a: a name and a backstory of one's own, built in part), structured words, who heard and one wire form for them (3a), and a reference agent with an adversary; an Arbor spike and then the `world` capability, a `world-player` trust profile and taint (3b, Arbor's repo); inhabitants living a world week at a slow pace (3c). Earshot engagements and the fiction domain, and needs, are left for later | Two Arbor agents live in the Reach for a world week unattended. Conversation engagements are scoped correctly. An injection attempt through in-world speech stays contained |
 | **M4** | Legends | History mode. Chronicle written to Quire. Canon-agreement check from 780 to 813 AR. Narrator | The 780–813 run produces a chronicle visible in Quire and a canon-agreement report |
 
 ## 14. Open questions

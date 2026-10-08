@@ -124,9 +124,12 @@ defmodule Avwe.Prose do
   def result(:read, :blocked, _reason, _target, _params),
     do: "You can't read like that. Read the last 1 to 50 pages."
 
-  # Taking and releasing a body is the session's bookkeeping, not something
-  # the body did, so nothing is said.
-  def result(verb, :success, _reason, _target, _params) when verb in [:control, :release], do: nil
+  # Taking and releasing a body, and a guest's arrival, are the session's
+  # bookkeeping, not something the body did, so nothing is said.
+  def result(verb, :success, _reason, _target, _params)
+      when verb in [:control, :release, :arrive],
+      do: nil
+
   def result(_verb, _outcome, _reason, _target, _params), do: "You can't do that."
 
   @doc """

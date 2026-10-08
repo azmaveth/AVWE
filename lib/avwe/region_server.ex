@@ -41,7 +41,7 @@ defmodule Avwe.RegionServer do
 
   use GenServer
 
-  alias Avwe.{Intent, Region, Store}
+  alias Avwe.{Guests, Intent, Region, Store}
 
   require Logger
 
@@ -66,8 +66,13 @@ defmodule Avwe.RegionServer do
     call(world, region_id, {:advance, steps}, :infinity)
   end
 
-  @doc "Queues an intent for the region's next step."
-  @spec submit(term(), term(), Avwe.Intent.t()) :: :ok | {:error, :not_found}
+  @doc """
+  Queues an intent for the region's next step. A guest's arrival
+  (`Avwe.Guests`) is checked first, against the guests there and the arrivals
+  already waiting, and refused with the reason before anything is journaled.
+  """
+  @spec submit(term(), term(), Avwe.Intent.t()) ::
+          :ok | {:error, :not_found | Avwe.Guests.reason()}
   def submit(world, region_id, intent) do
     call(world, region_id, {:submit, intent})
   end
@@ -137,6 +142,13 @@ defmodule Avwe.RegionServer do
   end
 
   @impl GenServer
+  def handle_call({:submit, %Intent{verb: :arrive} = intent}, _from, state) do
+    case Guests.check(state.region, intent) do
+      :ok -> {:reply, :ok, accept(state, intent)}
+      {:error, _reason} = refused -> {:reply, refused, state}
+    end
+  end
+
   def handle_call({:submit, intent}, _from, state), do: {:reply, :ok, accept(state, intent)}
 
   def handle_call({:advance, steps}, _from, state) do
@@ -286,7 +298,7 @@ defmodule Avwe.RegionServer do
 
   # A character as declared: the routine and norms of every body that has
   # any, and the ids of the items it carries (what is written in a notebook
-  # is state, not declaration).
+  # is state, not declaration). A guest is not declared: it arrived.
   defp characters(region) do
     carried =
       region
@@ -294,6 +306,7 @@ defmodule Avwe.RegionServer do
       |> Enum.group_by(&Region.get(region, &1, :carried_by))
 
     for id <- Region.with_components(region, [:body]),
+        Region.get(region, id, :guest) == nil,
         declared = Map.take(Region.entity(region, id), [:routine, :norms]),
         declared = put_carries(declared, carried[id]),
         declared != %{},

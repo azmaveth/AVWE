@@ -26,9 +26,13 @@ defmodule Avwe.Actions do
   it was written in, the time its result reports. A read's result carries
   the pages it read, so the reader is told them in the same step.
 
-  Speech and pages are one line of plain text: terminal escape sequences
-  are dropped, line breaks and tabs become single spaces, and other
-  control characters are dropped, before the length is checked.
+  Speech and pages are one line of plain text (`Avwe.Text`): terminal
+  escape sequences are dropped, line breaks and tabs become single spaces,
+  and other control characters are dropped, before the length is checked.
+
+  A guest's arrival (`:arrive`, `Avwe.Guests`) is the one intent for a body
+  that does not exist yet: it makes the body, or is blocked with the reason,
+  and ends in its one result like any other.
 
   A durative action's `:action_started` (and a journey's `:departed`) is
   stamped with the start of the step, when the intent is applied and the
@@ -40,7 +44,7 @@ defmodule Avwe.Actions do
   the smoke of its own fire from a stranger's (`Avwe.Systems.Smoke`).
   """
 
-  alias Avwe.{Calendar, Event, Intent, Region, Space, Terrain, Tick}
+  alias Avwe.{Calendar, Event, Guests, Intent, Region, Space, Terrain, Text, Tick}
   alias Avwe.Systems.{Daylight, Fire}
 
   @volumes [:whisper, :talk, :shout]
@@ -53,14 +57,17 @@ defmodule Avwe.Actions do
   @max_pages 500
   @read_last 10
   @read_most 1..50
-  # Line breaks and tabs, as regex class members: what a page turns into a space.
-  @breaks "\\t\\r\\n\\v\\f\\x{85}\\x{2028}\\x{2029}"
-  # Terminal escape sequences: CSI (`ESC [ ... final`), OSC (`ESC ] ...`
-  # ended by BEL or ST, or by nothing) and the two-character kind.
-  @escapes ~r/\e(?:\[[0-?]*[ -\/]*[@-~]|\][^\a\e]*(?:\a|\e\\)?|[@-Z\\-_])/u
 
   @doc "Applies an intent at the start of a step."
   @spec handle(Region.t(), Intent.t(), Tick.t()) :: {Region.t(), [Event.t()]}
+  # A guest's arrival is the one intent for a body that does not exist yet.
+  def handle(region, %Intent{verb: :arrive} = intent, tick) do
+    case Guests.arrive(region, intent, tick) do
+      {:ok, region, arrived} -> {region, [arrived, result(intent, :success, nil)]}
+      {:error, reason} -> {region, [result(intent, :blocked, reason)]}
+    end
+  end
+
   def handle(region, %Intent{} = intent, tick) do
     if Region.get(region, intent.body, :body) do
       perform(region, intent, tick)
@@ -142,7 +149,7 @@ defmodule Avwe.Actions do
   end
 
   defp perform(region, %Intent{verb: :say, params: params} = intent, _tick) do
-    text = params |> param(:text) |> clean() |> trim()
+    text = params |> param(:text) |> Text.line()
     volume = param(params, :volume) || :talk
 
     if text != "" and String.length(text) <= @max_speech and volume in @volumes do
@@ -212,7 +219,7 @@ defmodule Avwe.Actions do
     case carried_notebook(region, intent) do
       {:ok, id, notebook} ->
         intent = %{intent | target: id}
-        text = intent.params |> param(:text) |> clean() |> trim()
+        text = intent.params |> param(:text) |> Text.line()
 
         cond do
           text == "" or String.length(text) > @max_page ->
@@ -427,26 +434,6 @@ defmodule Avwe.Actions do
   end
 
   def wait_until(_params, _now), do: :error
-
-  defp trim(text) when is_binary(text), do: String.trim(text)
-  defp trim(_other), do: ""
-
-  # What speech and a page may hold: terminal escape sequences are dropped
-  # whole, line breaks and tabs become single spaces, and every other
-  # control character is dropped, so words can neither forge the lines a
-  # listener or a reader is told in nor reach a terminal as a command.
-  defp clean(text) when is_binary(text) do
-    if String.valid?(text) do
-      text
-      |> String.replace(@escapes, "")
-      |> String.replace(~r/[ #{@breaks}]*[#{@breaks}][ #{@breaks}]*/u, " ")
-      |> String.replace(~r/[\x{0}-\x{1F}\x{7F}-\x{9F}]/u, "")
-    else
-      ""
-    end
-  end
-
-  defp clean(other), do: other
 
   defp action_base(%Intent{} = intent), do: Map.take(intent, [:ref, :verb, :target, :params])
 
