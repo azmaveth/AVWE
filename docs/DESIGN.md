@@ -26,6 +26,17 @@ us. A second goal is to make Arbor's agent abstractions (Intent, Percept,
 Engagement, trust profiles) stronger by giving them a demanding environment
 that isn't a chat window.
 
+AVWE is an engine, not one world. A world runs a **ruleset**, a set of
+granular **rules** that each bring a model (state and systems) and, for bodies,
+an embodiment (verbs, senses, behaviours, vocabulary); `earthlike` is today's
+core, in seven rules. It is described by a **world definition**: JSON data
+(parameters, map, entities, characters) that an LLM compiles from Quire's
+articles and a person reviews. The LLM writes data, never code that runs in a
+world. There are two engines, **sim** (how a world evolves) and **play** (how
+anyone lives in it), and the engines, the rule packages and the platform are
+separate projects. `docs/engine-spec.md` is the plan; where it and this
+document differ, the spec wins.
+
 The 2019 C++ scaffold in this repo (CMake, Conan, `src/main.cpp`) is replaced
 when M0 starts.
 
@@ -60,6 +71,7 @@ when M0 starts.
 | Language | Elixir, with Nx or Rustler NIFs for hot paths | Phoenix Channels and Presence, supervision, hot reload of world rules, and Arbor is already Elixir |
 | Repo | AVWE is standalone. Arbor is a client | Keeps the protocol honest. Anything Arbor needs must exist in the protocol |
 | First world | The Ember Reach | Small, already written, and its lore is about heat, water and fire |
+| Generality | A general-purpose engine in two parts, sim and play. A world runs a ruleset of granular rules (each a model, plus an embodiment for bodies) and is described by a JSON world definition; the LLM compiles Quire into the definition and never writes runtime code; the engines, the rule packages and the platform are separate projects; space is a 2D grid or a place graph in v1; the long-term shape (3D, real time, MMO scale, per-client projections) is recorded, not built (`docs/engine-spec.md`, decided 2026-10-08) | Earth-like, fantasy, sci-fi and new worlds need different rules and the same machinery. The Ember Reach's physics is the first ruleset, not the engine |
 | Clock | One shared clock that never pauses | Bodies keep acting on autopilot when their controller leaves |
 | Canon | Quire is canon. AVWE writes a separate chronicle | The author decides what becomes history |
 | Entity storage | No ECS library. Plain data in region processes | See section 6.2 |
