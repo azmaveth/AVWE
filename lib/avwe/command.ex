@@ -382,6 +382,31 @@ defmodule Avwe.Command do
     end
   end
 
+  @doc """
+  Matches a name someone typed against the bodies they could take (`here`) and
+  the characters who are nowhere (`elsewhere`, `Avwe.elsewhere/1`), both as
+  `{id, name}` pairs. A body that can be taken wins; a name that fits only
+  someone elsewhere is `{:elsewhere, name}`, so the player can be told why
+  they cannot be played and not that nobody has that name.
+
+      iex> Avwe.Command.resolve_body("brine", [{"wren", "Wren"}], [{"brine", "Brine"}])
+      {:elsewhere, "Brine"}
+  """
+  @spec resolve_body(String.t(), [{String.t(), String.t()}], [{String.t(), String.t()}]) ::
+          {:ok, String.t()} | {:ambiguous, [String.t()]} | {:elsewhere, String.t()} | :none
+  def resolve_body(query, here, elsewhere) do
+    case resolve(query, here) do
+      :none ->
+        case resolve(query, elsewhere) do
+          {:ok, id} -> {:elsewhere, elsewhere |> List.keyfind!(id, 0) |> elem(1)}
+          other -> other
+        end
+
+      found ->
+        found
+    end
+  end
+
   defp normalize(text) do
     text
     |> String.downcase()

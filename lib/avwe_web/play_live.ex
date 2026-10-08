@@ -229,7 +229,18 @@ defmodule AvweWeb.PlayLive do
          %{} = body <- Enum.find(bodies, &(&1.id == param)) do
       {:ok, body}
     else
-      _nobody -> {:error, "There is nobody by that name in #{world.name}."}
+      _nobody -> {:error, nobody(world, param)}
+    end
+  end
+
+  # A character who is nowhere (their home is not on the map) is somebody, but
+  # nobody the page can play.
+  defp nobody(world, param) do
+    with {:ok, away} <- Avwe.elsewhere(world.id),
+         %{name: name} <- Enum.find(away, &(&1.id == param)) do
+      Prose.elsewhere(name)
+    else
+      _unknown -> "There is nobody by that name in #{world.name}."
     end
   end
 

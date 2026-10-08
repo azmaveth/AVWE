@@ -215,6 +215,10 @@ defmodule Avwe do
   `:autopilot` when nobody holds it (a taken body whose session has gone
   idle is autopilot's until the session acts again), and whether it is a
   `guest` (`Avwe.Guests`).
+
+  A body that is nowhere, because its character's home is not on the map
+  (`Avwe.Quire.Seed.unplaced/1`), cannot be taken and is not listed; see
+  `elsewhere/1`.
   """
   @spec bodies(atom()) :: {:ok, [map()]} | {:error, :not_found}
   def bodies(world) do
@@ -224,7 +228,7 @@ defmodule Avwe do
       guests = Map.get(snapshot.components, :guest, %{})
 
       bodies =
-        for id <- snapshot.components |> Map.get(:body, %{}) |> Map.keys() |> Enum.sort() do
+        for id <- body_ids(snapshot), placed?(snapshot, id) do
           %{
             id: id,
             name: get_in(repr, [id, :name]) || id,
@@ -238,6 +242,36 @@ defmodule Avwe do
       {:ok, bodies}
     end
   end
+
+  @doc """
+  The characters of a world who are nowhere, as `%{id, name, description}`:
+  their home is not a pin on the map (`Avwe.Quire.Seed.unplaced/1`), so their
+  bodies have no position and nobody can play them yet. They are in the world's
+  state and in canon, and `Avwe.connect/2` refuses them with `:elsewhere`.
+  """
+  @spec elsewhere(atom()) :: {:ok, [map()]} | {:error, :not_found}
+  def elsewhere(world) do
+    with {:ok, snapshot} <- snapshot(world) do
+      repr = Map.get(snapshot.components, :repr, %{})
+
+      away =
+        for id <- body_ids(snapshot), not placed?(snapshot, id) do
+          %{
+            id: id,
+            name: get_in(repr, [id, :name]) || id,
+            description: get_in(repr, [id, :description])
+          }
+        end
+
+      {:ok, away}
+    end
+  end
+
+  defp body_ids(snapshot),
+    do: snapshot.components |> Map.get(:body, %{}) |> Map.keys() |> Enum.sort()
+
+  defp placed?(snapshot, id),
+    do: snapshot.components |> Map.get(:position, %{}) |> Map.has_key?(id)
 
   @doc """
   Connects a controller to a world and returns its `Avwe.Session`.
@@ -263,8 +297,9 @@ defmodule Avwe do
       fields (`Avwe.WorldScene`), and its ground, which never changes, is
       `Avwe.Session.ground/1`. Default: `false`.
 
-  Fails with `:no_such_world`, `:no_such_body`, `:body_taken` or
-  `:invalid_controller`; and for a guest with `:body_and_guest`, `:no_guests`,
+  Fails with `:no_such_world`, `:no_such_body`, `:elsewhere` (the body is
+  nowhere: its character's home is not on the map; see `elsewhere/1`),
+  `:body_taken` or `:invalid_controller`; and for a guest with `:body_and_guest`, `:no_guests`,
   `:invalid_name`, `:invalid_backstory`, `:name_taken` (the name is the name or
   id of something in the world, or of a guest who is there or arriving) or
   `:full`.

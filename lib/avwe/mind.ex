@@ -151,7 +151,7 @@ defmodule Avwe.Mind do
   call before the Mind stops and releases the body; default 30 minutes).
 
   Fails as `Avwe.connect/2` does (`:no_such_world`, `:no_such_body`,
-  `:body_taken`, and for a guest `:no_guests`, `:invalid_name`, `:invalid_backstory`,
+  `:elsewhere`, `:body_taken`, and for a guest `:no_guests`, `:invalid_name`, `:invalid_backstory`,
   `:name_taken` or `:full`), or with `:invalid_controller`.
   """
   @spec start(atom(), String.t(), keyword()) :: {:ok, pid()} | {:error, term()}

@@ -649,10 +649,15 @@ defmodule Avwe.Session do
   defp check_body(_view, nil, _guest), do: :ok
   defp check_body(_view, _body, guest) when guest != nil, do: :ok
 
+  # A body that is nowhere, because its character's home is not on the map
+  # (`Avwe.Quire.Seed.unplaced/1`), has no position to perceive from: it cannot
+  # be played, whoever asks, and nothing is claimed for it.
   defp check_body(view, body, nil) do
-    if Map.has_key?(Map.get(view.components, :body, %{}), body),
-      do: :ok,
-      else: {:error, :no_such_body}
+    cond do
+      not Map.has_key?(Map.get(view.components, :body, %{}), body) -> {:error, :no_such_body}
+      not Map.has_key?(Map.get(view.components, :position, %{}), body) -> {:error, :elsewhere}
+      true -> :ok
+    end
   end
 
   defp claim(_world, _world_pid, nil, _controller, _guest), do: :ok
