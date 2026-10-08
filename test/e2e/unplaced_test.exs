@@ -9,7 +9,8 @@ defmodule Avwe.E2E.UnplacedTest do
 
   use ExUnit.Case, async: false
 
-  import Avwe.Test.Fixtures, only: [hollow_with_wanderers: 1]
+  import ExUnit.CaptureLog
+  import Avwe.Test.Fixtures, only: [hollow_with_wanderers: 1, lantern_hollow: 0]
 
   alias Avwe.Test.{MCPClient, TelnetClient}
 
@@ -21,8 +22,12 @@ defmodule Avwe.E2E.UnplacedTest do
   @moduletag :tmp_dir
 
   setup %{tmp_dir: dir} do
-    {:ok, _pid} =
-      Avwe.start_world(@world, quire: hollow_with_wanderers(dir), start: {1, hour: 12})
+    # The world says at its start who is not placed (tested below); here it
+    # would only put that in the output.
+    capture_log(fn ->
+      {:ok, _pid} =
+        Avwe.start_world(@world, quire: hollow_with_wanderers(dir), start: {1, hour: 12})
+    end)
 
     on_exit(fn -> Avwe.stop_world(@world) end)
 
@@ -68,6 +73,46 @@ defmodule Avwe.E2E.UnplacedTest do
       {:ok, watcher} = Avwe.connect(@world, scenes: true)
       assert {:ok, %Avwe.WorldScene{things: things}} = Avwe.Session.scene(watcher)
       assert for(%{kind: :body, id: id} <- things, do: id) == @playable
+    end
+  end
+
+  describe "the log" do
+    test "says which characters are not placed when the world starts", %{tmp_dir: dir} do
+      log =
+        capture_log(fn ->
+          {:ok, _pid} = Avwe.start_world(:hollow_wanderers_log, quire: dir, start: {1, hour: 12})
+        end)
+
+      on_exit(fn -> Avwe.stop_world(:hollow_wanderers_log) end)
+
+      assert log =~ "hollow_wanderers_log: 2 characters are not placed"
+      assert log =~ "nobody can play them yet: Brine (home: The Salt Road), Moth (no home)."
+      assert log =~ "A character is placed at its home when the home is a pin on the map."
+    end
+
+    test "says it in the singular for one", %{tmp_dir: dir} do
+      File.rm!(Path.join([dir, "articles", "moth.md"]))
+
+      log =
+        capture_log(fn ->
+          {:ok, _pid} = Avwe.start_world(:hollow_one_wanderer, quire: dir, start: {1, hour: 12})
+        end)
+
+      on_exit(fn -> Avwe.stop_world(:hollow_one_wanderer) end)
+
+      assert log =~ "hollow_one_wanderer: 1 character is not placed"
+      assert log =~ "nobody can play them yet: Brine (home: The Salt Road)."
+    end
+
+    test "says nothing when every character is placed" do
+      log =
+        capture_log(fn ->
+          {:ok, _pid} = Avwe.start_world(:hollow_all_placed, quire: lantern_hollow(), start: 0)
+        end)
+
+      on_exit(fn -> Avwe.stop_world(:hollow_all_placed) end)
+
+      refute log =~ "not placed"
     end
   end
 

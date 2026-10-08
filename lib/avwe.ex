@@ -26,6 +26,8 @@ defmodule Avwe do
 
   alias Avwe.{Calendar, Clock, GroundCache, Quire, RegionServer, Terrain}
 
+  require Logger
+
   @default_region {0, 0}
   @default_systems [
     Avwe.Systems.Daylight,
@@ -85,6 +87,8 @@ defmodule Avwe do
 
     with {:ok, path} <- quire_path(opts),
          {:ok, quire_world} <- Quire.load(path) do
+      warn_unplaced(id, Quire.Seed.unplaced(quire_world))
+
       region =
         Avwe.Worldgen.region(quire_world,
           id: @default_region,
@@ -117,6 +121,25 @@ defmodule Avwe do
       )
     end
   end
+
+  # A character whose home is not a pin on the map gets a body that is nowhere
+  # (`Avwe.Quire.Seed`), and nobody can play it. Whoever runs the world, and
+  # whoever writes its canon, should hear of it.
+  defp warn_unplaced(_world, []), do: :ok
+
+  defp warn_unplaced(world, unplaced) do
+    count = length(unplaced)
+    noun = if count == 1, do: "1 character is", else: "#{count} characters are"
+    names = Enum.map_join(unplaced, ", ", &unplaced_name/1)
+
+    Logger.warning(
+      "#{world}: #{noun} not placed, so nobody can play them yet: #{names}. " <>
+        "A character is placed at its home when the home is a pin on the map."
+    )
+  end
+
+  defp unplaced_name(%{name: name, home: nil}), do: "#{name} (no home)"
+  defp unplaced_name(%{name: name, home: home}), do: "#{name} (home: #{home})"
 
   # The settings guests arrive under, checked here where a bad one is easiest
   # to explain, as a bad hearth is: the place must be a place of the world.

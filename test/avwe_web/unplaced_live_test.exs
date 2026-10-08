@@ -8,12 +8,16 @@ defmodule AvweWeb.UnplacedLiveTest do
 
   use Avwe.Test.WebCase, async: false
 
+  import ExUnit.CaptureLog
+
   @world :hollow_unplaced_web
   @moduletag :tmp_dir
 
   setup %{tmp_dir: dir} do
-    {:ok, _pid} =
-      Avwe.start_world(@world, quire: hollow_with_wanderers(dir), start: {1, hour: 12})
+    capture_log(fn ->
+      {:ok, _pid} =
+        Avwe.start_world(@world, quire: hollow_with_wanderers(dir), start: {1, hour: 12})
+    end)
 
     on_exit(fn -> Avwe.stop_world(@world) end)
     :ok
