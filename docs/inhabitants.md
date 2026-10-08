@@ -107,6 +107,12 @@ configuration (for Claude Code, a strict MCP configuration naming only the
 nothing but those tools). Check the way yours works by asking the inhabitant to
 list its tools, and by giving it a task that needs a forbidden one.
 
+**Dedicated, too.** What an inhabitant says is heard by every body in earshot,
+and a cloud-hosted client may be one of them, so whatever it knows can leave in
+its speech or in a notebook page. An inhabitant is made for the world, with a
+persona and a backstory and nothing private in its memory or its other
+conversations (`docs/m3-spec.md`, decision 7).
+
 The world does what it can on its side. A name and a backstory are one line of
 plain text, and a name is limited to 40 letters, digits and a few marks; speech
 and pages are cleaned of line breaks and terminal codes, so words cannot forge a
