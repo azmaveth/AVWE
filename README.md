@@ -8,7 +8,10 @@ server that lets Claude play, or Arbor agents that live there on their own.
 Worlds are written in [Quire](https://github.com/azmaveth/quire). The first one
 is the Ember Reach.
 
-The design is in [docs/DESIGN.md](docs/DESIGN.md).
+The design is in [docs/DESIGN.md](docs/DESIGN.md). AVWE is meant to run many
+kinds of world, not one: a world is a ruleset plus a world definition, and
+[docs/engine-spec.md](docs/engine-spec.md) says how the engine gets there from
+the Ember Reach.
 
 ## Status
 
