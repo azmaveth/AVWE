@@ -201,6 +201,20 @@ terms for unattended runs.
   to a cloud-hosted model needs a human-authenticated disclosure that a
   heartbeat never has: an unattended agent wants an on-host model) and the
   `capability_intent("world", ...)` dispatcher (which knows only shell) need.
+
+  **Moving ground (Hysun, 2026-10-08).** All of the above is Arbor as read at
+  `05c2ca9`. Arbor's intent/percept system is being reworked, and ExMCP is
+  being split: the MCP library, kept slim, becomes ArborMCP, and ACP and the
+  shared RPC module move out of it. A release candidate stable enough to test
+  with is aimed for by 2026-10-09. The spike goes through MCP with the commands
+  any player uses, so the rework does not touch it. The second half of M3b,
+  connecting percepts to Arbor directly, depends on the rework and is specified
+  once it settles; the facts above are checked again against the tree as it is
+  then, and before the spike. AVWE's MCP server and test client are on ExMCP 1.5
+  (`ExMCP.HttpPlug`, `ExMCP.SessionManager`, the handler behaviour,
+  `ExMCP.Client` in tests, and one internal module,
+  `ExMCP.Internal.VersionRegistry`); they move to ArborMCP as a change of their
+  own (`docs/m2-spec.md`, 3.1 and 7).
 - **M3c, living.** A run harness (start the world at the slow pace, the
   inhabitants and the watch page; a spend cap and a kill switch, since a body
   nobody calls for goes back to its routine on its own), two inhabitants, the
