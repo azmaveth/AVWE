@@ -7,7 +7,7 @@
 > and DESIGN.md is updated afterwards. Names of modules and fields are
 > proposals; the behaviour is the contract.
 
-**Decisions** (Hysun, 2026-10-07):
+**Decisions** (Hysun, 2026-10-07; 7 on 2026-10-08):
 
 1. **MCP first.** Agents play through the MCP server that already exists. Phoenix
    Channels (DESIGN 11.1) waits until something consumes pushed percepts.
@@ -23,13 +23,27 @@
    subscriptions (Claude Code, Codex, OpenCode) over MCP, run with only the
    AVWE tools.
 6. **Out of M3:** engagements and the fiction domain (DESIGN 11.4), needs.
+7. **Dedicated inhabitants.** Every inhabitant in M3, the spike's agent and the
+   week's two, is *dedicated*: its identity, memory and conversations are the
+   world's and nothing else, and it holds nothing private. An Arbor agent is one
+   made for the world, under the `world-player` profile (M3b); a CLI is run with
+   only the AVWE tools in an empty directory (`docs/inhabitants.md`). An agent
+   that has a life outside the world does not visit in M3. Why: the world is a
+   public channel in both directions. What an inhabitant says is heard by every
+   body in earshot, and a cloud-hosted client may be one of them; what it hears
+   is untrusted text from other players. A dedicated agent has nothing to leak
+   and nothing outside the world to be steered. It works with the enforcement
+   that exists (Arbor's audience rule is documentation only, and percept text
+   loses its taint label), it keeps "changes nothing they can do" testable, and
+   it needs none of the deferred work (decision 6). What shared agents wait for
+   is in section 4.
 
-**Done when** (DESIGN 13, restated): two LLM inhabitants live in the Reach for a
-world week at the configured pace without anyone attending, an injection through
-in-world speech changes nothing they can do, and the whole is watched on the
-M2b page. M3a is done when scripted agents, guest and canon, live in Lantern
-Hollow for a world day through the real MCP transport, told only what the
-protocol says, and an adversary's words reach them as another body's words.
+**Done when** (DESIGN 13, restated): two dedicated LLM inhabitants live in the
+Reach for a world week at the configured pace without anyone attending, an
+injection through in-world speech changes nothing they can do, and the whole is
+watched on the M2b page. M3a is done when scripted agents, guest and canon, live
+in Lantern Hollow for a world day through the real MCP transport, told only what
+the protocol says, and an adversary's words reach them as another body's words.
 
 ## 0. What exists, and what does not
 
@@ -62,7 +76,7 @@ below (section 4); M3a changes none of it.
 | **M3a-2** | Words as data, who heard, a notebook page's author, one wire codec, the scripted reference agent with an adversary, `docs/inhabitants.md` |
 | **M3b** | Arbor: a spike with one agent and a local model against the MCP server, then, with Hysun's OK, percepts into Arbor with taint labels, a `world-player` profile, the egress decision, the injection test |
 | **M3c** | Living in the Reach: the inhabitants, a run harness with a spend cap and a kill switch, the week |
-| Later | Phoenix Channels; engagements and the fiction domain; needs; guests over telnet and the web |
+| Later | Phoenix Channels; engagements and the fiction domain; needs; shared inhabitants (agents with a life outside the world); guests over telnet and the web |
 
 ## 2. Guests (M3a-1)
 
@@ -217,8 +231,19 @@ terms for unattended runs.
   own (`docs/m2-spec.md`, 3.1 and 7).
 - **M3c, living.** A run harness (start the world at the slow pace, the
   inhabitants and the watch page; a spend cap and a kill switch, since a body
-  nobody calls for goes back to its routine on its own), two inhabitants, the
-  week.
+  nobody calls for goes back to its routine on its own), two dedicated
+  inhabitants, the week.
+- **Shared inhabitants, later.** An agent with a life outside the world, other
+  conversations and memories, that also takes a body is what DESIGN 11.4 is for,
+  and decision 7 keeps it out of M3. It waits for three things: the
+  intent/percept rework (above) has landed; the audience rule is enforced
+  (`audience(X) ⊆ audience(Y)`, moduledoc only in Arbor at `05c2ca9`), with the
+  fiction domain or what replaces it; and a **secret-keeper test** exists, which
+  plants a private fact in the agent's other context, has an adversary guest try
+  to get it out by speech and by a notebook page, and gets nothing. If Arbor can
+  make an agent from an existing one's character without its memories or
+  engagements, that would still be a dedicated agent: a familiar personality on
+  a clean slate.
 
 ## 5. Tests
 
@@ -274,6 +299,11 @@ Two changes, each ending with its tests and its docs:
    restart.
 5. **Channels.** When Arbor's event loop is revived and wants percepts pushed,
    `Avwe.Protocol` is what the Channels adapter would send.
+6. **Two memories.** An Arbor agent keeps memory of its own (DESIGN 14, question
+   5), and the notebook is the in-world one. For a dedicated agent both hold the
+   world and nothing else, so the risk is duplication and not leakage; which is
+   the source of truth when they disagree? The spike shows what Arbor keeps by
+   itself.
 
 ## 9. As built: M3a-1
 
