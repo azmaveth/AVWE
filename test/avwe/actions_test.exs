@@ -166,6 +166,16 @@ defmodule Avwe.ActionsTest do
       assert [%{outcome: :success, params: %{text: "hello", volume: :shout}}] = results(events)
     end
 
+    test "says where it was said from in its result, for those who are told who heard", %{
+      world: world
+    } do
+      {region, events} =
+        world |> hollow() |> submit("wren", :say, params: %{text: "hello"}) |> run(1)
+
+      assert [%{outcome: :success, position: position}] = results(events)
+      assert position == Region.get(region, "wren", :position)
+    end
+
     test "is one line of plain text: escape sequences go, breaks become spaces, the rest go", %{
       world: world
     } do

@@ -115,6 +115,30 @@ defmodule Avwe.NotebookTest do
              ]
     end
 
+    test "says what kind of controller wrote the page, when one did, and a read gives it back", %{
+      world: world
+    } do
+      {region, _events} =
+        world
+        |> hollow()
+        |> write("wren", "By hand.", controller: :human, ref: "a")
+        |> write("wren", "By a model.", controller: :mcp, ref: "b")
+        |> write("wren", "By nobody.", ref: "c")
+        |> run()
+
+      assert [
+               %{text: "By hand.", by: :human},
+               %{text: "By a model.", by: :mcp},
+               %{text: "By nobody."} = anonymous
+             ] = pages(region, "wren-notebook")
+
+      refute Map.has_key?(anonymous, :by)
+
+      {_region, events} = region |> submit("wren", :read, []) |> run()
+      [percept] = Perception.percepts(view(region), "wren", events)
+      assert [%{by: :human}, %{by: :mcp}, %{text: "By nobody."}] = percept.data.pages
+    end
+
     test "goes in the named notebook, or the first carried by id", %{world: world} do
       {region, events} =
         world
