@@ -26,6 +26,43 @@ defmodule Avwe.Test.Fixtures do
   def lantern_hollow, do: Path.expand("../fixtures/quire/lantern-hollow", __DIR__)
 
   @doc """
+  Lantern Hollow with two wanderers, written into `dir` (a test's `tmp_dir`):
+  Brine, whose home is the Salt Road, an article that is not a pin on the map,
+  and Moth, who has no home at all. Neither can be placed, so each has a body
+  that is nowhere. Returns `dir`, a Quire world folder.
+  """
+  def hollow_with_wanderers(dir) do
+    File.cp_r!(lantern_hollow(), dir)
+    articles = Path.join(dir, "articles")
+
+    write_article(
+      articles,
+      "salt-road",
+      "The Salt Road",
+      "location",
+      "A road that leaves the map."
+    )
+
+    write_article(articles, "brine", "Brine", "character", "A tinker on the Salt Road.",
+      home: "The Salt Road"
+    )
+
+    write_article(articles, "moth", "Moth", "character", "Nobody knows where Moth sleeps.")
+    dir
+  end
+
+  defp write_article(dir, id, title, type, summary, fields \\ []) do
+    front =
+      ["id: #{id}", "title: #{title}", "type: #{type}", "summary: #{summary}"] ++
+        if fields == [],
+          do: [],
+          else: ["fields:" | for({key, value} <- fields, do: "  #{key}: #{value}")]
+
+    text = Enum.join(["---" | front] ++ ["---", "", summary, ""], "\n")
+    File.write!(Path.join(dir, "#{id}.md"), text)
+  end
+
+  @doc """
   Every percept the session has sent to the calling process so far.
 
   Calls the session first, so it has handled every world event sent before

@@ -15,6 +15,13 @@ defmodule Avwe.Quire.Seed do
   the river and its source come next.
 
   Entity ids are Quire ids: pin ids for places, article ids for characters.
+
+  A character is placed at its `home` only when that is a pinned place. One
+  whose home is an article without a pin, or names nothing, or is missing, still
+  gets a body, but a body that is **nowhere**: it has no `:position` (and no
+  `:home`), so nobody can play it (`Avwe.elsewhere/1`), nobody sees it, and
+  autopilot leaves it alone. `unplaced/1` names them, and the world says so when
+  it starts.
   """
 
   alias Avwe.Quire.{Article, World}
@@ -35,6 +42,27 @@ defmodule Avwe.Quire.Seed do
     |> Region.new()
     |> add_places(world, grid)
     |> add_characters(world, grid)
+  end
+
+  @doc """
+  The characters `region/2` cannot place, sorted by id: each with its `id`, its
+  `name` and the `home` its article gives (`nil` when it gives none). They are
+  the characters whose home is not a pinned place.
+  """
+  @spec unplaced(World.t()) :: [%{id: String.t(), name: String.t(), home: String.t() | nil}]
+  def unplaced(%World{} = world) do
+    world.articles
+    |> Map.values()
+    |> Enum.filter(&(&1.type == :character and home_pin(&1, world) == nil))
+    |> Enum.sort_by(& &1.id)
+    |> Enum.map(&%{id: &1.id, name: &1.title, home: home_title(&1)})
+  end
+
+  defp home_title(article) do
+    case article.fields["home"] do
+      title when is_binary(title) -> title
+      _none -> nil
+    end
   end
 
   defp add_places(region, world, grid) do

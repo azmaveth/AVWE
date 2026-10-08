@@ -16,6 +16,14 @@ defmodule Avwe.Prose do
   @spec body_taken(String.t()) :: String.t()
   def body_taken(name), do: "#{name} is already being played."
 
+  @doc """
+  Somebody asked for a character who is nowhere, because their home is not on
+  the map (`Avwe.Quire.Seed.unplaced/1`).
+  """
+  @spec elsewhere(String.t()) :: String.t()
+  def elsewhere(name),
+    do: "#{name} lives somewhere the map does not show, so nobody can play them yet."
+
   @doc "A body has started an action of its own."
   @spec started(atom(), String.t() | nil, map()) :: String.t()
   def started(:go, target, _params), do: "You set off toward #{target}."

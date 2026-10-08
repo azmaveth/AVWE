@@ -212,6 +212,27 @@ defmodule Avwe.E2E.GuestsTest do
       assert {:error, :full} = arrive(name: "Pim Aldous")
     end
 
+    test "a session refused after it claimed the guest's name lets go of the lease itself" do
+      {:ok, _tomas} = arrive(@tomas)
+      {:ok, _ines} = arrive(@ines)
+
+      # The session claims the guest's name, and is refused for want of room.
+      # The Registry only notices that a process has gone a little later, and a
+      # retry made in that moment would be told the name is taken, so the session
+      # must release the lease before it says no. `init/1` is called here, in
+      # the test's own process, which stays alive: only the session's own
+      # release can have emptied the lease, whatever the machine's speed.
+      assert {:stop, :full} =
+               Session.init(
+                 world: @world,
+                 guest: [name: "Pim Aldous"],
+                 controller: :mcp,
+                 sink: self()
+               )
+
+      assert lease("guest-pim-aldous") == []
+    end
+
     test "a name that is not a name, and a backstory that is not one" do
       assert {:error, :invalid_name} = arrive(name: "x")
       assert {:error, :invalid_name} = arrive(name: "Tomas <script>")

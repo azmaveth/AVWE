@@ -799,6 +799,17 @@ AVWE reads `quire/data/worlds/<id>/` and never writes to canon files.
 | `type: event` | Canon event | The River Runs Dry (812 AR, the Dry Bend) |
 | `type: article` | Lore, sometimes a building type | Kiln-Houses |
 
+**Characters whose home is not on the map.** A character is placed at its
+`home` when that is a pinned place. One whose home is an article without a pin,
+or names nothing, or is missing (the Ember Reach's Abbot Malakor lives at the
+Frozen Nadir, which has no pin) gets a body that is **nowhere**: no position, no
+home. Nobody can play it (`Avwe.connect/2` refuses it with `:elsewhere`, and the
+lobby, the telnet menu and `bodies` do not list it; asking for one by name gets
+"Abbot Malakor lives somewhere the map does not show, so nobody can play them
+yet."), nobody sees it, and autopilot leaves it alone. The world logs a warning
+naming each when it starts (`Avwe.Quire.Seed.unplaced/1`); pinning the home in
+Quire places the character the next time the world is made.
+
 ### 10.2 Pins as terrain anchors
 
 Pins are percentages of the map. Terrain generation has to respect them and
@@ -953,7 +964,7 @@ most one body, and a client cannot choose its own token. Each player has one
 
 | Tool | Behavior |
 |---|---|
-| `bodies` | Who can be played, and who plays each; a guest is marked |
+| `bodies` | Who can be played, and who plays each; a guest is marked. A character whose home is not on the map is not listed (10.1) |
 | `join(body)` | Take a body; the first look opens with "While you were away", and a guest is told its backstory |
 | `arrive(name, backstory?)` | Arrive as a guest of one's own making, where the world takes guests; the first look follows the next world step (M3a) |
 | `look` | The look as prose; the structured look (places with distances, bodies in sight, hearths, affordances, measures rounded) in `structuredContent` |

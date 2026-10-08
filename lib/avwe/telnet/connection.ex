@@ -144,11 +144,16 @@ defmodule Avwe.Telnet.Connection do
 
   defp choose_body(state, line) do
     {:ok, bodies} = Avwe.bodies(state.world)
+    {:ok, away} = Avwe.elsewhere(state.world)
 
-    case Command.resolve(line, Enum.map(bodies, &{&1.id, &1.name})) do
+    case Command.resolve_body(line, pairs(bodies), pairs(away)) do
       {:ok, id} ->
         body = Enum.find(bodies, &(&1.id == id))
         join(state, body, "You are #{body.name}.")
+
+      {:elsewhere, name} ->
+        write(state, Prose.elsewhere(name) <> " Choose someone else, or watch.")
+        state
 
       {:ambiguous, names} ->
         write(state, "Which do you mean: #{Enum.join(names, ", ")}?")
@@ -163,6 +168,8 @@ defmodule Avwe.Telnet.Connection do
         state
     end
   end
+
+  defp pairs(bodies), do: Enum.map(bodies, &{&1.id, &1.name})
 
   defp join(state, body, welcome) do
     opts = [body: body && body.id, controller: :human] ++ state.session_opts

@@ -338,7 +338,8 @@ defmodule Avwe.MCP do
   defp join(query, state, _args) do
     with {:ok, key} <- join_key(state),
          {:ok, bodies} <- Avwe.bodies(state.world),
-         {:ok, id} <- resolve_body(query, bodies),
+         {:ok, away} <- Avwe.elsewhere(state.world),
+         {:ok, id} <- resolve_body(query, bodies, away),
          {:ok, mind} <- Players.join(key, state.world, id, mind_opts(state)),
          {:ok, look} <- first_look(key, mind) do
       joined(key, id, look, state.world)
@@ -586,13 +587,16 @@ defmodule Avwe.MCP do
 
   defp leave_first(_state), do: "Call leave first."
 
-  defp resolve_body(query, bodies) do
-    case Command.resolve(query, Enum.map(bodies, &{&1.id, &1.name})) do
+  defp resolve_body(query, bodies, away) do
+    case Command.resolve_body(query, pairs(bodies), pairs(away)) do
       {:ok, id} -> {:ok, id}
+      {:elsewhere, name} -> {:error, Prose.elsewhere(name)}
       {:ambiguous, names} -> {:error, "Which do you mean: #{Enum.join(names, ", ")}?"}
       :none -> {:error, :no_such_body}
     end
   end
+
+  defp pairs(bodies), do: Enum.map(bodies, &{&1.id, &1.name})
 
   defp leave(state) do
     case Players.mind(state.player) do

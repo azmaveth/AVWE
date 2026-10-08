@@ -118,6 +118,35 @@ defmodule Avwe.CommandTest do
     end
   end
 
+  describe "resolve_body/3" do
+    @here [{"wren", "Wren"}, {"wendell", "Wendell Ash"}, {"pell", "Pell"}]
+    @away [{"brine", "Brine"}, {"moth", "Moth"}, {"wick", "Wick the Younger"}]
+
+    test "finds a body that can be taken, as resolve/2 does" do
+      assert Command.resolve_body("PELL", @here, @away) == {:ok, "pell"}
+      assert Command.resolve_body("wen", @here, @away) == {:ok, "wendell"}
+      assert Command.resolve_body("w", @here, @away) == {:ambiguous, ["Wren", "Wendell Ash"]}
+    end
+
+    test "says when the name is of someone who lives off the map" do
+      assert Command.resolve_body("brine", @here, @away) == {:elsewhere, "Brine"}
+      assert Command.resolve_body("the moth", @here, @away) == {:elsewhere, "Moth"}
+      assert Command.resolve_body("wick", @here, @away) == {:elsewhere, "Wick the Younger"}
+    end
+
+    test "prefers someone here to someone elsewhere" do
+      assert Command.resolve_body("wren", @here, [{"wrenna", "Wrenna"}]) == {:ok, "wren"}
+    end
+
+    test "asks which when several who live off the map fit, and reports a miss" do
+      assert Command.resolve_body("m", [], [{"moth", "Moth"}, {"mole", "Mole"}]) ==
+               {:ambiguous, ["Moth", "Mole"]}
+
+      assert Command.resolve_body("atlantis", @here, @away) == :none
+      assert Command.resolve_body("anyone", [], []) == :none
+    end
+  end
+
   describe "interpret/2" do
     @look %{
       spectator: false,

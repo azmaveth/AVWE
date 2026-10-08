@@ -18,7 +18,8 @@ get there from the Ember Reach.
 M0 and M1 are built:
 
 - Worlds load from Quire. Map pins become places, and characters start at home
-  knowing the way to every pinned place.
+  knowing the way to every pinned place. A character whose home is not a pin is
+  nowhere: nobody can play them yet, and the world says so when it starts.
 - A deterministic clock with daylight, walking, waiting and speech.
 - Sessions: any controller can take a body (one at a time) or watch, act with
   intents, and receive percepts. Every intent ends in exactly one result.
