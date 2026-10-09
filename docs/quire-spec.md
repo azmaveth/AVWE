@@ -75,12 +75,16 @@ replaces; `definition.json` is the output it should be able to produce),
   `mix test --warnings-as-errors`, `mix test --only playwright`, `mix dialyzer`,
   `scripts/sobelow`, `mix hex.audit`, `npm test --prefix assets`. **Do not push,
   open or merge a pull request without Hysun's say-so, each time.**
-- **Do not change the simulation or play core**: `Avwe.Region`, `Tick`, the
-  systems, `Actions`, `Perception`, `Session`, `Mind`, `Guests`, `Store`,
-  `RegionServer`, `World`. E2a (the kernel built in place: rules and their check,
-  system ids, inputs and hooks) has landed (pull request 18); E2b is moving those
-  files into a project of their own, `avwe_sim`, next, and a clash costs more than
-  it saves. What you may change: `Avwe.Quire.*`, `Avwe.Definition.*` (additively),
+- **Set up with the kernel beside the code.** The simulation kernel (`Avwe.Region`,
+  `Tick`, `Store`, `RegionServer`, `World`, the rules and their check, inputs and
+  hooks) has been a project of its own since E2b (pull requests 18 and 21): the
+  repository `github.com/azmaveth/avwe_sim`, which AVWE depends on by path. Clone it
+  next to this one (`git clone https://github.com/azmaveth/avwe_sim ../avwe_sim`)
+  before `mix deps.get`; a worktree of this repository somewhere else sets
+  `AVWE_SIM_PATH` to it. A change to the kernel is a pull request in its repository.
+- **Do not change the simulation or play core**: the kernel above, nor `Actions`,
+  `Perception`, `Session`, `Mind`, `Guests` or the systems here; a clash costs more
+  than it saves. What you may change: `Avwe.Quire.*`, `Avwe.Definition.*` (additively),
   `Avwe.Compile.*` and `Avwe.Chronicle.*` (new), Mix tasks, `mix.exs` dependencies
   (see 4.10), `config/`, `priv/`, docs and test support. Two small exceptions, each
   its own commit with its own test: making `Avwe.Definition.Export.entities/1`
@@ -1141,8 +1145,8 @@ priv/compile/{prompts,guides}/*.md  priv/compile/ranges.json
 
 Each slice is one or a few pull requests and ends green on the whole gate (section
 0). Tracks A and B can run at once. Track A2 (Q7, Q8) touches the entry points
-that E2b is moving (`Avwe.start_world/2`, `Avwe.Application`): it waits until E2b,
-the kernel's move into `avwe_sim`, has landed.
+that E2b changed (`Avwe.start_world/2`, `Avwe.Application`): E2b, the kernel's move
+into `avwe_sim`, has landed (pull request 21), so it can start whenever Hysun says.
 
 **Track A, in AVWE (the compile).**
 
@@ -1158,7 +1162,8 @@ the kernel's move into `avwe_sim`, has landed.
 | **Q6b** | `LLM.ReqLLM`, with `req_llm` as a dev/test dep; the provider and model from `--model` or `config :avwe, :compile, model:` (`provider:model-id`), and a missing one is an error | A tagged live test (`:live_llm`, excluded by default) runs one pass; a run with no provider or no model stops without calling; nothing else changes |
 
 **Track A2, in AVWE (the chronicle and proposals).** After E2b, the kernel's move
-into its own project (section 12, question 11, decided; E2a landed as pull request 18).
+into its own project (section 12, question 11, decided; E2a and E2b have landed, as
+pull requests 18 and 21).
 
 | Slice | Scope | Done when |
 |---|---|---|
@@ -1305,10 +1310,11 @@ by both).
 10. **Where the guides live once rules own their parameters** (E2 and after).
     Default: here, keyed by rule id; they move with the rule when rules become
     modules.
-11. **The order with E2.** Decided: Q1 to Q6b first. Q7 and Q8 wait until E2b, the
-    kernel's move into the `avwe_sim` project, has landed (E2a, the kernel built in
-    place, landed as pull request 18). They touch `Avwe.start_world/2` and the
-    supervision tree, which that move changes.
+11. **The order with E2.** Decided: Q1 to Q6b first. Q7 and Q8 waited until E2b, the
+    kernel's move into the `avwe_sim` project, had landed; it has (E2a, the kernel
+    built in place, was pull request 18, E2b pull request 21). They touch
+    `Avwe.start_world/2` and the supervision tree, which that move changed: read
+    them as they are on `master`.
 
 **What to expect from the first real run**, so that it does not surprise anyone:
 
@@ -1474,10 +1480,12 @@ with the existing proposal for a repeated `external_id`.
 **For the agent working in AVWE** (paste as the first message):
 
 > You are implementing part of AVWE, an Elixir world simulator, in
-> `/Users/azmaveth/code/avwe`. Read `CLAUDE.md`, then `docs/quire-spec.md` in full:
+> `/Users/azmaveth/code/avwe` (with the simulation kernel cloned beside it, `git
+> clone https://github.com/azmaveth/avwe_sim ../avwe_sim`; section 0). Read
+> `CLAUDE.md`, then `docs/quire-spec.md` in full:
 > it is your brief. You own track A, slices Q1 to Q6b in order (Q3 is Q3a then
 > Q3b), one pull request each on a branch off `master`. Track A2 (Q7, Q8) is not
-> yours yet: Q7 and Q8 wait until E2b's kernel split has landed (section 12,
+> yours yet: Hysun will say when (E2b, which they waited for, has landed: section 12,
 > question 11). Do not push, open or merge a pull request without
 > asking Hysun first, each time. Do not touch the simulation or play core (the list
 > is in section 0). Start with Q1. At the end of each slice report: what you built,
