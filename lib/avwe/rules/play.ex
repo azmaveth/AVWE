@@ -28,7 +28,8 @@ defmodule Avwe.Rules.Play do
   def provides, do: [:bodies, :intents]
 
   @impl Avwe.Rule
-  def uses, do: [:air_temperature, :fire_sources, :light, :river_water]
+  def uses,
+    do: [:air_temperature, :fire_sources, :ground_heat, :light, :river_water, :smoke, :wind]
 
   # In this order, which the physics rules fit themselves around (they say
   # what they run before; the engine names none of them).

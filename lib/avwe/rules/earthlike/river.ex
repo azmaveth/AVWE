@@ -19,7 +19,7 @@ defmodule Avwe.Rules.Earthlike.River do
   def requires, do: [:air_temperature]
 
   @impl Avwe.Rule
-  def uses, do: [:terrain]
+  def uses, do: [:scheduled_changes, :terrain]
 
   # After the scheduled changes (a spring's flow is one) and the air the water
   # gives its warmth to; before the bodies.

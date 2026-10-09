@@ -101,6 +101,41 @@ defmodule Avwe.RulesCompositionTest do
     end
   end
 
+  # Whether the declared order puts `from` somewhere before `to`.
+  defp before?(edges, from, to, seen \\ []) do
+    from != to and
+      Enum.any?(edges, fn
+        {^from, ^to} -> true
+        {^from, next} -> next not in seen and before?(edges, next, to, [from | seen])
+        _other -> false
+      end)
+  end
+
+  test "the order the rules declare covers every dependency they declare" do
+    for {subset, _planned} <- accepted() do
+      {:ok, plan} = Ruleset.plan_for(%{rules: subset})
+      edges = Ruleset.declared_order(plan.rules)
+
+      for consumer <- plan.rules,
+          capability <- consumer.requires ++ consumer.uses,
+          provider <- plan.rules,
+          provider.id != consumer.id,
+          capability in provider.provides,
+          consumer.systems != [],
+          provider.systems != [] do
+        ordered? =
+          Enum.any?(
+            for(c <- consumer.systems, p <- provider.systems, do: {c.id, p.id}),
+            fn {c, p} -> before?(edges, p, c) or before?(edges, c, p) end
+          )
+
+        assert ordered?,
+               "#{inspect(subset)}: #{consumer.id} reads :#{capability} from #{provider.id}, " <>
+                 "and what the rules say does not put one of them first"
+      end
+    end
+  end
+
   test "every set the check accepts makes the world the old order makes of the rules that remain" do
     for {subset, planned} <- accepted(),
         wanted = Enum.filter(@legacy, &(&1 in planned)),

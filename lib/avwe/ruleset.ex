@@ -324,7 +324,7 @@ defmodule Avwe.Ruleset do
   # smallest id goes first.
   defp order(rules, known) do
     systems = for rule <- rules, system <- rule.systems, do: Map.put(system, :rule, rule)
-    edges = Enum.uniq(own_order(rules) ++ constraints(rules, systems))
+    edges = edges(rules, systems)
     unknown = unknown_constraints(rules, systems, known)
 
     case sorted(Map.new(systems, &{&1.id, &1}), edges) do
@@ -338,6 +338,21 @@ defmodule Avwe.Ruleset do
   defp planned(system) do
     %{id: system.id, module: system.module, options: Keyword.drop(system.options, @constraints)}
   end
+
+  @doc """
+  The order the rules declare, as `{first, then}` pairs of system ids: each rule's
+  own systems in the order it lists them, and every `runs_after` and `runs_before`,
+  a rule or a capability standing for its systems. It is what the plan is sorted
+  by, before what it leaves open is put in the order of the ids, for tools that
+  check what the rules say (`test/avwe/rules_composition_test.exs`).
+  """
+  @spec declared_order([module() | map()]) :: [{String.t(), String.t()}]
+  def declared_order(rules) do
+    rules = manifests(rules)
+    edges(rules, for(rule <- rules, system <- rule.systems, do: Map.put(system, :rule, rule)))
+  end
+
+  defp edges(rules, systems), do: Enum.uniq(own_order(rules) ++ constraints(rules, systems))
 
   # A rule's own systems run in the order it lists them.
   defp own_order(rules) do

@@ -15,8 +15,12 @@ defmodule Avwe.Rules.Earthlike.Fire do
   @impl Avwe.Rule
   def provides, do: [:fire_sources]
 
-  # After the scheduled changes (a hearth's fuel is one) and the river it is
-  # lit beside; before the heat that takes what it burns, and the bodies.
+  @impl Avwe.Rule
+  def uses, do: [:scheduled_changes]
+
+  # After the scheduled changes (a hearth's fuel is one); and after the river,
+  # which it reads nothing of but which has always run before it. Before the heat
+  # that takes what it burns, and the bodies.
   @impl Avwe.Rule
   def systems do
     [
