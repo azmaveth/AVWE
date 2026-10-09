@@ -1,6 +1,6 @@
 defmodule Avwe.E2E.MCPGuestsTest do
   @moduledoc """
-  End to end over real HTTP with ExMCP's client: a player arrives in Lantern
+  End to end over real HTTP with ArborMCP's client: a player arrives in Lantern
   Hollow as a guest of its own making (the `arrive` tool), beside a telnet
   player. The world is at noon on a manual clock and takes two guests, who
   arrive on Hollow Green, where Wren and Tamsin stand.
@@ -11,6 +11,8 @@ defmodule Avwe.E2E.MCPGuestsTest do
   import Avwe.Test.Fixtures, only: [lantern_hollow: 0, eventually: 1]
   import Avwe.Test.MCPClient
   import Avwe.Test.TelnetClient, only: [expect: 2, join: 2, refute_line: 2]
+
+  alias Arbor.MCP.Client
 
   @world :hollow_mcp_guests
   @ref :hollow_mcp_guests_server
@@ -57,7 +59,7 @@ defmodule Avwe.E2E.MCPGuestsTest do
 
   describe "the arrive tool" do
     test "is offered, with the name required", %{port: port} do
-      {:ok, %{tools: tools}} = ExMCP.Client.list_tools(client(port))
+      {:ok, %{tools: tools}} = Client.list_tools(client(port))
       arrive = Enum.find(tools, &((&1["name"] || &1[:name]) == "arrive"))
       schema = arrive["inputSchema"] || arrive[:inputSchema]
 

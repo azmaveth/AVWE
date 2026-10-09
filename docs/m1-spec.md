@@ -252,6 +252,19 @@ moduledocs of `Avwe.Mind`, `Avwe.MCP` and its modules are the reference.
   the wind.
 - `scripts/mcp_call.py` starts a new session only when the server says 404;
   `--leave` leaves, ends the session and forgets it.
+- **On ArborMCP 2 since 2026-10-08.** The server above was built on ExMCP 1.5;
+  it now mounts ArborMCP's plug (`Arbor.MCP.HttpPlug`, behind
+  `Avwe.MCP.Endpoint`, on Bandit) over a supervised runtime
+  (`Arbor.MCP.Server.Runtime`, `execution: :stateless`, so a call that waits
+  on world time holds up no other). Nothing a player sees changed. What did:
+  the handler starts once and takes the session header from each request's
+  application context, with the era (MCP 2026-07-28 has no sessions) from the
+  request's context rather than a version check of our own; a DELETE that
+  ends a session ends its Mind in the endpoint, on the 204; and there is no
+  sweep for sessions the server let expire: the Mind's own `quit_after` is
+  shorter than the runtime keeps a session, so it has let go of the body by
+  then. The runtime also bounds what ExMCP did not: 64 calls at once and 64
+  queued behind them.
 
 **Tests** (end to end): `test/e2e/mcp_test.exs` (tools, errors, leases,
 players, timeouts, argument checks), `mcp_journey_test.exs` (the done

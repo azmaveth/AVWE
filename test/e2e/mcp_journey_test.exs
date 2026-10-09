@@ -1,6 +1,6 @@
 defmodule Avwe.E2E.MCPJourneyTest do
   @moduledoc """
-  End to end over real HTTP with ExMCP's client: Claude plays Mira across
+  End to end over real HTTP with ArborMCP's client: Claude plays Mira across
   two MCP sessions and finds the notes from the first (the M1 done
   criterion), and a note survives the world stopping and starting again.
   The Ember Reach, from 813 AR, day 220, 08:30, on a manual clock.

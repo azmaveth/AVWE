@@ -1,8 +1,8 @@
 defmodule Avwe.MCP do
   @moduledoc """
   The MCP front door: a world's bodies as tools for a language model, over
-  streamable HTTP (`ExMCP.HttpPlug` on Cowboy, behind
-  `Avwe.MCP.Endpoint`), bound to 127.0.0.1.
+  streamable HTTP (`Arbor.MCP.HttpPlug`, mounted by `Avwe.MCP.Endpoint` on
+  Bandit), bound to 127.0.0.1.
 
   Enable it with `config :avwe, :mcp, port: 4041` (and `world:`, default
   `:ember_reach`), or start it yourself with `{Avwe.MCP, port: 0, world:
@@ -14,18 +14,22 @@ defmodule Avwe.MCP do
 
   **One MCP session, one Mind.** A client of the session-based MCP
   revisions (2025-03-26 to 2025-11-25, which start with `initialize`) is
-  given an `Mcp-Session-Id` by ExMCP, and its player's `Avwe.Mind` is kept
+  given an `Mcp-Session-Id` by ArborMCP, and its player's `Avwe.Mind` is kept
   under it. Tool handlers see it through the plug's `handler_opts`, read
-  from the request's header (ExMCP has validated it by then). The session
-  ending, by DELETE or expiry, ends the Mind and gives the body back
-  (`Avwe.MCP.Players`, `Avwe.MCP.Sessions`).
+  from the request's header (ArborMCP has validated it by then). The session
+  ending by DELETE ends the Mind and gives the body back
+  (`Avwe.MCP.Endpoint` tells `Avwe.MCP.Players`); a session that merely
+  stops being used is let go of by the Mind's own `quit_after`
+  (`Avwe.MCP.Players`), which is well inside the session's own lifetime in
+  the runtime.
 
-  ExMCP also takes the session id from the legacy `X-Session-Id` header
+  ArborMCP also takes the session id from the legacy `X-Session-Id` header
   (and refuses a request whose two headers disagree), so AVWE reads either.
 
   MCP 2026-07-28 has no protocol session: every request stands alone, and
-  a session id header on such a request is ignored (ExMCP does not check
-  it there, so it names nobody). A client of that revision is given
+  a session id header on such a request is ignored (ArborMCP does not check
+  it there, so it names nobody; the request's era is what the callback's
+  `Arbor.MCP.Server.Context` says it is). A client of that revision is given
   a `player` token by `join`, and passes it to every other tool; its Mind
   ends when it leaves, or after its `quit_after` without a call (15 real
   minutes by default, `Avwe.MCP.Players`), so an abandoned player frees
@@ -38,11 +42,14 @@ defmodule Avwe.MCP do
   the join text and the instructions warn that a client which loses its
   token takes a second body, and the first stays held until `quit_after`.
 
-  Each request runs in its own short-lived handler process (ExMCP's way),
-  so nothing here keeps state between calls: the Minds live in
-  `Avwe.MCP.Players`. A tool call may wait on world time for up to
-  #{25} real seconds (`act`'s `max_wait_seconds`), under the handler
-  deadline set here.
+  The handler is started once, by the runtime (`Arbor.MCP.Server.Runtime`),
+  and keeps no state between calls: what is particular to a request, its
+  session header, comes in as the request's application context, and the
+  Minds live in `Avwe.MCP.Players`. The runtime is `:stateless`, so calls
+  run side by side (a bounded number of them, and as many again queued),
+  which they must, since a tool call may wait on world time for up to
+  #{25} real seconds (`act`'s `max_wait_seconds`), under the deadline set
+  here.
 
   Arguments are checked before anything is submitted (`Avwe.MCP.Steps`),
   and what cannot be done is a tool error in plain words.
@@ -53,16 +60,33 @@ defmodule Avwe.MCP do
   telnet does.
   """
 
-  use ExMCP.Server.Handler
+  use Arbor.MCP.Server.Handler
 
+  alias Arbor.MCP.Server.Context
   alias Avwe.{Command, Mind, Prose}
   alias Avwe.MCP.{Players, Report, Steps}
-  alias ExMCP.Internal.VersionRegistry
 
   require Logger
 
   @max_wait_seconds 25
   @handler_timeout (@max_wait_seconds + 15) * 1_000
+  # Calls that may be waiting on world time at once, and as many again queued.
+  @max_concurrency 64
+  @max_queue 64
+  # How long the runtime keeps an MCP session nobody uses: longer than the
+  # Mind's `quit_after`, which ends the player first.
+  @session_ttl_ms 2 * 60 * 60 * 1_000
+  # ArborMCP keeps every request id a session has used (JSON-RPC ids may not
+  # repeat) and refuses the session's next request once it holds as many as
+  # it may: 128 by default, which a player's session passes in minutes. These
+  # are ExMCP's own bound (10,000 a session), and the room for several
+  # sessions that size; each id costs about 150 bytes.
+  @session_options [
+    session_ttl_ms: @session_ttl_ms,
+    max_request_ids_per_session: 10_000,
+    max_request_ids: 40_000,
+    max_request_id_bytes: 16_000_000
+  ]
   @server_info %{name: "avwe", version: "0.1.0"}
 
   @doc """
@@ -144,27 +168,53 @@ defmodule Avwe.MCP do
     }
 
     port = opts |> Keyword.get(:port, 4041) |> free_port()
+    runtime = {:via, Registry, {Avwe.Registry, {:mcp, ref}}}
+
+    server = [
+      id: {:mcp_runtime, ref},
+      name: runtime,
+      handler: __MODULE__,
+      handler_args: config,
+      transport: :mounted_http,
+      protocol_mode: :prefer_legacy,
+      # Calls keep nothing between them (the Minds are in `Avwe.MCP.Players`),
+      # so they may run side by side: one may wait on world time for long.
+      execution: :stateless,
+      max_concurrency: @max_concurrency,
+      max_queue: @max_queue,
+      request_timeout_ms: @handler_timeout,
+      services: [sessions: [options: @session_options]]
+    ]
 
     plug_opts = [
-      handler: __MODULE__,
-      handler_opts: {__MODULE__, :handler_opts, [config]},
-      handler_call_timeout: @handler_timeout,
-      server_info: @server_info,
-      server_capabilities: %{tools: %{}},
-      session_manager: Avwe.MCP.Sessions,
+      runtime: runtime,
+      handler_opts: {__MODULE__, :handler_opts, []},
+      protocol_mode: :prefer_legacy,
       world: config.world,
       # Requests from a browser page carry its Origin: only the server's
-      # own are let in (ExMCP's client sends the server's), and the Host
-      # must be a loopback name, against DNS rebinding.
+      # own are let in, and the Host must be a loopback name, against DNS
+      # rebinding.
       allowed_origins: Enum.map(["127.0.0.1", "localhost"], &"http://#{&1}:#{port}"),
       allowed_hosts: ["localhost", "127.0.0.1"]
     ]
 
-    Plug.Cowboy.child_spec(
-      scheme: :http,
+    listener = {
+      Bandit,
       plug: {Avwe.MCP.Endpoint, plug_opts},
-      options: [port: port, ip: {127, 0, 0, 1}, ref: ref]
-    )
+      scheme: :http,
+      ip: {127, 0, 0, 1},
+      port: port,
+      startup_log: false,
+      thousand_island_options: [supervisor_options: [name: ref]]
+    }
+
+    %{
+      id: ref,
+      start:
+        {Supervisor, :start_link,
+         [[{Arbor.MCP.Server.Runtime, server}, listener], [strategy: :rest_for_one]]},
+      type: :supervisor
+    }
   end
 
   # Port 0 means any free port. It is chosen here, not by the listener, so
@@ -180,25 +230,21 @@ defmodule Avwe.MCP do
 
   @doc "The port the server started with `ref` listens on."
   @spec port(atom()) :: :inet.port_number()
-  def port(ref \\ __MODULE__), do: :ranch.get_port(ref)
-
-  @doc false
-  # Called by ExMCP.HttpPlug for every request: the handler's init argument.
-  # A session-era request names its MCP session; a modern one (MCP
-  # 2026-07-28, told the way ExMCP tells it) has none, whatever its headers.
-  @spec handler_opts(Plug.Conn.t(), term(), map()) :: map()
-  def handler_opts(conn, request, config) do
-    session =
-      case {modern?(conn, request), session_header(conn)} do
-        {false, id} -> id
-        {true, _ignored} -> nil
-      end
-
-    Map.put(config, :session, session)
+  def port(ref \\ __MODULE__) do
+    {:ok, {_address, port}} = ThousandIsland.listener_info(ref)
+    port
   end
 
-  # The session id as ExMCP reads it: `Mcp-Session-Id`, or the legacy
-  # `X-Session-Id` (ExMCP has refused the request if they disagree).
+  @doc false
+  # Called by Arbor.MCP.HttpPlug for every request: the request's
+  # application context, which the callback reads from `Context`. It carries
+  # the session header, if any; whether that names a player is for the
+  # callback to say, by the request's era.
+  @spec handler_opts(Plug.Conn.t(), term()) :: map()
+  def handler_opts(conn, _request), do: %{session: session_header(conn)}
+
+  # The session id as ArborMCP reads it: `Mcp-Session-Id`, or the legacy
+  # `X-Session-Id` (ArborMCP has refused the request if they disagree).
   defp session_header(conn) do
     Enum.find_value(["mcp-session-id", "x-session-id"], fn header ->
       case Plug.Conn.get_req_header(conn, header) do
@@ -208,33 +254,23 @@ defmodule Avwe.MCP do
     end)
   end
 
-  defp modern?(conn, request) do
-    header =
-      case Plug.Conn.get_req_header(conn, "mcp-protocol-version") do
-        [version] -> VersionRegistry.modern?(version)
-        _none -> false
-      end
+  # The server's identity and capabilities, for `server/discover` (which
+  # takes them from the handler module) and `initialize` alike.
+  @doc false
+  @spec __server_info__() :: map()
+  def __server_info__, do: @server_info
 
-    meta =
-      case request do
-        %{"params" => %{"_meta" => meta}} when is_map(meta) ->
-          Map.has_key?(meta, "io.modelcontextprotocol/protocolVersion") or
-            Map.has_key?(meta, "io.modelcontextprotocol/clientCapabilities")
-
-        _other ->
-          false
-      end
-
-    header or meta
-  end
+  @doc false
+  @spec __server_capabilities__() :: map()
+  def __server_capabilities__, do: %{tools: %{}}
 
   @impl GenServer
   def init(config) when is_map(config), do: {:ok, config}
 
   def init(_other),
-    do: {:ok, %{world: :ember_reach, idle_after: nil, arrival_wait: nil, session: nil}}
+    do: {:ok, %{world: :ember_reach, idle_after: nil, arrival_wait: nil}}
 
-  @impl ExMCP.Server.Handler
+  @impl Arbor.MCP.Server.Handler
   def handle_initialize(params, state) do
     {:ok,
      %{
@@ -245,19 +281,31 @@ defmodule Avwe.MCP do
      }, state}
   end
 
-  @impl ExMCP.Server.Handler
+  @impl Arbor.MCP.Server.Handler
   def handle_list_tools(_cursor, state), do: {:ok, tools(), nil, state}
 
-  @impl ExMCP.Server.Handler
+  @impl Arbor.MCP.Server.Handler
   def handle_call_tool(name, args, state) do
     args = if is_map(args), do: args, else: %{}
-    {:ok, call(name, args, player(state, args)), state}
+    call_state = Map.put(state, :session, session())
+    {:ok, call(name, args, player(call_state, args)), state}
   rescue
     error ->
       Logger.error("MCP tool #{name} failed: " <> Exception.format(:error, error, __STACKTRACE__))
       {:ok, error("Something went wrong in the server; try again."), state}
   catch
     :exit, _mind_gone -> {:ok, error(not_joined()), state}
+  end
+
+  # The MCP session of the request being served: the header it carried, if it
+  # is of an era that has sessions. A request of MCP 2026-07-28 stands alone,
+  # whatever its headers say.
+  defp session do
+    case Context.current() do
+      %{era: :modern} -> nil
+      %{application_context: %{session: id}} when is_binary(id) -> id
+      _none -> nil
+    end
   end
 
   # The player is the MCP session, or, without one, the token `join` gave:

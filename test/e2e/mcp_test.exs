@@ -1,6 +1,6 @@
 defmodule Avwe.E2E.MCPTest do
   @moduledoc """
-  End to end over real HTTP with ExMCP's client: the MCP tools in Lantern
+  End to end over real HTTP with ArborMCP's client: the MCP tools in Lantern
   Hollow at noon, on a manual clock, beside telnet players. Wren and
   Tamsin stand together on Hollow Green.
   """
@@ -11,6 +11,7 @@ defmodule Avwe.E2E.MCPTest do
   import Avwe.Test.MCPClient
   import Avwe.Test.TelnetClient, only: [join: 2, send_line: 2, sync: 1, expect: 2]
 
+  alias Arbor.MCP.Client
   alias Avwe.MCP.Players
 
   @world :hollow_mcp
@@ -154,19 +155,6 @@ defmodule Avwe.E2E.MCPTest do
     assert mind(@world, "pell") == nil
   end
 
-  test "an MCP session that expires in ExMCP gives the body back at the next sweep", %{
-    client: client
-  } do
-    refute call(client, "join", %{"body" => "pell"}).error?
-    {:session, session} = Players.playing(@world)["pell"]
-    # Expiry, as ExMCP's session manager does it: no DELETE comes.
-    :ok = ExMCP.SessionManager.terminate_session(session)
-    assert taken?("pell")
-
-    send(Players, :sweep)
-    eventually(fn -> not taken?("pell") end)
-  end
-
   test "a client without an MCP session (MCP 2026-07-28) plays with a player token", %{
     port: port
   } do
@@ -186,6 +174,43 @@ defmodule Avwe.E2E.MCPTest do
 
     assert call(modern, "leave", %{"player" => token}).text =~ "You let go of Odo"
     eventually(fn -> not taken?("odo") end)
+  end
+
+  test "a page of another site, or a name that is not this machine's, is turned away",
+       %{port: port} do
+    hello = %{
+      "jsonrpc" => "2.0",
+      "id" => 1,
+      "method" => "initialize",
+      "params" => %{
+        "protocolVersion" => "2025-11-25",
+        "capabilities" => %{},
+        "clientInfo" => %{"name" => "test", "version" => "1"}
+      }
+    }
+
+    accept = {"accept", "application/json, text/event-stream"}
+    post = fn headers -> http(port, :post, "/mcp", body: hello, headers: [accept | headers]) end
+
+    # What a client that is not a browser sends, and what the server's own
+    # pages could: both of this server's names, on its port.
+    assert post.([]).status == 200
+    assert post.([{"origin", "http://127.0.0.1:#{port}"}]).status == 200
+    assert post.([{"origin", "http://localhost:#{port}"}]).status == 200
+
+    # A page elsewhere, or another service on this machine, or another scheme.
+    for origin <- [
+          "http://evil.example",
+          "http://evil.example:#{port}",
+          "http://127.0.0.1:#{port + 1}",
+          "https://127.0.0.1:#{port}"
+        ] do
+      assert post.([{"origin", origin}]).status == 403, origin
+    end
+
+    # DNS rebinding: a name of the attacker's that resolves to this machine
+    # is a misdirected request.
+    assert post.([{"host", "evil.example:#{port}"}]).status == 421
   end
 
   test "the endpoint is /mcp: a GET there is 405, allowing POST and DELETE; no other path serves",
@@ -232,9 +257,9 @@ defmodule Avwe.E2E.MCPTest do
 
     # A client without a session is told the same, through discovery.
     modern = connect(port, :modern_only)
-    assert {:ok, %{"instructions" => ^instructions}} = ExMCP.Client.discover(modern)
+    assert {:ok, %{"instructions" => ^instructions}} = Client.discover(modern)
 
-    {:ok, %{tools: tools}} = ExMCP.Client.list_tools(client)
+    {:ok, %{tools: tools}} = Client.list_tools(client)
     tools = Map.new(tools, &{&1["name"] || &1[:name], &1})
 
     assert tools |> Map.keys() |> Enum.sort() ==
@@ -287,7 +312,7 @@ defmodule Avwe.E2E.MCPTest do
     {:session, session} = Players.playing(@world)["wren"]
 
     # A request of MCP 2026-07-28 carrying the session's header is not that
-    # session's player (ExMCP's client sends no such header in that era, so
+    # session's player (ArborMCP's client sends no such header in that era, so
     # this one is written by hand), nor is a token that happens to be its id.
     assert %{"isError" => true, "content" => [%{"text" => "You are not playing anyone." <> _}]} =
              modern_call(port, "look", %{}, [{"mcp-session-id", session}])
@@ -410,6 +435,13 @@ defmodule Avwe.E2E.MCPTest do
     refute call(client, "join", %{"body" => "wren"}).error?
     assert Players.quit_after() == 15 * 60_000
     assert :sys.get_state(mind(@world, "wren")).quit_after == 15 * 60_000
+  end
+
+  test "one session takes far more calls than ArborMCP's own bound on a session would let it",
+       %{client: client} do
+    # ArborMCP refuses a session's next request once it has used 128 request
+    # ids, unless the server raises that (`Avwe.MCP` does).
+    for _call <- 1..400, do: refute(call(client, "bodies").error?)
   end
 
   test "a join waiting on the world holds up no other player's call", %{

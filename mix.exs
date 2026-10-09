@@ -76,7 +76,7 @@ defmodule Avwe.MixProject do
   defp deps do
     [
       {:yaml_elixir, "~> 2.12"},
-      {:ex_mcp, "~> 1.5"},
+      {:arbor_mcp, "~> 2.0.0-rc.2"},
       {:phoenix, "~> 1.8"},
       {:phoenix_html, "~> 4.3"},
       {:phoenix_live_view, "~> 1.2"},

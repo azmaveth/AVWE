@@ -224,11 +224,12 @@ terms for unattended runs.
   any player uses, so the rework does not touch it. The second half of M3b,
   connecting percepts to Arbor directly, depends on the rework and is specified
   once it settles; the facts above are checked again against the tree as it is
-  then, and before the spike. AVWE's MCP server and test client are on ExMCP 1.5
+  then, and before the spike. AVWE's MCP server and test client were on ExMCP 1.5
   (`ExMCP.HttpPlug`, `ExMCP.SessionManager`, the handler behaviour,
   `ExMCP.Client` in tests, and one internal module,
-  `ExMCP.Internal.VersionRegistry`); they move to ArborMCP as a change of their
-  own (`docs/m2-spec.md`, 3.1 and 7).
+  `ExMCP.Internal.VersionRegistry`); they moved to ArborMCP 2 (rc.2) as a change
+  of their own on 2026-10-08 (`docs/m1-spec.md`, errata; `docs/m2-spec.md`, 3.1
+  and 7).
 - **M3c, living.** A run harness (start the world at the slow pace, the
   inhabitants and the watch page; a spend cap and a kill switch, since a body
   nobody calls for goes back to its routine on its own), two dedicated

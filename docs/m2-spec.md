@@ -261,15 +261,15 @@ no telemetry dashboard.
 
 The HTTP adapter is Bandit, Phoenix's default, declared in `mix.exs` by name
 rather than arriving through another dependency (open question 1, settled).
-Cowboy is here today only because ExMCP 1.5 needs it. ArborMCP 2
+Cowboy was here only because ExMCP 1.5 needed it. ArborMCP 2
 (`arbor_mcp`, `Arbor.MCP.*`, now a release candidate) makes its HTTP
 backends optional and pins Bandit 1.12.5, Thousand Island 1.5.0 and, for
-Cowboy, Ranch 1.8.1 (we run 2.3.0). A web on Cowboy would be pushed back a
-Ranch major version when the MCP adapter moves to v2; a web on Bandit
-already sits on the stack v2 and Phoenix both lean toward (1.12.5 is what we
-run). Until the MCP adapter moves (a separate task: four files in `lib/`),
-the app runs two HTTP servers, one for each. Nothing in `AvweWeb` touches the
-adapter, so changing it is a config line.
+Cowboy, Ranch 1.8.1 (we ran 2.3.0). A web on Cowboy would have been pushed
+back a Ranch major version when the MCP adapter moved to v2; a web on Bandit
+already sat on the stack v2 and Phoenix both lean toward. The MCP adapter has
+moved (2026-10-08, a change of its own: `Avwe.MCP` and `Avwe.MCP.Endpoint`
+mount ArborMCP's plug on a Bandit listener of their own), so the app runs two
+Bandit listeners, one for each, and no Cowboy or Ranch.
 
 **One endpoint, always started.** The application starts `AvweWeb.Endpoint`
 and the `Phoenix.PubSub` LiveView needs (`AvweWeb.PubSub`; AVWE's own
@@ -694,7 +694,10 @@ Order inside the work: 2.1 first (a pure refactor with its own tests), then
 3. **MCP and the web endpoint.** The MCP server keeps its own listener (4041)
    in M2. With ArborMCP 2's `Arbor.MCP.HttpPlug` mounts it could later live in
    the Phoenix router: one port, one origin policy. Revisit when the MCP
-   adapter moves to v2.
+   adapter moves to v2. **Revisited with that move (2026-10-08): kept apart.**
+   The port is in `.mcp.json` and the docs; the two have different origin
+   policies (a page's socket, a program's POSTs); and sharing a router would
+   gain nothing the two plugs lack on their own.
 4. **Glyph overrides.** Config keys now (2.2). Whether Quire articles should
    carry them is for Quire.
 5. **Keyboard play.** Not in M2a (clicks and the command line). Arrow keys
