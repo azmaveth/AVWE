@@ -14,7 +14,7 @@
    rules it runs) and the **data** that says how: its parameters, map,
    entities and characters. One file, the **world definition**, holds both.
    Quire is the source that an LLM compiles into the world definition
-   (`docs/quire-spec.md`, to come).
+   (`docs/quire-spec.md`).
 2. **The line for what an LLM may produce: data, and vetted rule code; never
    runtime code.** The LLM writes world definitions, which are validated,
    reviewed and hashed. A world that needs a mechanic no rule has gets it the
@@ -1069,8 +1069,8 @@ what make that a swap and not a rewrite.
 - Units other than a 60-second minute and a 60-minute hour (decision 8).
 - The pipeline that has an LLM draft a rule and its tests; decision 2 says
   only that it goes through review.
-- The Quire compile and proposals (`docs/quire-spec.md`, next), and tiers of
-  non-player brains (a spec of their own).
+- The Quire compile and proposals are specified in `docs/quire-spec.md`, not
+  here; tiers of non-player brains are a spec of their own.
 - Needs, satisfiers and utility curves as data, and a data form for cultural
   norms, until a world asks for them.
 - Languages other than English.

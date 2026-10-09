@@ -166,7 +166,7 @@ avwe/
   lib/avwe/session.ex    controller sessions and leases
   lib/avwe/ground_cache.ex  keeps each terrain's ground map and world ground, built once (runtime)
   lib/avwe/mind.ex       the controller side for programs: plans, waits (M1)
-  lib/avwe/quire/        importer, compiled sidecars, chronicle writer
+  lib/avwe/quire/        importer; snapshots, sources; compile/ and chronicle/ to come (docs/quire-spec.md)
   lib/avwe/telnet/       text client (M0)
   lib/avwe/mcp.ex, mcp/  MCP adapter on ExMCP: endpoint, players, steps,
                          reports (M1)
@@ -866,11 +866,13 @@ and edited before it becomes fixed.
 
 ### 10.3 Compiling prose into parameters
 
-At import time only, an LLM reads each article and proposes a **sidecar** of
-simulation parameters. The sidecar is stored in AVWE at
-`worlds/<id>/compiled/<article-id>.json`, with a hash of the source text so it
-recompiles when the article changes. Sidecars can be reviewed and overridden
-by hand. The simulation never calls an LLM.
+At compile time only, an LLM reads Quire's articles and proposes the world
+**definition** (`docs/engine-spec.md`, section 5; the plan is `docs/quire-spec.md`,
+which replaces the per-article sidecars this section first described): passes
+that each own a part of the definition, every value tagged with the canon
+sentence it comes from or marked as invented, checked against the closed schema
+and reviewed by a person before it is accepted. A hash of each source article
+makes a recompile touch only what changed. The simulation never calls an LLM.
 
 For example, Mira Vale's article compiles to: a dawn routine walking the banks,
 a survey activity, carries ink and a notebook, does not carry the Last Coal,
@@ -879,10 +881,11 @@ a cold chimney.
 
 ### 10.4 Chronicle
 
-- AVWE writes `chronicle.jsonl` into the world's Quire folder. Quire never has
-  to read it.
-- Quire gains a Chronicle view and a "promote to timeline" action (Quire work,
-  M4). Promotion is a human act, made in Quire.
+- AVWE writes `chronicle.jsonl` beside the run's log and snapshots (it cannot go
+  into Quire's folder, which AVWE only reads), and drafts **proposals** from it
+  that it posts to Quire's queue (`docs/quire-spec.md`, 5).
+- Quire gains a proposals queue and the actions to accept, edit or reject
+  (Quire work). Promotion is a human act, made in Quire.
 - AVWE never edits `timeline.json` or articles.
 - Discoveries are chronicle events too. When something new is found, such as
   the river's source, promoting it in Quire can add a pin and an article as
@@ -1033,7 +1036,7 @@ core. A feature isn't done until its end-to-end test exists.
 | **M2a** | A window onto the world | Representation layers (glyphs), the scene, Phoenix on Bandit with a lobby, and the embodied view on a LiveView canvas (all built: 8.4 and 9) | A telnet player, a web player and Claude are in the world at once and each perceives the others (met: end to end in `three_controllers_test.exs`, with the page, telnet and MCP; and the page itself is held in a real browser by `test/browser`, a CI job of its own) |
 | **M2b** | Many lenses | The spectator view with field overlays (heat, water, smoke), and "watch" in the lobby (all built: 8.4 and 9, `docs/m2b-spec.md`). Sprites and a remembered map are left for later: sprites need art, and a remembered map is body memory, which is simulation state | A watcher in a browser sees the river's reaches fall silent one after another, and the silt cool, as the telnet watcher is told of them (met: end to end in `river_watchers_test.exs`, with the page and a telnet watcher, and in a real browser, on the canvas pixel by pixel, in `test/browser/watch_river_test.exs`) |
 | **M3** | Agents move in | Scoped with Hysun on 2026-10-07 (`docs/m3-spec.md`, which wins where it differs): agents play over **MCP first**, with Channels left until something consumes pushed percepts; **guests** (3a: a name and a backstory of one's own), structured words, who heard and one wire form for them (3a), and a reference agent with an adversary (all of 3a built: `docs/m3-spec.md`, 9 and 10); an Arbor spike and then the `world` capability, a `world-player` trust profile and taint (3b, Arbor's repo); inhabitants living a world week at a slow pace (3c). Earshot engagements and the fiction domain, and needs, are left for later | Two Arbor agents live in the Reach for a world week unattended. An injection attempt through in-world speech stays contained |
-| **M4** | Legends | History mode. Chronicle written to Quire. Canon-agreement check from 780 to 813 AR. Narrator | The 780–813 run produces a chronicle visible in Quire and a canon-agreement report |
+| **M4** | Legends | History mode. Chronicle proposed to Quire (`docs/quire-spec.md`). Canon-agreement check from 780 to 813 AR. Narrator | The 780–813 run produces a chronicle visible in Quire and a canon-agreement report |
 
 ## 14. Open questions
 
