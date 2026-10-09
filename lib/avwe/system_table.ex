@@ -60,9 +60,21 @@ defmodule Avwe.SystemTable do
     :persistent_term.put({__MODULE__, id}, module)
   end
 
-  @doc "The module that runs the system `id`."
+  @doc """
+  The module that runs the system `id`. An id the table has not been told of
+  is looked for among the systems of the rules the packages ship
+  (`Avwe.Ruleset.register_known/0`, which the application also does when it
+  starts), once, before it is said to be unknown.
+  """
   @spec fetch(id()) :: {:ok, module()} | :error
   def fetch(id) when is_binary(id) do
+    with :error <- lookup(id) do
+      :ok = Avwe.Ruleset.register_known()
+      lookup(id)
+    end
+  end
+
+  defp lookup(id) do
     case :persistent_term.get({__MODULE__, id}, nil) do
       nil -> :error
       module -> {:ok, module}

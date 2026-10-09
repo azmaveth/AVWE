@@ -94,7 +94,7 @@ defmodule Avwe.SystemIdsTest do
 
       assert length(systems) == 12
       assert length(Enum.uniq(ids)) == 12
-      assert Enum.all?(ids, &String.match?(&1, ~r{\A(sim|play|earthlike)\.[a-z]+/step\z}))
+      assert Enum.all?(ids, &String.match?(&1, ~r{\A(sim|play|earthlike\.[a-z]+)/[a-z]+\z}))
     end
 
     test "a region keeps the id and its options, given a module, an id or a pair" do
@@ -133,6 +133,16 @@ defmodule Avwe.SystemIdsTest do
 
       assert Region.state_hash(by_module) == Region.state_hash(by_id)
       refute inspect(by_module.systems) =~ "Counter"
+    end
+
+    test "an id of a rule the engine ships is found even when the table was never told of it" do
+      :persistent_term.erase({SystemTable, "earthlike.fire/step"})
+
+      assert SystemTable.fetch("earthlike.fire/step") == {:ok, Avwe.Systems.Fire}
+
+      assert SystemTable.missing(["earthlike.fire/step", "test.ids.never/step"]) == [
+               "test.ids.never/step"
+             ]
     end
 
     test "a system that moved to another module runs from there, for a region that was saved" do

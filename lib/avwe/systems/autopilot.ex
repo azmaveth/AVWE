@@ -50,7 +50,7 @@ defmodule Avwe.Systems.Autopilot do
   alias Avwe.{Actions, Autopilot, Calendar, Event, Intent, Region, Tick}
 
   @impl Avwe.System
-  def system_id, do: "play.autopilot/step"
+  def system_id, do: "play/autopilot"
 
   @impl Avwe.System
   def prepare(region) do

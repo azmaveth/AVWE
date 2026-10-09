@@ -30,7 +30,7 @@ defmodule Avwe.Systems.Memory do
   def keep, do: @keep
 
   @impl Avwe.System
-  def system_id, do: "play.memory/step"
+  def system_id, do: "play/memory"
 
   @impl Avwe.System
   def run(region, tick) do

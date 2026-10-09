@@ -34,6 +34,7 @@ defmodule Avwe do
     Quire,
     Region,
     RegionServer,
+    Ruleset,
     Terrain,
     Worldgen
   }
@@ -41,20 +42,6 @@ defmodule Avwe do
   require Logger
 
   @default_region {0, 0}
-  @default_systems [
-    Avwe.Systems.Daylight,
-    Avwe.Systems.Miracles,
-    Avwe.Systems.Weather,
-    Avwe.Systems.River,
-    Avwe.Systems.Fire,
-    Avwe.Systems.Heat,
-    Avwe.Systems.Movement,
-    Avwe.Systems.Waiting,
-    Avwe.Systems.Discovery,
-    Avwe.Systems.Autopilot,
-    Avwe.Systems.Smoke,
-    Avwe.Systems.Memory
-  ]
 
   @doc """
   Starts a world, from a definition or from Quire.
@@ -87,7 +74,9 @@ defmodule Avwe do
       `Avwe.Calendar.at/2`. Default: the start of 0 AR.
     * `:seed` - world seed. Default: derived from `id`.
     * `:clock` - `:manual` (default) or `{:live, interval_ms}`.
-    * `:systems` - systems to run, in order. Default: `#{inspect(@default_systems)}`.
+    * `:systems` - systems to run, in order, as modules or ids. Default: those of
+      the world's rules (`Avwe.Ruleset`): its definition's `ruleset`, or the
+      Earth-like preset (`default_systems/0`).
     * `:terrain`, `:hearths`, `:miracles`, `:climate` and `:characters` -
       AVWE's own settings for the world. See `Avwe.Worldgen`.
     * `:guests` - `[arrival: place_id, max: n]`: the world takes guests
@@ -154,9 +143,40 @@ defmodule Avwe do
     end
   end
 
+  @doc """
+  The systems a world runs when it is given none: those of the default
+  ruleset (the Earth-like preset), as a region keeps them (`{id, options}`),
+  in the order they run.
+  """
+  @spec default_systems() :: [{String.t(), keyword()}]
+  def default_systems do
+    {:ok, systems} = ruleset_systems(nil)
+    systems
+  end
+
+  # The systems a world runs: the ones it is given, or those of its rules.
+  defp systems(opts, ruleset) do
+    case Keyword.fetch(opts, :systems) do
+      {:ok, systems} -> {:ok, systems}
+      :error -> ruleset_systems(ruleset)
+    end
+  end
+
+  defp ruleset_systems(spec) do
+    case Ruleset.plan_for(spec) do
+      {:ok, plan} ->
+        :ok = Ruleset.register(plan)
+        {:ok, Ruleset.systems(plan)}
+
+      {:error, problems} ->
+        {:error, {:invalid_ruleset, problems}}
+    end
+  end
+
   defp from_quire(id, opts) do
     with {:ok, path} <- quire_path(opts),
-         {:ok, quire_world} <- Quire.load(path) do
+         {:ok, quire_world} <- Quire.load(path),
+         {:ok, systems} <- systems(opts, nil) do
       warn_unplaced(
         id,
         Enum.map(Quire.Seed.unplaced(quire_world), &unplaced_name/1),
@@ -168,7 +188,7 @@ defmodule Avwe do
           id: @default_region,
           seed: Keyword.get_lazy(opts, :seed, fn -> :erlang.phash2(id) end),
           time: Definition.time(Keyword.get(opts, :start, 0)),
-          systems: Keyword.get(opts, :systems, @default_systems),
+          systems: systems,
           terrain: Keyword.get(opts, :terrain),
           hearths: Keyword.get(opts, :hearths, []),
           miracles: Keyword.get(opts, :miracles, []),
@@ -193,12 +213,9 @@ defmodule Avwe do
 
   defp from_definition(id, source, opts) do
     with :ok <- definition_alone(opts),
-         {:ok, definition} <- definition(source) do
-      region =
-        Definition.region(definition,
-          id: @default_region,
-          systems: Keyword.get(opts, :systems, @default_systems)
-        )
+         {:ok, definition} <- definition(source),
+         {:ok, systems} <- systems(opts, definition.ruleset) do
+      region = Definition.region(definition, id: @default_region, systems: systems)
 
       warn_unplaced(
         id,

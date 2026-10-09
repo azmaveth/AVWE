@@ -205,7 +205,7 @@ defmodule Avwe.DefinitionTest do
         |> put_in(["rules", "earthlike.weather", "wind", "gusts"], 3)
 
       assert problems(json) == [
-               ~s|colour: not a key of this (it has "schema", "id", "name", "tagline", "description", "seed", "dt", "start", "rules", "entities", "miracles", "characters", "guests")|,
+               ~s|colour: not a key of this (it has "schema", "id", "name", "tagline", "description", "seed", "dt", "start", "ruleset", "rules", "entities", "miracles", "characters", "guests")|,
                ~s|rules.earthlike.weather.wind.gusts: not a key of this (it has "from", "m_s")|
              ]
     end
@@ -467,6 +467,84 @@ defmodule Avwe.DefinitionTest do
         "component" => component,
         "set" => set
       }
+    end
+  end
+
+  describe "the rules it runs" do
+    test "a definition without a ruleset runs the Earth-like one, and does not write one" do
+      definition = decode!(tiny())
+
+      assert definition.ruleset == nil
+      refute Map.has_key?(Definition.encode(definition), "ruleset")
+    end
+
+    test "a preset with rules left out is read, written again, and part of what the world is" do
+      ruleset = %{"preset" => "earthlike", "without" => ["earthlike.smoke"]}
+      definition = decode!(Map.put(tiny(), "ruleset", ruleset))
+
+      assert definition.ruleset == [preset: "earthlike", without: ["earthlike.smoke"]]
+      assert Definition.encode(definition)["ruleset"] == ruleset
+      refute Definition.hash(definition) == Definition.hash(decode!(tiny()))
+    end
+
+    test "a list of rules is read as well" do
+      ruleset = %{"rules" => ["play", "earthlike.daylight"]}
+
+      definition =
+        decode!(
+          Map.put(tiny() |> Map.delete("rules") |> Map.delete("miracles"), "ruleset", ruleset)
+        )
+
+      assert definition.ruleset == [rules: ["play", "earthlike.daylight"]]
+      assert Definition.encode(definition)["ruleset"] == ruleset
+    end
+
+    test "a preset and a list together, or neither, is refused" do
+      for ruleset <- [
+            %{"preset" => "earthlike", "rules" => ["play"]},
+            %{"with" => ["earthlike.smoke"]},
+            %{"rules" => ["play"], "without" => ["earthlike.smoke"]}
+          ] do
+        assert [problem] = problems(Map.put(tiny(), "ruleset", ruleset))
+
+        assert problem =~
+                 "ruleset: expected a preset (with rules added or left out) or a list of rules, not both"
+      end
+    end
+
+    test "an unknown rule or preset is refused, naming it" do
+      assert [problem] =
+               problems(
+                 Map.put(tiny(), "ruleset", %{
+                   "preset" => "earthlike",
+                   "with" => ["earthlike.fyre"]
+                 })
+               )
+
+      assert problem =~ ~s(ruleset: no rule has the id "earthlike.fyre")
+
+      assert [problem] = problems(Map.put(tiny(), "ruleset", %{"preset" => "medieval"}))
+      assert problem =~ ~s(ruleset: no ruleset preset is named "medieval")
+    end
+
+    test "rules that do not make a world are refused, all the problems at once" do
+      ruleset = %{"preset" => "earthlike", "without" => ["earthlike.weather"]}
+      problems = problems(Map.put(tiny(), "ruleset", ruleset))
+
+      assert ("ruleset: earthlike.heat needs :air_temperature, which no rule in this ruleset " <>
+                "provides (earthlike.weather does)") in problems
+
+      assert ("ruleset: earthlike.smoke needs :wind, which no rule in this ruleset provides " <>
+                "(earthlike.weather does)") in problems
+
+      assert "rules.earthlike.weather: this world does not run that rule" in problems
+    end
+
+    test "a rule that is told things must be one the world runs" do
+      ruleset = %{"preset" => "earthlike", "without" => ["earthlike.smoke", "earthlike.fire"]}
+
+      assert problems(Map.put(tiny(), "ruleset", ruleset)) ==
+               ["rules.earthlike.fire: this world does not run that rule"]
     end
   end
 

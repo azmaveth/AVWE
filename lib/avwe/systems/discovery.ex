@@ -15,7 +15,7 @@ defmodule Avwe.Systems.Discovery do
   @discover_cells 3
 
   @impl Avwe.System
-  def system_id, do: "play.discovery/step"
+  def system_id, do: "play/discovery"
 
   @impl Avwe.System
   def run(region, _tick) do

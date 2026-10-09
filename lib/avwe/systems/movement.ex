@@ -18,7 +18,7 @@ defmodule Avwe.Systems.Movement do
   @finished %{go: :arrived, follow: :end_of_channel, walk: :walked}
 
   @impl Avwe.System
-  def system_id, do: "play.movement/step"
+  def system_id, do: "play/movement"
 
   @impl Avwe.System
   def run(region, tick) do

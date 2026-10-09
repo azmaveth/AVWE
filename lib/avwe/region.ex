@@ -200,21 +200,24 @@ defmodule Avwe.Region do
   @doc """
   Advances the region by `steps` steps.
 
-  Options: `:dt` overrides the region's step length for these steps. Events
-  emitted along the way collect in the outbox; take them with
-  `drain_events/1`.
+  Options: `:dt` overrides the region's step length for these steps, and
+  `:observe` is a function called after each system has run, with the system's
+  id and the region before and after it (for tools that measure what a system
+  changes; `Avwe.RuleCase`). Events emitted along the way collect in the outbox;
+  take them with `drain_events/1`.
   """
   @spec advance(t(), non_neg_integer(), keyword()) :: t()
   def advance(%__MODULE__{} = region, steps \\ 1, opts \\ [])
       when is_integer(steps) and steps >= 0 do
     dt = Keyword.get(opts, :dt, region.dt)
-    Enum.reduce(List.duplicate(dt, steps), region, &step(&2, &1))
+    observe = Keyword.get(opts, :observe)
+    Enum.reduce(List.duplicate(dt, steps), region, &step(&2, &1, observe))
   end
 
   # A step starts with an empty outbox, so `step_events/2` reads only its
   # own events, and puts the earlier ones back behind them when it ends:
   # that costs the step's own events, not the whole undrained outbox.
-  defp step(%__MODULE__{outbox: earlier} = region, dt) do
+  defp step(%__MODULE__{outbox: earlier} = region, dt, observe) do
     tick = %Tick{
       step: region.step,
       time: region.time,
@@ -226,7 +229,7 @@ defmodule Avwe.Region do
     stepped =
       %{region | outbox: []}
       |> apply_intents(tick)
-      |> run_systems(tick)
+      |> run_systems(tick, observe)
       |> finish_step(tick)
 
     %{stepped | outbox: stepped.outbox ++ earlier}
@@ -243,17 +246,21 @@ defmodule Avwe.Region do
     end)
   end
 
-  defp run_systems(region, tick) do
+  defp run_systems(region, tick, observe) do
     Enum.reduce(region.systems, region, fn {id, options}, acc ->
       case due(options, tick) do
-        :skip ->
-          acc
-
-        system_tick ->
-          {acc, events} = SystemTable.fetch!(id).run(acc, system_tick)
-          emit(acc, events, tick)
+        :skip -> acc
+        system_tick -> run_system(acc, id, system_tick, tick, observe)
       end
     end)
+  end
+
+  # The system runs on its tick (which a period may have changed), and what
+  # it emits is stamped by the step's.
+  defp run_system(region, id, system_tick, tick, observe) do
+    {ran, events} = SystemTable.fetch!(id).run(region, system_tick)
+    if observe, do: observe.(id, region, ran)
+    emit(ran, events, tick)
   end
 
   # A system with a period runs in the step that reaches a multiple of it,
