@@ -290,7 +290,10 @@ defmodule Avwe.RegionServer do
       )
     end
 
-    added = given.systems -- saved.systems
+    # A system whose options changed is the same system: only the ids that are new
+    # are prepared (preparing a live system again would reset what it keeps).
+    known = Enum.map(saved.systems, &elem(&1, 0))
+    added = for {id, _options} <- given.systems, id not in known, do: id
     Region.prepare(%{saved | systems: given.systems}, only: added)
   end
 

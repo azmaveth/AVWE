@@ -40,6 +40,22 @@ defmodule Avwe.E2E.SystemIdsTest do
     def run(region, _tick), do: {Region.put_env(region, :ran, :successor), []}
   end
 
+  defmodule Tally do
+    @moduledoc false
+    @behaviour Avwe.System
+
+    # Counts the times it was prepared, which a world must not do twice.
+    @impl Avwe.System
+    def system_id, do: "test.e2e.tally/step"
+
+    @impl Avwe.System
+    def prepare(region),
+      do: Region.put_env(region, :prepared, Map.get(region.env, :prepared, 0) + 1)
+
+    @impl Avwe.System
+    def run(region, tick), do: {Region.put_env(region, :last, {tick.time, tick.dt}), []}
+  end
+
   defmodule Vanishing do
     @moduledoc false
     @behaviour Avwe.System
@@ -49,6 +65,10 @@ defmodule Avwe.E2E.SystemIdsTest do
 
     @impl Avwe.System
     def run(region, _tick), do: {region, []}
+  end
+
+  setup do
+    on_exit(fn -> if Avwe.World.whereis(@world), do: Avwe.stop_world(@world) end)
   end
 
   defp start(tmp_dir, systems) do
@@ -91,6 +111,33 @@ defmodule Avwe.E2E.SystemIdsTest do
     assert rebuilt.systems == [{"test.e2e.marker/step", []}]
 
     SystemTable.put("test.e2e.marker/step", Marker)
+  end
+
+  test "a world resumed with another period for a system is not prepared again, and replays", %{
+    tmp_dir: tmp_dir
+  } do
+    {:ok, _pid} = start(tmp_dir, [Tally])
+    Avwe.step(@world, 3)
+    assert {:ok, %{env: %{prepared: 1}}} = Avwe.snapshot(@world)
+    :ok = Avwe.stop_world(@world)
+
+    {:ok, _pid} = start(tmp_dir, [{Tally, every: 120}])
+
+    assert {:ok, %{step: 3, env: %{prepared: 1}}} = Avwe.snapshot(@world)
+
+    Avwe.step(@world, 3)
+    {:ok, live} = RegionServer.state_hash(@world, @region)
+    :ok = Avwe.stop_world(@world)
+
+    # The log from the change on belongs to the new period, so a snapshot was
+    # written at once, and the world comes back from it to the same state.
+    {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+    assert Store.snapshots(store) == [0, 3]
+    assert {:ok, rebuilt} = Store.rebuild(store)
+    :ok = Store.close(store)
+
+    assert rebuilt.systems == [{"test.e2e.tally/step", [every: 120]}]
+    assert Region.state_hash(rebuilt) == live
   end
 
   test "a world saved with a system that no module runs is refused, naming it", %{
