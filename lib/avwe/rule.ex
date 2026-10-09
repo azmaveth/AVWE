@@ -4,7 +4,7 @@ defmodule Avwe.Rule do
   `earthlike.weather`), the unit a world's **ruleset** is made of. This is the
   rule's **model**, the half that needs nothing but the simulation: the state
   it owns, the systems that move it, and what it needs of the other rules. (Its
-  embodiment, the verbs and senses by which bodies meet it, is a second module
+  embodiment, the verbs and senses by which a world's inhabitants meet it, is a second module
   that `c:facets/0` names; `docs/engine-spec.md`, 4.1.)
 
   A rule says what it touches, and `Avwe.Ruleset` checks the whole when a world

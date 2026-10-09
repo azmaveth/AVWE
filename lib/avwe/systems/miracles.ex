@@ -4,13 +4,14 @@ defmodule Avwe.Systems.Miracles do
 
   A miracle event is an entity with a `:miracle` component:
 
-      %{kind: :event, at: time, target: "river-source", component: :spring,
+      %{kind: :event, at: time, target: "spring-1", component: :spring,
         set: %{flow_m3_s: 0.0}, cause: :unknown, note: "...", applied_at: nil}
 
   When its time comes, `set` is merged into the target's component, along with
   `miracle: id` and `changed_at: at`, so the change is annotated where it
-  happened. The `:miracle` event this emits is for the game master: bodies
-  perceive only the effects, through the systems that respond to the change.
+  happened. The `:miracle` event this emits is for the game master: whoever
+  lives in the world perceives only the effects, through the systems that
+  respond to the change.
   """
 
   @behaviour Avwe.System

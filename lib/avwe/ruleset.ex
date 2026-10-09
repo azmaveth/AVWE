@@ -17,15 +17,14 @@ defmodule Avwe.Ruleset do
       of a rule's own systems) can all be met, and what they leave open is
       sorted by id, so the same ruleset always runs in the same order.
 
-  Everything wrong is reported at once, each problem in plain words (`"earthlike.smoke
-  needs :wind, which no rule in this ruleset provides (earthlike.weather does)"`).
+  Everything wrong is reported at once, each problem in plain words (`"station.scrubbers
+  needs :power, which no rule in this ruleset provides (station.grid does)"`).
   Pure but for reading `config :avwe, :rule_packages`.
   """
 
   alias Avwe.{Rule, SystemTable}
 
   @engine "sim"
-  @default_preset "earthlike"
   @constraints [:runs_after, :runs_before]
 
   @typedoc "A world's `ruleset` section: a preset and changes to it, or an explicit list."
@@ -42,13 +41,14 @@ defmodule Avwe.Ruleset do
 
   @doc "The rule packages, from `config :avwe, :rule_packages`."
   @spec packages() :: [module()]
-  def packages,
-    do: Application.get_env(:avwe, :rule_packages, [Avwe.Rules.Engine, Avwe.Rules.Earthlike])
+  def packages, do: Application.get_env(:avwe, :rule_packages, [])
 
-  @doc "Every rule the packages ship, by id."
+  @doc "Every rule the packages ship, and the kernel's own `sim`, by id."
   @spec known() :: %{String.t() => module()}
   def known do
-    for package <- packages(), module <- package.rules(), into: %{}, do: {module.id(), module}
+    for module <- [Avwe.Rules.Sim | Enum.flat_map(packages(), & &1.rules())],
+        into: %{},
+        do: {module.id(), module}
   end
 
   @doc "The presets the packages name."
@@ -57,22 +57,30 @@ defmodule Avwe.Ruleset do
     Enum.reduce(packages(), %{}, fn package, acc -> Map.merge(acc, package.presets()) end)
   end
 
-  @doc "The preset a definition without a `ruleset` runs."
-  @spec default_preset() :: String.t()
-  def default_preset, do: @default_preset
+  @doc """
+  The ruleset a definition without a `ruleset` section runs: the preset named
+  in `config :avwe, :default_preset`, or `sim` alone.
+  """
+  @spec default() :: %{optional(atom()) => term()}
+  def default do
+    case Application.get_env(:avwe, :default_preset) do
+      nil -> %{rules: []}
+      name -> %{preset: name}
+    end
+  end
 
   # Resolving what a definition says
 
   @doc """
   The rule modules a `ruleset` section names, sorted by id, with `sim` among
-  them. `nil` is the default preset. The section is `%{preset: name, with: ids,
+  them. `nil` is the default ruleset (`default/0`). The section is `%{preset: name, with: ids,
   without: ids}` (`with` and `without` optional) or `%{rules: ids}`.
   """
   @spec resolve(spec()) :: {:ok, [module()]} | {:error, [String.t()]}
   def resolve(spec) do
     known = known()
 
-    with {:ok, ids} <- ids(Map.new(spec || %{preset: @default_preset})),
+    with {:ok, ids} <- ids(Map.new(spec || default())),
          ids = Enum.uniq([@engine | ids]),
          [] <- unknown(ids, known) do
       {:ok, ids |> Enum.sort() |> Enum.map(&Map.fetch!(known, &1))}

@@ -100,3 +100,34 @@ defmodule Avwe.Intent do
     }
   end
 end
+
+defimpl Avwe.Input, for: Avwe.Intent do
+  @moduledoc false
+
+  alias Avwe.{Actions, Event, Guests, Intent, Region, Tick}
+
+  # An intent is applied by the body it is for, and a body's intents in the
+  # order they were submitted.
+  @spec handle(Intent.t(), Region.t(), Tick.t()) :: {Region.t(), [Event.t()]}
+  def handle(intent, region, tick), do: Actions.handle(region, intent, tick)
+
+  @spec order_key(Intent.t()) :: String.t()
+  def order_key(intent), do: intent.body
+
+  # A guest's arrival is checked against the guests there and the arrivals
+  # waiting; the rest are checked as they are applied, and answered with a
+  # result.
+  @spec validate(Intent.t(), Region.t()) :: :ok | {:error, term()}
+  def validate(%{verb: :arrive} = intent, region), do: Guests.check(region, intent)
+  def validate(_intent, _region), do: :ok
+
+  # Autopilot's refs are the mark of an intent it made.
+  @spec derived?(Intent.t()) :: boolean()
+  def derived?(%{ref: ref}), do: String.starts_with?(ref, "auto-")
+
+  @spec seq(Intent.t()) :: non_neg_integer()
+  def seq(intent), do: intent.seq
+
+  @spec put_seq(Intent.t(), non_neg_integer()) :: Intent.t()
+  def put_seq(intent, seq), do: %{intent | seq: seq}
+end

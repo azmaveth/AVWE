@@ -11,9 +11,10 @@ defmodule Avwe.Region do
       just an id that appears in one or more component maps.
     * **fields**, dense per-cell values such as temperature or water.
     * **env**, region-wide values such as light.
-    * **terrain**, the static shape of the land (`Avwe.Terrain`), or `nil`.
-    * an **inbox** of intents waiting for the next step, and an **outbox** of
-      events emitted since it was last drained.
+    * **terrain**, the static shape of the land, opaque to the simulation and
+      owned by one rule, or `nil`.
+    * an **inbox** of inputs waiting for the next step (`Avwe.Input`), and an
+      **outbox** of events emitted since it was last drained.
 
   Build one with `new/1`, change it with the reducers, move it through time
   with `advance/3`, and read it with the converters.
@@ -26,7 +27,7 @@ defmodule Avwe.Region do
   depend on map iteration order.
   """
 
-  alias Avwe.{Actions, Event, Intent, SystemTable, Tick}
+  alias Avwe.{Event, Input, SystemTable, Tick}
 
   @type entity_id :: String.t()
   @type component :: atom()
@@ -58,7 +59,7 @@ defmodule Avwe.Region do
   @type t :: %__MODULE__{
           id: term(),
           seed: integer(),
-          terrain: Avwe.Terrain.t() | nil,
+          terrain: term(),
           step: non_neg_integer(),
           time: Avwe.Calendar.time(),
           dt: pos_integer(),
@@ -66,7 +67,7 @@ defmodule Avwe.Region do
           components: %{component() => %{entity_id() => term()}},
           fields: %{atom() => term()},
           env: %{atom() => term()},
-          inbox: [Intent.t()],
+          inbox: [Input.t()],
           next_seq: non_neg_integer(),
           outbox: [Event.t()]
         }
@@ -156,12 +157,12 @@ defmodule Avwe.Region do
   end
 
   @doc """
-  Queues an intent for the next step and numbers it. Intents are applied at
-  the start of the step, sorted by `{body, seq}`.
+  Queues an input (`Avwe.Input`) for the next step and numbers it. Inputs are
+  applied at the start of the step, sorted by `{order_key, seq}`.
   """
-  @spec submit(t(), Intent.t()) :: t()
-  def submit(%__MODULE__{inbox: inbox, next_seq: seq} = region, %Intent{} = intent) do
-    %{region | inbox: [%{intent | seq: seq} | inbox], next_seq: seq + 1}
+  @spec submit(t(), Input.t()) :: t()
+  def submit(%__MODULE__{inbox: inbox, next_seq: seq} = region, input) do
+    %{region | inbox: [Input.put_seq(input, seq) | inbox], next_seq: seq + 1}
   end
 
   @doc "Sets a region-wide environment value."
@@ -228,20 +229,20 @@ defmodule Avwe.Region do
 
     stepped =
       %{region | outbox: []}
-      |> apply_intents(tick)
+      |> apply_inputs(tick)
       |> run_systems(tick, observe)
       |> finish_step(tick)
 
     %{stepped | outbox: stepped.outbox ++ earlier}
   end
 
-  defp apply_intents(%__MODULE__{inbox: []} = region, _tick), do: region
+  defp apply_inputs(%__MODULE__{inbox: []} = region, _tick), do: region
 
-  defp apply_intents(%__MODULE__{inbox: inbox} = region, tick) do
+  defp apply_inputs(%__MODULE__{inbox: inbox} = region, tick) do
     inbox
-    |> Enum.sort_by(&{&1.body, &1.seq})
-    |> Enum.reduce(%{region | inbox: []}, fn intent, acc ->
-      {acc, events} = Actions.handle(acc, intent, tick)
+    |> Enum.sort_by(&{Input.order_key(&1), Input.seq(&1)})
+    |> Enum.reduce(%{region | inbox: []}, fn input, acc ->
+      {acc, events} = Input.handle(input, acc, tick)
       emit(acc, events, tick)
     end)
   end
@@ -322,13 +323,13 @@ defmodule Avwe.Region do
     |> Enum.sort()
   end
 
-  @doc "The intents waiting for the next step, in the order they were submitted."
-  @spec pending(t()) :: [Intent.t()]
+  @doc "The inputs waiting for the next step, in the order they were submitted."
+  @spec pending(t()) :: [Input.t()]
   def pending(%__MODULE__{inbox: inbox}), do: Enum.reverse(inbox)
 
   @doc """
   The events emitted so far in the step `tick` describes, oldest first: the
-  intents' and those of the systems that ran before the caller. For a
+  inputs' and those of the systems that ran before the caller. For a
   system that reacts to what happened earlier in the same step. A step
   runs on an outbox of its own (earlier events wait aside until it ends),
   so this is the same whether the region is advanced one step at a time

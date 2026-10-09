@@ -42,6 +42,7 @@ defmodule Avwe do
   require Logger
 
   @default_region {0, 0}
+  @default_hooks [Avwe.Hooks.Play, Avwe.Hooks.Settings]
 
   @doc """
   Starts a world, from a definition or from Quire.
@@ -98,6 +99,10 @@ defmodule Avwe do
       systems it was recorded with; after changing them, the region is
       snapshotted at once so the log from that point on belongs to the new
       rules.
+    * `:hooks` - modules that say what the layers above the simulation need
+      when a saved region is started again (`Avwe.Hooks`). Default: the agent
+      layer's (`Avwe.Hooks.Play`) and the settings comparison of a world from
+      Quire (`Avwe.Hooks.Settings`).
     * `:snapshot_every` - steps between snapshots. A snapshot is written at
       the end of any advance that crosses a multiple of this; a multi-step
       advance that crosses one snapshots at the end of that advance, not at
@@ -126,6 +131,7 @@ defmodule Avwe do
          },
          store: store_dir(id, Keyword.get(opts, :data_dir, Application.get_env(:avwe, :data_dir))),
          definition: world.definition,
+         hooks: Keyword.get(opts, :hooks, @default_hooks),
          snapshot_every: Keyword.get(opts, :snapshot_every, 1_000),
          snapshot_keep: Keyword.get(opts, :snapshot_keep, 5)}
       )
