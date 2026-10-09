@@ -77,20 +77,26 @@ replaces; `definition.json` is the output it should be able to produce),
   open or merge a pull request without Hysun's say-so, each time.**
 - **Do not change the simulation or play core**: `Avwe.Region`, `Tick`, the
   systems, `Actions`, `Perception`, `Session`, `Mind`, `Guests`, `Store`,
-  `RegionServer`, `World`. E2 is moving them (the kernel split); a clash costs
-  more than it saves. What you may change: `Avwe.Quire.*`, `Avwe.Definition.*`
-  (additively), `Avwe.Compile.*` and `Avwe.Chronicle.*` (new), Mix tasks,
-  `mix.exs` dependencies (see 4.10), `config/`, `priv/`, docs and test support.
-  Three small exceptions, each its own commit with its own test: a public
-  `Avwe.default_systems/0` (the smoke run needs the list `start_world` uses);
-  making `Avwe.Definition.Export.entities/1` public so the compile reuses it; and,
-  for Q7 only, a `chronicle:` option on `Avwe.start_world/2` with a
-  `DynamicSupervisor` child in `Avwe.Application` that holds the observers.
-- **E2 will change `Avwe.Definition.Schema`** (a `ruleset` section; `rules` filled
-  by what each rule declares). Learn what a definition may hold from the schema
-  *at run time* (4.3, 4.4), never from a copy of its section names, so E2 costs you
-  nothing. If the schema needs a new section or type for this work, ask Hysun
-  first; it is a change to what a world may name.
+  `RegionServer`, `World`. E2a (the kernel built in place: rules and their check,
+  system ids, inputs and hooks) has landed (pull request 18); E2b is moving those
+  files into a project of their own, `avwe_sim`, next, and a clash costs more than
+  it saves. What you may change: `Avwe.Quire.*`, `Avwe.Definition.*` (additively),
+  `Avwe.Compile.*` and `Avwe.Chronicle.*` (new), Mix tasks, `mix.exs` dependencies
+  (see 4.10), `config/`, `priv/`, docs and test support. Two small exceptions, each
+  its own commit with its own test: making `Avwe.Definition.Export.entities/1`
+  public so the compile reuses it; and, for Q7 only, a `chronicle:` option on
+  `Avwe.start_world/2` with a `DynamicSupervisor` child in `Avwe.Application` that
+  holds the observers. (`Avwe.default_systems/0`, which the smoke run needs, is
+  public already.)
+- **`Avwe.Definition.Schema` has a `ruleset` section since E2a** (a preset with
+  rules added and left out, or a list of rules; none means the Earth-like preset)
+  and will have `rules` filled by what each rule declares. Learn what a definition
+  may hold from the schema *at run time* (4.3, 4.4), never from a copy of its
+  section names, so the next change to it costs you nothing. The compile writes no
+  `ruleset`: the worlds it makes run the default rules. A definition with bodies
+  needs the rule that provides them (`play`), which the default has. If the schema
+  needs a new section or type for this work, ask Hysun first; it is a change to
+  what a world may name.
 - **This spec supersedes one line of `CLAUDE.md`**: "AVWE never writes to Quire's
   files except the chronicle (M4)". AVWE never writes to Quire at all; it
   *proposes* through Quire's API (decision 3) and the chronicle lives with the
@@ -168,8 +174,9 @@ Ash; read 2026-10-08, master `61dbe3c`).
   The golden journal and the equality tests prove the definition path builds the
   world the old path built.
 - What a definition can hold is exactly what `Schema` lists: places and bodies
-  (`entities`), `rules` (`earthlike.valley`: a river, rises and clay;
-  `earthlike.fire`: hearths; `earthlike.weather`: the wind), `miracles` (events
+  (`entities`), `ruleset` (which rules the world runs; optional), `rules`
+  (`earthlike.valley`: a river, rises and clay; `earthlike.fire`: hearths;
+  `earthlike.weather`: the wind), `miracles` (events
   that change a spring or a hearth at a time, and standing miracles), `characters`
   (norms, carried notebooks, a routine of timed plans over the verbs go, follow,
   walk, wait, say, stop, kindle, douse, write, read and rest; a glyph and a
@@ -554,7 +561,8 @@ gets its very large river. The schema stays permissive on purpose.
 ### 4.7 The smoke run
 
 A candidate that decodes is not yet a world that works. The compile builds the
-region (`Definition.region/2` with `Avwe.default_systems/0`) and advances it for the
+region (`Definition.region/2` with `Avwe.default_systems/0`, the systems of the rules
+the compile's worlds run, since it writes no `ruleset`) and advances it for the
 **smoke horizon**, by default one world day (`div(86_400, dt)` steps; the repo
 bounds a step at 10 ms, so a day may take 14 s, and the option `smoke_steps` lets
 tests use a short one) in a pure loop, `Region.advance/3` and `drain_events/1`, and
@@ -1133,8 +1141,8 @@ priv/compile/{prompts,guides}/*.md  priv/compile/ranges.json
 
 Each slice is one or a few pull requests and ends green on the whole gate (section
 0). Tracks A and B can run at once. Track A2 (Q7, Q8) touches the entry points
-that E2 is moving (`Avwe.start_world/2`, `Avwe.Application`): it waits until Hysun
-says in which order.
+that E2b is moving (`Avwe.start_world/2`, `Avwe.Application`): it waits until E2b,
+the kernel's move into `avwe_sim`, has landed.
 
 **Track A, in AVWE (the compile).**
 
@@ -1142,15 +1150,15 @@ says in which order.
 |---|---|---|
 | **Q1** | `Snapshot` (the clock injected, links, hashes, id collisions), `Source.Files`, `Brief` (fields and types), `mix avwe.compile.snapshot`; `Export.entities/1` public | The fixture world's snapshot, with a fixed `taken_at`, is byte-identical across runs and machines (compared with a checked-in file); changing one article changes that article's hash and the snapshot's and nothing else; the hash does not depend on the order a source returns records in (a property); a place and a body with one id are refused with both named; `Export.from_quire/2` gives the **same definition** from `Snapshot.to_world(snapshot)` as from the folder (a test over the fixture and the recipe); the task writes the file |
 | **Q2** | The pure kit: `JsonSchema` (and the codec's accessors), `Path`, `Merge`, `Diff`, `Evidence`, the `Provenance` struct and `Provenance.check/3` | `JsonSchema` accepts the Ember Reach definition and the fixture's, and for generated variants that are invalid in *shape* (a wrong type, a missing or unknown key, a value outside an enum or a length) it refuses what the decoder refuses (validate with `ex_json_schema`, which `arbor_mcp` brings in every environment: declare it in `mix.exs` **without** `only`, since Mix refuses a top-level `only: :test` for it); `Path.get/put` round-trip over both definitions, ids with `/` and `~` included; `merge(a, a) == a`, pinned wins, id-merge appends in order; `diff(a, a) == []` and a one-field change gives one change; quote cases (Markdown, links, curly quotes, whitespace, Unicode, too short, absent, several quotes some of which fail); `Provenance.check` finds each problem it lists |
-| **Q3a** | The pipeline: `Compile`, `Pass` (ownership predicates, views), prompts and guides, claims and coverage, merge and in-context validation (decode, region build, `Compile.Rules`), the repair loop and dropped passes, the candidate files; `--no-llm`, `--dry-run`, `LLM.Scripted` and the `llm:` injection into `mix avwe.compile.run`; `Avwe.default_systems/0` | `--no-llm` on the fixture gives a valid bare definition whose `entities` equal the exporter's; scripted answers for the fixture yield a candidate that decodes, builds and has provenance covering every leaf; each rejection class is a test (an out-of-scope path or item stripped and counted, a quote not found, an uncovered leaf, an id taken, a routine to the river's source, repair then success, repair exhausted and the pass dropped, the `world` pass failing, pinned beats the model); Appendix C 1, 3 and 5; `--dry-run` calls nothing and names the passes |
+| **Q3a** | The pipeline: `Compile`, `Pass` (ownership predicates, views), prompts and guides, claims and coverage, merge and in-context validation (decode, region build, `Compile.Rules`), the repair loop and dropped passes, the candidate files; `--no-llm`, `--dry-run`, `LLM.Scripted` and the `llm:` injection into `mix avwe.compile.run` | `--no-llm` on the fixture gives a valid bare definition whose `entities` equal the exporter's; scripted answers for the fixture yield a candidate that decodes, builds and has provenance covering every leaf; each rejection class is a test (an out-of-scope path or item stripped and counted, a quote not found, an uncovered leaf, an id taken, a routine to the river's source, repair then success, repair exhausted and the pass dropped, the `world` pass failing, pinned beats the model); Appendix C 1, 3 and 5; `--dry-run` calls nothing and names the passes |
 | **Q3b** | Sanity ranges (`ranges.json`, repair then clamp), the smoke run with `smoke_steps`, the report and `mix avwe.compile.review`, `Cache`, `Transcript`, `Workdir`, the budget, `--only`, `--refresh`, `--pull` | Appendix C 2 (clamped; a pinned value exempt); the smoke run's findings are in the report and a raise writes `invalid.json`; two runs with a warm cache write byte-identical candidate files and the second calls nothing; `--only` runs the passes named; the budget stops a run (exit status 3) and keeps the cache; the full-day smoke run is tested once and a short one elsewhere |
 | **Q4** | `LLM.Cassette` (a header with the prompt files' hashes; replay and `--record`), `LLM.Files` (awaiting, exit status 3); a cassette of the fixture world recorded with `req_llm` and the configured `provider:model-id` | The replay test passes offline in CI; editing a prompt or guide fails it with a message that names the file (from the header) and the re-record command; the `Files` adapter's two-step flow (requests written, answers dropped in, run completes) is a test; the Ember Reach fixture compile reads sensibly to Hysun (his review, in the PR) |
 | **Q5** | `accept`, `pin`, `adopt`, `status`, `bootstrap`; incremental regeneration; the diff in the report; the exporter refusing a bootstrapped world | Change one article of the fixture snapshot and recompile: only the passes that read it call the adapter (counted), and the diff names exactly the paths that moved; `bootstrap` of the checked-in Ember Reach yields a brief and provenance from which a recompile with a scripted model produces **no diff** (everything is pinned); `accept` refuses a stale or invalid candidate (a changed brief, a moved base); `adopt` turns a hand edit into a pin (by the value hashes); a renamed id is reported; the saved-world warning is in the report |
 | **Q6** | `Source.Api` on `Req` (reached only through the `Source` behaviour, by the module name the spec gives, so the prod build never names it); a fake Quire on a real socket; `req` as a dev/test dep; the prod compile in CI | The fake serves the real shapes (copied from `QuireWeb.API.V1.JSON`), with and without `/snapshot`; a world that changes between the double read of any of the four resources gives `{:error, :unstable}`; fallback slugs follow `Quire.Worlds.slugify/1` with the stated tie-break; a token never appears in any output (a grep test); `MIX_ENV=prod mix compile --warnings-as-errors` is clean |
 | **Q6b** | `LLM.ReqLLM`, with `req_llm` as a dev/test dep; the provider and model from `--model` or `config :avwe, :compile, model:` (`provider:model-id`), and a missing one is an error | A tagged live test (`:live_llm`, excluded by default) runs one pass; a run with no provider or no model stops without calling; nothing else changes |
 
-**Track A2, in AVWE (the chronicle and proposals).** After E2's kernel split
-(section 12, question 11, decided).
+**Track A2, in AVWE (the chronicle and proposals).** After E2b, the kernel's move
+into its own project (section 12, question 11, decided; E2a landed as pull request 18).
 
 | Slice | Scope | Done when |
 |---|---|---|
@@ -1297,9 +1305,10 @@ by both).
 10. **Where the guides live once rules own their parameters** (E2 and after).
     Default: here, keyed by rule id; they move with the rule when rules become
     modules.
-11. **The order with E2.** Decided: Q1 to Q6b first. Q7 and Q8 wait until E2's
-    kernel split has landed. They touch `Avwe.start_world/2` and the supervision
-    tree, which that split moves.
+11. **The order with E2.** Decided: Q1 to Q6b first. Q7 and Q8 wait until E2b, the
+    kernel's move into the `avwe_sim` project, has landed (E2a, the kernel built in
+    place, landed as pull request 18). They touch `Avwe.start_world/2` and the
+    supervision tree, which that move changes.
 
 **What to expect from the first real run**, so that it does not surprise anyone:
 
@@ -1468,7 +1477,7 @@ with the existing proposal for a repeated `external_id`.
 > `/Users/azmaveth/code/avwe`. Read `CLAUDE.md`, then `docs/quire-spec.md` in full:
 > it is your brief. You own track A, slices Q1 to Q6b in order (Q3 is Q3a then
 > Q3b), one pull request each on a branch off `master`. Track A2 (Q7, Q8) is not
-> yours yet: Q7 and Q8 wait until E2's kernel split has landed (section 12,
+> yours yet: Q7 and Q8 wait until E2b's kernel split has landed (section 12,
 > question 11). Do not push, open or merge a pull request without
 > asking Hysun first, each time. Do not touch the simulation or play core (the list
 > is in section 0). Start with Q1. At the end of each slice report: what you built,
