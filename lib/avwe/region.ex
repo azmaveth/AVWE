@@ -272,8 +272,10 @@ defmodule Avwe.Region do
   # A system with a period runs in the step that reaches a multiple of it,
   # whatever the step length (so the choice depends on time, never on counting
   # steps, and many steps at once are the same as one by one). It is told the
-  # period it covers: a step as long as the period or longer is its own tick,
-  # a shorter one becomes the last `every` seconds up to the step's end.
+  # period it covers: a step as long as the period or longer is its own tick; a
+  # shorter one reaches at most one multiple, and the system is told the `every`
+  # seconds that ended there, so the periods it is told tile time even when the
+  # step does not divide the period. It sees the region as the step left it.
   defp due(options, tick) do
     case Keyword.get(options, :every) do
       nil ->
@@ -284,7 +286,7 @@ defmodule Avwe.Region do
 
       every ->
         if Tick.crossed?(tick, every),
-          do: %{tick | time: Tick.end_time(tick) - every, dt: every},
+          do: %{tick | time: Tick.last_occurrence(tick, every) - every, dt: every},
           else: :skip
     end
   end

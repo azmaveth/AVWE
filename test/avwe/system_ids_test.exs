@@ -173,8 +173,38 @@ defmodule Avwe.SystemIdsTest do
     test "a period counts from the clock and not from the start" do
       region = region([{Counter, every: 300}], time: 100) |> Region.advance(10)
 
-      # Steps end at 160, 220, 280, 340 (crosses 300), ..., 640 (crosses 600).
-      assert counted(region) == [{40, 300}, {340, 300}]
+      # Steps end at 160, 220, 280, 340 (crosses 300), ..., 640 (crosses 600): the
+      # periods it is told are those of the clock, the first of which began before
+      # the region did.
+      assert counted(region) == [{0, 300}, {300, 300}]
+    end
+
+    test "a period that is not a multiple of the step is told the period that ended at the multiple" do
+      region = region([{Counter, every: 100}]) |> Region.advance(5)
+
+      # Steps end at 60, 120, 180, 240, 300; they reach 100, 200 and 300. Each time it is
+      # told the hundred seconds that ended there, so none is told twice or skipped.
+      assert counted(region) == [{0, 100}, {100, 100}, {200, 100}]
+    end
+
+    property "the periods a system is told tile time, whatever the step and the period" do
+      check all step <- integer(1..500),
+                extra <- integer(1..3_000),
+                start <- integer(0..10_000),
+                steps <- integer(1..120) do
+        every = step + extra
+
+        told =
+          region([{Counter, every: every}], time: start, dt: step)
+          |> Region.advance(steps)
+          |> counted()
+
+        stop = start + steps * step
+        first = div(start, every) + 1
+
+        assert told == for(n <- first..div(stop, every)//1, do: {(n - 1) * every, every}),
+               "every #{every} s over (#{start}, #{stop}] in steps of #{step} s"
+      end
     end
 
     test "a step as long as the period, or longer, runs the system as it is" do
