@@ -46,11 +46,12 @@ defmodule Avwe.MixProject do
   # The PLTs live in priv/plts (git-ignored) so CI can cache them. The
   # flags go beyond the defaults and find nothing today; `:missing_return`
   # (specs narrower than the code) was left off, it flags integer-versus-
-  # float arithmetic mostly.
+  # float arithmetic mostly. `:mix` is in them for the Mix task in lib/mix.
   defp dialyzer do
     [
       plt_local_path: "priv/plts",
       plt_core_path: "priv/plts",
+      plt_add_apps: [:mix],
       flags: [:error_handling, :extra_return, :unknown]
     ]
   end

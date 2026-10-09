@@ -60,6 +60,10 @@ defmodule Avwe.Worldgen do
   @grid 256
   @default_wind %{from: "south-west", m_s: 2.0}
 
+  @doc "Cells on a side of every world's map."
+  @spec grid() :: pos_integer()
+  def grid, do: @grid
+
   @doc """
   Builds the region. Options: those of `Avwe.Region.new/1`, plus `:terrain`,
   `:hearths`, `:miracles`, `:climate` and `:characters` as above.
@@ -209,14 +213,28 @@ defmodule Avwe.Worldgen do
   # "HH:MM" as seconds of day, checked where a bad one is easiest to
   # explain: the autopilot would never find the moment to cross.
   defp time_of_day!(id, at) do
+    case time_of_day(at) do
+      {:ok, seconds} ->
+        seconds
+
+      :error ->
+        raise ArgumentError, "character #{inspect(id)}: at must be \"HH:MM\", got #{inspect(at)}"
+    end
+  end
+
+  @doc """
+  A time of day written `"HH:MM"` (a routine entry's `:at`) as seconds of the
+  day, or `:error` when it is not one.
+  """
+  @spec time_of_day(term()) :: {:ok, non_neg_integer()} | :error
+  def time_of_day(at) do
     with true <- is_binary(at),
          [hour, minute] <- Regex.run(~r/^(\d\d):(\d\d)$/, at, capture: :all_but_first),
          {hour, minute} when hour < 24 and minute < 60 <-
            {String.to_integer(hour), String.to_integer(minute)} do
-      hour * Calendar.hour() + minute * Calendar.minute()
+      {:ok, hour * Calendar.hour() + minute * Calendar.minute()}
     else
-      _bad ->
-        raise ArgumentError, "character #{inspect(id)}: at must be \"HH:MM\", got #{inspect(at)}"
+      _bad -> :error
     end
   end
 
