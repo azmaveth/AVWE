@@ -1,4 +1,7 @@
-ExUnit.start(exclude: [:perf, :playwright])
+# A test that simulates a day of the valley is seconds of CPU on a fast machine and
+# can be most of a minute on a busy CI runner with several cases at once, so the
+# default of 60 s is too short for it; this is the longest any module asks for.
+ExUnit.start(exclude: [:perf, :playwright], timeout: 180_000)
 
 # The browser tests (test/browser) drive Chromium through Playwright, which
 # needs Node and a browser: start it only when they are asked for, as in
