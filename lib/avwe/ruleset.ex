@@ -371,7 +371,7 @@ defmodule Avwe.Ruleset do
 
   defp sorted(by_id, edges) do
     before = Enum.group_by(edges, &elem(&1, 1), &elem(&1, 0))
-    take(Map.keys(by_id) |> Enum.sort(), by_id, before, MapSet.new(), [])
+    take(Map.keys(by_id) |> Enum.sort(), by_id, before, %{}, [])
   end
 
   defp take([], _by_id, _before, _done, acc), do: {:ok, Enum.reverse(acc)}
@@ -382,12 +382,12 @@ defmodule Avwe.Ruleset do
         {:cycle, pending}
 
       id ->
-        take(List.delete(pending, id), by_id, before, MapSet.put(done, id), [by_id[id] | acc])
+        take(List.delete(pending, id), by_id, before, Map.put(done, id, true), [by_id[id] | acc])
     end
   end
 
   defp ready?(id, before, done) do
-    before |> Map.get(id, []) |> Enum.all?(&MapSet.member?(done, &1))
+    before |> Map.get(id, []) |> Enum.all?(&is_map_key(done, &1))
   end
 
   defp cycle(stuck) do
