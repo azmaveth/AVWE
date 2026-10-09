@@ -30,13 +30,14 @@
    quire-phoenix has what this needs.
 5. **Quire's API may change.** Section 6 is the contract AVWE asks of it.
 
-Defaults I chose (cheap to change on review; section 12 lists the questions):
-the compile runs offline from a snapshot, as a batch that a person reviews, and
-is not a service; the LLM is behind an adapter, with an "agent in the loop"
-adapter first (no API key, no new dependency) and a direct one (`req_llm`) next;
-proposals are posted by a batch task from a chronicle file, not live from the
-running world; the first proposals are *creations* (a pin, an article, a
-timeline event) and never edits.
+Defaults I chose (cheap to change on review; section 12 lists the questions,
+and the ones Hysun has answered): the compile runs offline from a snapshot, as a
+batch that a person reviews, and is not a service; the LLM is behind an adapter,
+and the first real compile runs through `req_llm`, with the provider and the
+model name given for each run and never named in the code; `Files` remains the
+adapter for a run with no key; proposals are posted by a batch task from a
+chronicle file, not live from the running world; the first proposals are
+*creations* (a pin, an article, a timeline event) and never edits.
 
 **Done when:**
 
@@ -605,10 +606,12 @@ definition".
 `%{pass, round, system, prompt, schema, model, params}` (the pass id and the
 repair round, so that a stand-in can tell the thirteen parallel place passes
 apart) and the response `%{object, usage, model}`. The model is named by
-`--model` or `config :avwe, :compile, model:`, and otherwise left to the
-adapter's default. The Mix tasks take the adapter from `--llm`; `run/2`, which a
-test calls, also takes `llm: {module, opts}`, which wins, so a test needs no
-flag to put a `Scripted` in. Adapters:
+`--model` or `config :avwe, :compile, model:`. For `ReqLLM` that value is
+`provider:model-id`, and both parts are required: the adapter names neither a
+provider nor a model, and a run that omits either stops and says so. The other
+adapters may ignore it. The Mix tasks take the adapter from `--llm`; `run/2`,
+which a test calls, also takes `llm: {module, opts}`, which wins, so a test
+needs no flag to put a `Scripted` in. Adapters:
 
 - `Scripted`: a function of the request, or a map from pass id to a list of
   answers (one per round); for unit tests.
@@ -619,7 +622,7 @@ flag to put a `Scripted` in. Adapters:
   which file changed (it compares the header with the files now). This is how
   tests run the real prompts offline (section 9), and what makes a changed prompt
   visible: its key changes and the cassette no longer matches.
-- `Files` (**the first real adapter; no key and no new dependency**): each request
+- `Files` (**no key and no new dependency**): each request
   is written to `tmp/compile/<id>/requests/<key>.json` and the run stops with the
   count; an agent in the loop (Claude Code, say, or a person) writes
   `responses/<key>.json`; running again continues from the cache. A request with
@@ -947,9 +950,9 @@ one thing. The loop for this example needs the schema to let the source **be**
 an existing place (for instance `source: {"at": "<place id>"}`: the spring attaches
 to that place, and the generator puts the river's head at its cell). That is a
 change to what a definition may say, small and additive (the Ember Reach's
-golden journal does not use it), and it is **not part of this work**: it is slice
-S1 in section 8, for Hysun. Q8's end-to-end test needs it; everything before Q8
-does not.
+golden journal does not use it). Hysun decided it on 2026-10-09: the schema does
+allow it. That is slice S1 in section 8. Q8's end-to-end test needs it;
+everything before Q8 does not.
 
 ## 6. The Quire API: what AVWE asks of it
 
@@ -1141,13 +1144,13 @@ says in which order.
 | **Q2** | The pure kit: `JsonSchema` (and the codec's accessors), `Path`, `Merge`, `Diff`, `Evidence`, the `Provenance` struct and `Provenance.check/3` | `JsonSchema` accepts the Ember Reach definition and the fixture's, and for generated variants that are invalid in *shape* (a wrong type, a missing or unknown key, a value outside an enum or a length) it refuses what the decoder refuses (validate with `ex_json_schema`, which `arbor_mcp` brings in every environment: declare it in `mix.exs` **without** `only`, since Mix refuses a top-level `only: :test` for it); `Path.get/put` round-trip over both definitions, ids with `/` and `~` included; `merge(a, a) == a`, pinned wins, id-merge appends in order; `diff(a, a) == []` and a one-field change gives one change; quote cases (Markdown, links, curly quotes, whitespace, Unicode, too short, absent, several quotes some of which fail); `Provenance.check` finds each problem it lists |
 | **Q3a** | The pipeline: `Compile`, `Pass` (ownership predicates, views), prompts and guides, claims and coverage, merge and in-context validation (decode, region build, `Compile.Rules`), the repair loop and dropped passes, the candidate files; `--no-llm`, `--dry-run`, `LLM.Scripted` and the `llm:` injection into `mix avwe.compile.run`; `Avwe.default_systems/0` | `--no-llm` on the fixture gives a valid bare definition whose `entities` equal the exporter's; scripted answers for the fixture yield a candidate that decodes, builds and has provenance covering every leaf; each rejection class is a test (an out-of-scope path or item stripped and counted, a quote not found, an uncovered leaf, an id taken, a routine to the river's source, repair then success, repair exhausted and the pass dropped, the `world` pass failing, pinned beats the model); Appendix C 1, 3 and 5; `--dry-run` calls nothing and names the passes |
 | **Q3b** | Sanity ranges (`ranges.json`, repair then clamp), the smoke run with `smoke_steps`, the report and `mix avwe.compile.review`, `Cache`, `Transcript`, `Workdir`, the budget, `--only`, `--refresh`, `--pull` | Appendix C 2 (clamped; a pinned value exempt); the smoke run's findings are in the report and a raise writes `invalid.json`; two runs with a warm cache write byte-identical candidate files and the second calls nothing; `--only` runs the passes named; the budget stops a run (exit status 3) and keeps the cache; the full-day smoke run is tested once and a short one elsewhere |
-| **Q4** | `LLM.Cassette` (a header with the prompt files' hashes; replay and `--record`), `LLM.Files` (awaiting, exit status 3); a cassette of the fixture world recorded with a real model (ask Hysun, once, for a key or to drive the `Files` loop) | The replay test passes offline in CI; editing a prompt or guide fails it with a message that names the file (from the header) and the re-record command; the `Files` adapter's two-step flow (requests written, answers dropped in, run completes) is a test; the Ember Reach fixture compile reads sensibly to Hysun (his review, in the PR) |
+| **Q4** | `LLM.Cassette` (a header with the prompt files' hashes; replay and `--record`), `LLM.Files` (awaiting, exit status 3); a cassette of the fixture world recorded with `req_llm` and the configured `provider:model-id` | The replay test passes offline in CI; editing a prompt or guide fails it with a message that names the file (from the header) and the re-record command; the `Files` adapter's two-step flow (requests written, answers dropped in, run completes) is a test; the Ember Reach fixture compile reads sensibly to Hysun (his review, in the PR) |
 | **Q5** | `accept`, `pin`, `adopt`, `status`, `bootstrap`; incremental regeneration; the diff in the report; the exporter refusing a bootstrapped world | Change one article of the fixture snapshot and recompile: only the passes that read it call the adapter (counted), and the diff names exactly the paths that moved; `bootstrap` of the checked-in Ember Reach yields a brief and provenance from which a recompile with a scripted model produces **no diff** (everything is pinned); `accept` refuses a stale or invalid candidate (a changed brief, a moved base); `adopt` turns a hand edit into a pin (by the value hashes); a renamed id is reported; the saved-world warning is in the report |
 | **Q6** | `Source.Api` on `Req` (reached only through the `Source` behaviour, by the module name the spec gives, so the prod build never names it); a fake Quire on a real socket; `req` as a dev/test dep; the prod compile in CI | The fake serves the real shapes (copied from `QuireWeb.API.V1.JSON`), with and without `/snapshot`; a world that changes between the double read of any of the four resources gives `{:error, :unstable}`; fallback slugs follow `Quire.Worlds.slugify/1` with the stated tie-break; a token never appears in any output (a grep test); `MIX_ENV=prod mix compile --warnings-as-errors` is clean |
-| **Q6b** | `LLM.ReqLLM`, with `req_llm` as a dev/test dep | A tagged live test (`:live_llm`, excluded by default) runs one pass; nothing else changes |
+| **Q6b** | `LLM.ReqLLM`, with `req_llm` as a dev/test dep; the provider and model from `--model` or `config :avwe, :compile, model:` (`provider:model-id`), and a missing one is an error | A tagged live test (`:live_llm`, excluded by default) runs one pass; a run with no provider or no model stops without calling; nothing else changes |
 
-**Track A2, in AVWE (the chronicle and proposals).** Wait for Hysun's word on the
-order with E2 (open question 11).
+**Track A2, in AVWE (the chronicle and proposals).** After E2's kernel split
+(section 12, question 11, decided).
 
 | Slice | Scope | Done when |
 |---|---|---|
@@ -1162,8 +1165,8 @@ order with E2 (open question 11).
 | **QA2** | A5: token scopes, the contributor role, the tokens page, `mix quire.service_token` | A `read`-only token cannot write; a contributor can read and (after QA3) propose and nothing else; the migration keeps existing tokens working with all scopes |
 | **QA3** | A6 to A8: proposals (schema, endpoints, accept applies in one transaction with refs, reject, withdraw, idempotency), origin, the queue page, MCP tools (`get_snapshot` too), CLI (`quire snapshot` too) | Every endpoint, tool, command and page has a case in `test/e2e`; a duplicate `external_id` returns the first; accepting a proposal whose change conflicts marks it `failed` and applies nothing; created records show their origin |
 
-**S1, for Hysun, not for the implementing agent.** The schema lets a river's source
-**be** an existing place (5.3). A small additive change to `Avwe.Definition.Schema`,
+**S1, decided.** The schema lets a river's source **be** an existing place
+(5.3, question 6). A small additive change to `Avwe.Definition.Schema`,
 `Avwe.Worldgen` and the terrain generator, with the Ember Reach's golden journal
 unchanged. Do it before Q8's end-to-end test.
 
@@ -1259,10 +1262,21 @@ slice after Q8); reading Quire's comments or webhooks; tokens with expiry.
 
 ## 12. Open questions
 
-Each has a default; the implementing agent uses it unless Hysun says otherwise.
+Hysun answered on 2026-10-09. An implementing agent follows a decided question
+as written here. Each question still open has a default, and the agent uses
+that unless he says otherwise.
 
-1. **Which model first.** Default: whatever Hysun drives through the `Files`
-   adapter, then `req_llm` with a provider he names. The code picks no model.
+Also decided for quire-phoenix, as section 6 already asks: A4 (`sort_key` is a
+decimal, whole numbers stay whole, and inference from `date_label` stays an
+integer) and A5 (a token's scopes and a contributor role, and a token is limited
+by both).
+
+1. **Which model first.** Decided: the first real compile runs through `req_llm`.
+   The provider and the model name are configuration, never a pair the code
+   chooses. A run sets them with `--model` or `config :avwe, :compile, model:`
+   as `provider:model-id`. When either part is missing, the run stops and says
+   so. The key is the provider's usual environment variable. `Files` stays the
+   adapter for a run that has no key.
 2. **The present and later canon.** Default: `as_of` in the brief; timeline events
    after it are shown to the model as future canon and never instantiated.
 3. **Commit the accepted snapshot** (`priv/worlds/<id>/snapshot.json`, about
@@ -1270,9 +1284,12 @@ Each has a default; the implementing agent uses it unless Hysun says otherwise.
    evidence in the repository.
 4. **Batch or live posting.** Default: batch, from the chronicle file. A live
    poster is a small addition later.
-5. **Scopes or a role for AVWE's credential.** Default: both (a `propose` scope on
-   the token, a contributor user).
-6. **The river's source** (5.3). Default: extend the schema (S1).
+5. **Scopes or a role for AVWE's credential.** Decided: both (scopes on the
+   token, and a contributor user). A token is limited by its scopes and by the
+   user's role. AVWE's credential is a contributor with `read` and `propose`.
+6. **The river's source** (5.3). Decided: extend the schema (S1), so a source
+   may be an existing place, `source: {"at": "<place id>"}`. The Ember Reach's
+   golden journal does not use it.
 7. **Glyph and colour.** Default: the character pass may set them when the prose
    gives an image, and otherwise omits them.
 8. **Does `accept` commit?** Default: no; the person commits.
@@ -1280,9 +1297,9 @@ Each has a default; the implementing agent uses it unless Hysun says otherwise.
 10. **Where the guides live once rules own their parameters** (E2 and after).
     Default: here, keyed by rule id; they move with the rule when rules become
     modules.
-11. **The order with E2.** Q7 and Q8 touch `Avwe.start_world/2` and the supervision
-    tree, which E2 moves. Default: Q1 to Q6b first (they touch none of it); Q7 and Q8
-    after E2's kernel split lands, or as Hysun says.
+11. **The order with E2.** Decided: Q1 to Q6b first. Q7 and Q8 wait until E2's
+    kernel split has landed. They touch `Avwe.start_world/2` and the supervision
+    tree, which that split moves.
 
 **What to expect from the first real run**, so that it does not surprise anyone:
 
@@ -1451,13 +1468,14 @@ with the existing proposal for a repeated `external_id`.
 > `/Users/azmaveth/code/avwe`. Read `CLAUDE.md`, then `docs/quire-spec.md` in full:
 > it is your brief. You own track A, slices Q1 to Q6b in order (Q3 is Q3a then
 > Q3b), one pull request each on a branch off `master`. Track A2 (Q7, Q8) is not
-> yours yet: it waits for Hysun's word on the order with E2. Do not push, open or merge a pull request without
+> yours yet: Q7 and Q8 wait until E2's kernel split has landed (section 12,
+> question 11). Do not push, open or merge a pull request without
 > asking Hysun first, each time. Do not touch the simulation or play core (the list
 > is in section 0). Start with Q1. At the end of each slice report: what you built,
 > the gate's result, the deliberate breaks you tried and what caught them, and
 > anything in the spec you found wrong, ambiguous or missing, with the change you
-> propose. Do not deviate silently. The open questions in section 12 have
-> defaults; use them.
+> propose. Do not deviate silently. Section 12 says which questions are decided
+> and the default for the rest; follow it.
 
 **For the agent working in quire-phoenix:**
 
