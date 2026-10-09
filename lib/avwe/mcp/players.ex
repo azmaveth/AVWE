@@ -2,21 +2,21 @@ defmodule Avwe.MCP.Players do
   @moduledoc """
   Which MCP player plays which body: one `Avwe.Mind` per player.
 
-  The MCP server's tool handlers live only as long as one request, so the
+  The MCP server's tool handlers keep nothing between requests, so the
   Minds are kept here, by player key. Keys come in two kinds that never
   meet: `{:session, id}`, the MCP session of a client that has one, and
   `{:token, token}`, a player token that `join` gave a client without one
   (MCP 2026-07-28 has no sessions). A token can never name a session's
   player, nor a session id a token's. A Mind ends when:
 
-    * its MCP session is deleted (`Avwe.MCP.Sessions` tells `ended/1`);
-    * its MCP session expires in ExMCP's session manager, found by a sweep
-      every `:sweep_ms` real milliseconds (default one minute);
+    * its MCP session is deleted (`Avwe.MCP.Endpoint` tells `ended/1`);
     * the player leaves (`leave/1`);
     * nobody calls for its `quit_after`, 15 real minutes by
       default here (the `:quit_after` option, in ms), so an abandoned
       player frees its body; this is the only end a token player has
-      besides leaving. Or its world stops.
+      besides leaving, and the only one a session player has when its
+      session expires without a DELETE (the server keeps sessions longer
+      than that). Or its world stops.
 
   A Mind that ends on its own is forgotten, so the player can join again.
 
@@ -29,9 +29,6 @@ defmodule Avwe.MCP.Players do
 
   alias Avwe.Mind
 
-  require Logger
-
-  @sweep_ms 60_000
   @quit_after 15 * 60_000
 
   @type key :: {:session, String.t()} | {:token, String.t()}
@@ -110,14 +107,12 @@ defmodule Avwe.MCP.Players do
 
   @impl GenServer
   def init(opts) do
-    sweep_ms = Keyword.get(opts, :sweep_ms, @sweep_ms)
     quit_after = Keyword.get(opts, :quit_after, @quit_after)
-    Process.send_after(self(), :sweep, sweep_ms)
 
     if :persistent_term.get({__MODULE__, :quit_after}, nil) != quit_after,
       do: :persistent_term.put({__MODULE__, :quit_after}, quit_after)
 
-    {:ok, %{players: %{}, sweep_ms: sweep_ms, quit_after: quit_after}}
+    {:ok, %{players: %{}, quit_after: quit_after}}
   end
 
   @impl GenServer
@@ -169,35 +164,6 @@ defmodule Avwe.MCP.Players do
   def handle_info({:DOWN, monitor, :process, _mind, _reason}, state) do
     players = Map.reject(state.players, fn {_key, player} -> player.monitor == monitor end)
     {:noreply, %{state | players: players}}
-  end
-
-  # Sessions that expired in ExMCP's session manager end their Minds.
-  def handle_info(:sweep, state) do
-    {gone, kept} =
-      Enum.split_with(state.players, fn
-        {{:session, session}, _player} -> expired?(session)
-        {{:token, _token}, _player} -> false
-      end)
-
-    for {{:session, session}, player} <- gone do
-      Logger.info(
-        "MCP session #{String.slice(session, 0, 8)}... expired; releasing #{player.body}"
-      )
-
-      close(player)
-    end
-
-    Process.send_after(self(), :sweep, state.sweep_ms)
-    {:noreply, %{state | players: Map.new(kept)}}
-  end
-
-  defp expired?(session) do
-    case ExMCP.SessionManager.get_session(session) do
-      {:ok, %{status: :active}} -> false
-      _terminated_or_gone -> true
-    end
-  catch
-    :exit, _no_session_manager -> false
   end
 
   defp close(player) do

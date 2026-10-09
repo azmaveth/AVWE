@@ -6,7 +6,7 @@ defmodule Avwe.E2E.ThreeControllersTest do
   Lantern Hollow at noon on a manual clock. Wren (telnet) and Tamsin (MCP) are
   on Hollow Green. Odo (the web page) is in the Far Tower, 1.5 km east, out of
   sight and hearing, and walks to them. Telnet is over TCP, MCP over HTTP with
-  ExMCP's client, and the page through its endpoint with `Phoenix.LiveViewTest`
+  ArborMCP's client, and the page through its endpoint with `Phoenix.LiveViewTest`
   (its socket and its browser are tested in `web_test.exs` and the Browser job).
   """
 

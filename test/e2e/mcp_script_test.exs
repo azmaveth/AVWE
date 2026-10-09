@@ -8,6 +8,7 @@ defmodule Avwe.E2E.MCPScriptTest do
   use ExUnit.Case, async: false
 
   import Avwe.Test.Fixtures, only: [lantern_hollow: 0, eventually: 1]
+  import Avwe.Test.MCPClient, only: [http: 4]
 
   alias Avwe.MCP.Players
 
@@ -41,6 +42,19 @@ defmodule Avwe.E2E.MCPScriptTest do
 
   defp saved(context), do: context.session_file |> File.read!() |> Jason.decode!()
 
+  # The server has forgotten the session: a request naming it is a 404.
+  defp session_gone?(port, session) do
+    ping = %{"jsonrpc" => "2.0", "id" => 1, "method" => "ping"}
+
+    headers = [
+      {"mcp-session-id", session},
+      {"mcp-protocol-version", "2025-11-25"},
+      {"accept", "application/json, text/event-stream"}
+    ]
+
+    http(port, :post, "/mcp", body: ping, headers: headers).status == 404
+  end
+
   test "plays a body across calls, and --leave lets go of it and ends the session", context do
     assert {0, out} = run(context, ["join", ~s({"body": "wren"})])
     assert out =~ "You are Wren, at Hollow Green."
@@ -55,13 +69,15 @@ defmodule Avwe.E2E.MCPScriptTest do
     assert out =~ "Session ended."
     refute File.exists?(context.session_file)
     eventually(fn -> Players.playing(@world)["wren"] == nil end)
-    assert {:ok, %{status: :terminated}} = ExMCP.SessionManager.get_session(session)
+    assert session_gone?(context.port, session)
   end
 
   test "a session the server has forgotten (404) is started again, once", context do
     assert {0, _out} = run(context, ["bodies"])
     old = saved(context)["session"]
-    :ok = ExMCP.SessionManager.terminate_session(old)
+
+    assert %{status: 204} =
+             http(context.port, :delete, "/mcp", headers: [{"mcp-session-id", old}])
 
     assert {0, out} = run(context, ["bodies"])
     assert out =~ "(The saved session is gone; starting a new one.)"

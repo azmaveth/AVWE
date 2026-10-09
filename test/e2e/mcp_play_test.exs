@@ -1,6 +1,6 @@
 defmodule Avwe.E2E.MCPPlayTest do
   @moduledoc """
-  End to end over real HTTP with ExMCP's client: how play over MCP reads,
+  End to end over real HTTP with ArborMCP's client: how play over MCP reads,
   in Lantern Hollow at noon with a fire pit on the green and a cold hearth
   by the mill pond, on a manual clock, beside telnet players. Wren and
   Tamsin stand on Hollow Green; Pell is at the Mill Pond, 70 m east.

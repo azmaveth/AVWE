@@ -29,7 +29,7 @@ rule about it below).
 - **Every user- or agent-facing feature gets an end-to-end test** through its
   real transport (`test/e2e/`): telnet over TCP with `Avwe.Test.TelnetClient`,
   sessions as agents use them, MCP over real HTTP with `Avwe.Test.MCPClient`
-  (ExMCP's client; `test/e2e/mcp_*_test.exs`), the web client over a real
+  (ArborMCP's client; `test/e2e/mcp_*_test.exs`), the web client over a real
   socket with `Avwe.Test.HTTPClient` and `Avwe.Test.WebSocketClient`
   (`test/e2e/web_*_test.exs`, with `Avwe.Test.WebPage` for a page's side of the
   LiveView protocol; the pages' own logic is in `test/avwe_web/`, through

@@ -210,25 +210,54 @@ terms for unattended runs.
   `:interrupt` percepts have no producers or consumers; so MCP, which is
   request and reply, fits. Arbor already has an MCP client, configured per
   agent (`Arbor.Gateway.MCP.ClientConnection`, capabilities under
-  `arbor://mcp/<server>/`). Not yet known: how its tools reach an agent's prompt.
-  The spike answers that, and what taint labels, the egress gate (tainted data
-  to a cloud-hosted model needs a human-authenticated disclosure that a
-  heartbeat never has: an unattended agent wants an on-host model) and the
-  `capability_intent("world", ...)` dispatcher (which knows only shell) need.
+  `arbor://mcp/<server>/`).
+
+  **The spike, first part** (2026-10-08, Arbor at `fab033ba5`: its code read in a
+  clone, and two connection runs against AVWE; Arbor itself was not started).
+
+  - *The wire works.* Arbor's client library (ExMCP 1.3.0, with the options its
+    `ClientConnection` uses: streamable HTTP, `protocol_mode: :legacy_only`) plays
+    AVWE on ArborMCP: bodies, join, look, leave. ArborMCP's own client in its
+    default mode negotiates MCP 2026-07-28 and plays by player token.
+  - *Its tools do not reach an agent's turn.* An agent connects servers through an
+    approval-gated config (`Arbor.Agent.set_mcp_config/3`; the two-argument form
+    is refused), a server's tools become `mcp.<server>.<tool>` with the
+    capability `arbor://mcp/<server>/<tool>`, and results are tagged `:untrusted`.
+    But the tools of an agent's turn are its profile's or template's action
+    modules (`Lifecycle.resolve_agent_tools`), and the one caller of
+    `Arbor.Gateway.call_mcp_tool` is Arbor's own MCP server handler, for external
+    agents. An agent that plays AVWE needs a bridge: an action module for the
+    `world` capability, or the connection's tools put into the session's tool list.
+  - *Starting Arbor beside the live one is not isolated by default.* `mix
+    arbor.setup` writes `~/.arbor` (the SQLite database, the identity and operator
+    keys), the gateway and dashboard take ports 4000 and 4001, and
+    `arbor.user.init` completes genesis there; a run for a spike overrides `HOME`,
+    the ports and the node name. For an on-host model, `arbor.doctor` detects
+    LM Studio's local server (OpenAI-compatible, port 1234).
+
+  What is left of the spike is to build that bridge in a clone and run one agent
+  on a local model through it. It waits for Arbor's rework (below), since the
+  bridge is what the rework decides. It still answers what taint labels, the
+  egress gate (tainted data to a cloud-hosted model needs a human-authenticated
+  disclosure that a heartbeat never has: an unattended agent wants an on-host
+  model) and the `capability_intent("world", ...)` dispatcher (which knows only
+  shell) need.
 
   **Moving ground (Hysun, 2026-10-08).** All of the above is Arbor as read at
   `05c2ca9`. Arbor's intent/percept system is being reworked, and ExMCP is
   being split: the MCP library, kept slim, becomes ArborMCP, and ACP and the
   shared RPC module move out of it. A release candidate stable enough to test
   with is aimed for by 2026-10-09. The spike goes through MCP with the commands
-  any player uses, so the rework does not touch it. The second half of M3b,
+  any player uses, so the rework does not touch what AVWE offers; it does decide
+  the bridge on Arbor's side. The second half of M3b,
   connecting percepts to Arbor directly, depends on the rework and is specified
   once it settles; the facts above are checked again against the tree as it is
-  then, and before the spike. AVWE's MCP server and test client are on ExMCP 1.5
+  then, and before the spike. AVWE's MCP server and test client were on ExMCP 1.5
   (`ExMCP.HttpPlug`, `ExMCP.SessionManager`, the handler behaviour,
   `ExMCP.Client` in tests, and one internal module,
-  `ExMCP.Internal.VersionRegistry`); they move to ArborMCP as a change of their
-  own (`docs/m2-spec.md`, 3.1 and 7).
+  `ExMCP.Internal.VersionRegistry`); they moved to ArborMCP 2 (rc.2) as a change
+  of their own on 2026-10-08 (`docs/m1-spec.md`, errata; `docs/m2-spec.md`, 3.1
+  and 7).
 - **M3c, living.** A run harness (start the world at the slow pace, the
   inhabitants and the watch page; a spend cap and a kill switch, since a body
   nobody calls for goes back to its routine on its own), two dedicated

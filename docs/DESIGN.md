@@ -175,7 +175,7 @@ avwe/
   lib/avwe/mind.ex       the controller side for programs: plans, waits (M1)
   lib/avwe/quire/        importer; snapshots, sources; compile/ and chronicle/ to come (docs/quire-spec.md)
   lib/avwe/telnet/       text client (M0)
-  lib/avwe/mcp.ex, mcp/  MCP adapter on ExMCP: endpoint, players, steps,
+  lib/avwe/mcp.ex, mcp/  MCP adapter on ArborMCP: endpoint, players, steps,
                          reports (M1)
   lib/avwe_web/          Phoenix on Bandit (M2): the endpoint and the guards
                          that keep a page that is not ours out, the lobby, the
@@ -795,7 +795,7 @@ is as it was.
 | TCP line protocol (telnet) | Text client | Percepts rendered as prose on the server, MUD-style commands parsed into intents |
 | Phoenix LiveView (WebSocket) | Web client | The page's own socket. Percepts are rendered as lines, and the scene goes to the canvas as JSON (`Avwe.Scene.to_map/1`) in an attribute. A click on the map comes back as a cell, and a button or a typed line as a command line. The watch page is sent the world's ground once, in an attribute of its own, and the world scene (`Avwe.WorldScene.to_map/1`) in another with each step that changes it; a click comes back as a cell and how far it may miss |
 | Phoenix Channels (WebSocket) | Arbor | JSON messages as above |
-| MCP (ExMCP, streamable HTTP) | Claude | Tools described in section 12 |
+| MCP (ArborMCP, streamable HTTP) | Claude | Tools described in section 12 |
 
 ## 9. Clients
 
@@ -986,7 +986,7 @@ domain.
 
 ## 12. MCP adapter (Claude plays)
 
-Built in M1 (`Avwe.MCP`, on ExMCP; `docs/m1-spec.md` and its errata). One
+Built in M1 (`Avwe.MCP`; on ExMCP then, on ArborMCP 2 since 2026-10-08; `docs/m1-spec.md` and its errata). One
 endpoint, `http://127.0.0.1:4041/mcp` in dev, streamable HTTP bound to
 loopback; a GET there answers 405 and every other path 404. `.mcp.json` at
 the repo root points Claude Code at it, and `scripts/mcp_call.py` is a

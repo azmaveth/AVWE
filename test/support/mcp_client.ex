@@ -1,6 +1,6 @@
 defmodule Avwe.Test.MCPClient do
   @moduledoc """
-  An MCP player for end-to-end tests: ExMCP's own client over real HTTP
+  An MCP player for end-to-end tests: ArborMCP's own client over real HTTP
   against an `Avwe.MCP` server on localhost.
 
   Tool calls that wait on world time block until the world is stepped, so
@@ -10,6 +10,7 @@ defmodule Avwe.Test.MCPClient do
 
   import ExUnit.Assertions
 
+  alias Arbor.MCP.Client
   alias Avwe.MCP.Players
   alias Avwe.Test.Fixtures
 
@@ -22,7 +23,7 @@ defmodule Avwe.Test.MCPClient do
   """
   def connect(port, protocol_mode \\ :legacy_only) do
     {:ok, client} =
-      ExMCP.Client.start_link(
+      Client.start_link(
         transport: :http,
         url: "http://127.0.0.1:#{port}/mcp",
         use_sse: false,
@@ -34,7 +35,7 @@ defmodule Avwe.Test.MCPClient do
   end
 
   @doc """
-  One raw HTTP request to the server on `port`, for what ExMCP's client
+  One raw HTTP request to the server on `port`, for what ArborMCP's client
   does not show: `%{status, headers, body}`, header names lowercased.
   Options: `:headers` and `:body` (encoded as JSON).
   """
@@ -79,8 +80,8 @@ defmodule Avwe.Test.MCPClient do
 
   @doc "Ends the session (an HTTP DELETE) and stops the client."
   def close(client) do
-    :ok = ExMCP.Client.disconnect(client)
-    ExMCP.Client.stop(client)
+    :ok = Client.disconnect(client)
+    Client.stop(client)
   end
 
   @doc """
@@ -89,7 +90,8 @@ defmodule Avwe.Test.MCPClient do
   is a tool error.
   """
   def call(client, tool, args \\ %{}) do
-    {:ok, result} = ExMCP.Client.call_tool(client, tool, args, timeout: @timeout, format: :map)
+    {:ok, result} =
+      Client.call_tool(client, tool, args, timeout: @timeout, format: :map)
 
     %{
       text: result |> Map.get("content", []) |> Enum.map_join("\n", & &1["text"]),
