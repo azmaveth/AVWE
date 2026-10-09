@@ -33,6 +33,8 @@ jobs:
         with:
           version-file: .tool-versions
           version-type: strict
+      # The simulation kernel is a path dependency, which mix deps.get needs.
+      - uses: ./.github/actions/kernel
 
       # hex.audit reads the locked packages, so they must be fetched; there is
       # nothing to compile.

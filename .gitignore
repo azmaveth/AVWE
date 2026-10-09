@@ -26,6 +26,9 @@ avwe-*.tar
 # Worlds' logs and snapshots (config :avwe, :data_dir).
 /worlds/
 
+# The simulation kernel as CI checks it out beside the code (.github/actions/kernel).
+/avwe_sim/
+
 # Worktrees the Claude app makes for parallel agents
 /.claude/worktrees/
 
