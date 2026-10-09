@@ -9,11 +9,10 @@ defmodule Avwe.Application do
   def start(_type, _args) do
     :ok = Avwe.Ruleset.register_known()
 
+    # The simulation kernel (avwe_sim) has started by now, and with it the registries
+    # `Avwe.Registry` and `Avwe.PubSub` and the supervisor `Avwe.Worlds`.
     children =
       [
-        {Registry, keys: :unique, name: Avwe.Registry},
-        {Registry, keys: :duplicate, name: Avwe.PubSub},
-        {DynamicSupervisor, name: Avwe.Worlds, strategy: :one_for_one},
         {DynamicSupervisor, name: Avwe.Sessions, strategy: :one_for_one},
         {DynamicSupervisor, name: Avwe.Minds, strategy: :one_for_one},
         Avwe.MCP.Players,

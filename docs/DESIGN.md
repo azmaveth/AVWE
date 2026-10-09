@@ -136,6 +136,13 @@ which is what keeps the core deterministic and testable.
 
 ### Proposed layout
 
+The simulation kernel is a project of its own since E2b, `avwe_sim` beside this
+repository (modules keep their `Avwe.*` names): `world.ex`, `region.ex`, `tick.ex`,
+`rng.ex`, `event.ex`, `system.ex`, `system_table.ex`, `calendar.ex`, `space.ex`,
+`store.ex`, `region_server.ex`, `clock.ex`, `input.ex`, `hooks.ex`, `rule.ex`,
+`rule_package.ex`, `ruleset.ex`, `rules/sim.ex` and `systems/miracles.ex` in the
+tree below are its files. AVWE depends on it by path.
+
 ```
 avwe/
   lib/avwe/              simulation core, no I/O
@@ -262,7 +269,7 @@ module runs one, so moving or renaming a module breaks no saved world; the id
 is what the state hash and every snapshot see. A system may be listed with a
 period, `every: seconds`, and then runs only in a step that reaches a multiple
 of it. Which systems a world runs, and in what order, is its **ruleset**
-(`Avwe.Ruleset`, `docs/engine-spec.md` section 4.2 and "E2 as built"): the
+(`Avwe.Ruleset`, `docs/engine-spec.md` section 4.2 and "E2a as built"): the
 rules it lists, each saying what it owns, needs and runs after.
 
 A system that only acts at certain moments (sunrise, every hour) checks

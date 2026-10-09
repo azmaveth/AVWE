@@ -7,7 +7,7 @@ defmodule Avwe.RulesTest do
 
   use ExUnit.Case, async: true
 
-  alias Avwe.{Intent, Region, Rule, RuleCase, Ruleset}
+  alias Avwe.{Intent, Region, Rule, RuleCase, Ruleset, SystemTable}
   alias Avwe.Test.Ember
 
   @mira "mira-vale"
@@ -59,6 +59,21 @@ defmodule Avwe.RulesTest do
 
   defp rule_of(plan, system_id) do
     Enum.find(plan.rules, fn rule -> Enum.any?(rule.systems, &(&1.id == system_id)) end)
+  end
+
+  test "every system the engine ships declares an id of its rule's, and they are all different" do
+    systems =
+      for app <- [:avwe, :avwe_sim],
+          module <- Application.spec(app, :modules),
+          String.starts_with?(inspect(module), "Avwe.Systems."),
+          Avwe.System in (module.module_info(:attributes)[:behaviour] || []),
+          do: module
+
+    ids = Enum.map(systems, &SystemTable.id/1)
+
+    assert length(systems) == 12
+    assert length(Enum.uniq(ids)) == 12
+    assert Enum.all?(ids, &String.match?(&1, ~r{\A(sim|play|earthlike\.[a-z]+)/[a-z]+\z}))
   end
 
   test "a system writes only the keys its rule owns, or may edit", %{plan: plan, written: written} do
