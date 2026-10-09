@@ -31,4 +31,37 @@ defmodule Avwe.System do
   @callback prepare(Avwe.Region.t()) :: Avwe.Region.t()
 
   @optional_callbacks prepare: 1, system_id: 0
+
+  @doc """
+  What is wrong with the options a system is listed with, as the words that follow
+  "with" (`"every: 0, which is not a whole number of seconds above 0"`), or
+  `[]`. A system has one option, `:every`; `also` names more keys a caller reads
+  itself (the ruleset reads `:runs_after` and `:runs_before`).
+  """
+  @spec option_problems(term(), [atom()]) :: [String.t()]
+  def option_problems(options, also \\ [])
+
+  def option_problems(options, also) when is_list(options) do
+    if Keyword.keyword?(options) do
+      for {key, value} <- options, problem <- option_problem(key, value, also), do: problem
+    else
+      ["options that are not a keyword list"]
+    end
+  end
+
+  def option_problems(_other, _also), do: ["options that are not a keyword list"]
+
+  defp option_problem(:every, every, _also) when is_integer(every) and every > 0, do: []
+
+  defp option_problem(:every, other, _also),
+    do: ["every: #{inspect(other)}, which is not a whole number of seconds above 0"]
+
+  defp option_problem(key, _value, also) do
+    if key in also do
+      []
+    else
+      has = Enum.map_join([:every | also], ", ", &inspect/1)
+      ["the option #{inspect(key)}, which a system does not have (it has #{has})"]
+    end
+  end
 end

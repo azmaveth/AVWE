@@ -43,7 +43,10 @@ defmodule Avwe.Definition.Check do
     case Ruleset.resolve(definition.ruleset) do
       {:ok, modules} ->
         listed = MapSet.new(modules, & &1.id())
-        composition(modules) ++ not_run(definition, listed)
+
+        composition(modules) ++
+          not_run(definition, listed) ++
+          ruleset_problems(Definition.unserved(definition, modules))
 
       {:error, problems} ->
         ruleset_problems(problems)

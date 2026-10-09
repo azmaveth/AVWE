@@ -107,6 +107,24 @@ defmodule Avwe.SystemIdsTest do
                region([{Counter, every: 300}]).systems
     end
 
+    test "a region refuses options it cannot run, in words, and does not keep them" do
+      for {options, words} <- [
+            {[every: 0], "every: 0, which is not a whole number of seconds above 0"},
+            {[every: -5], "every: -5, which is not a whole number"},
+            {[every: 60.5], "every: 60.5, which is not a whole number"},
+            {[every: "60"], ~s(every: "60", which is not a whole number)},
+            {[evry: 60], "the option :evry, which a system does not have (it has :every)"}
+          ] do
+        assert_raise ArgumentError,
+                     ~r/the system test.ids.counter\/step is listed with #{Regex.escape(words)}/,
+                     fn -> region([{Counter, options}]) end
+      end
+
+      assert_raise ArgumentError, ~r/options that are not a keyword list/, fn ->
+        region([{Counter, [:every]}])
+      end
+    end
+
     test "what a region keeps is what it accepts again" do
       kept = region([Counter, {Unnamed, every: 60}]).systems
 

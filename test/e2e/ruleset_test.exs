@@ -78,6 +78,26 @@ defmodule Avwe.E2E.RulesetTest do
              "the world's rules do not make a world:\n  earthlike.heat needs :air_temperature"
   end
 
+  test "a definition with bodies and no rule to serve them does not start, and says why" do
+    definition = %{
+      ember_reach_definition()
+      | ruleset: [preset: "earthlike", without: ["play"]]
+    }
+
+    assert {:error, {:invalid_ruleset, problems} = reason} =
+             Avwe.start_world(@world, definition: definition)
+
+    assert Avwe.World.whereis(@world) == nil
+    assert [bodies | _guests] = problems
+    assert bodies =~ "the world has bodies (" and bodies =~ "mira-vale"
+
+    assert bodies =~
+             "which need :bodies, and no rule in this ruleset provides it (play does)"
+
+    assert Definition.explain(reason) =~
+             "the world's rules do not make a world:\n  the world has bodies"
+  end
+
   test "the same ruleset always gives the same plan" do
     plans = for _n <- 1..5, do: Ruleset.plan_for(nil)
 

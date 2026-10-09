@@ -107,8 +107,17 @@ defmodule Avwe.Region do
   @spec systems([module() | String.t() | {module() | String.t(), keyword()}]) :: [system()]
   def systems(given) when is_list(given), do: Enum.map(given, &system/1)
 
-  defp system({module_or_id, options}) when is_list(options),
-    do: {system_id(module_or_id), options}
+  defp system({module_or_id, options}) when is_list(options) do
+    id = system_id(module_or_id)
+
+    case Avwe.System.option_problems(options) do
+      [] ->
+        {id, options}
+
+      problems ->
+        raise ArgumentError, "the system #{id} is listed with #{Enum.join(problems, "; ")}"
+    end
+  end
 
   defp system(module_or_id), do: {system_id(module_or_id), []}
 

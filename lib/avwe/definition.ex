@@ -25,7 +25,7 @@ defmodule Avwe.Definition do
   starting region; `encode/1`, `to_json/1` and `hash/1` write it out.
   """
 
-  alias Avwe.{Calendar, Region, Worldgen}
+  alias Avwe.{Calendar, Region, Ruleset, Worldgen}
   alias Avwe.Definition.{Check, Codec, Json, Schema}
 
   @default_dt 60
@@ -211,6 +211,36 @@ defmodule Avwe.Definition do
     canonical = definition |> encode() |> Map.delete("guests") |> Json.compact()
     :sha256 |> :crypto.hash(canonical) |> Base.encode16(case: :lower)
   end
+
+  # Serving
+
+  @doc """
+  What the definition puts in the world that the rules of `modules` cannot serve,
+  in words, or `[]`: bodies need a rule that provides `:bodies`, and the guests
+  who arrive in them one that provides `:intents` (`Avwe.Ruleset`). Without it
+  nobody would act on what they are told.
+  """
+  @spec unserved(t(), [module()]) :: [String.t()]
+  def unserved(%__MODULE__{} = definition, modules) do
+    bodies = for {id, %{body: _body}} <- definition.entities, do: id
+
+    wanted = [
+      {bodies != [], :bodies, "the world has bodies (#{some(bodies)})"},
+      {definition.guests != nil, :intents, "the world takes guests"}
+    ]
+
+    for {true, capability, what} <- wanted, not Ruleset.provides?(modules, capability) do
+      "#{what}, which need :#{capability}, and no rule in this ruleset provides it" <>
+        who_does(Ruleset.providers_of(capability))
+    end
+  end
+
+  defp some(ids) when length(ids) <= 3, do: Enum.join(ids, ", ")
+  defp some(ids), do: Enum.join(Enum.take(ids, 3), ", ") <> " and #{length(ids) - 3} more"
+
+  defp who_does([]), do: ""
+  defp who_does([one]), do: " (#{one} does)"
+  defp who_does(several), do: " (#{Enum.join(several, " and ")} do)"
 
   # Building
 

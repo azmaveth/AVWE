@@ -527,6 +527,34 @@ defmodule Avwe.DefinitionTest do
       assert problem =~ ~s(ruleset: no ruleset preset is named "medieval")
     end
 
+    test "a rule left out that no rule has is refused, naming it" do
+      ruleset = %{"preset" => "earthlike", "without" => ["earthlike.smok"]}
+
+      assert [problem] = problems(Map.put(tiny(), "ruleset", ruleset))
+      assert problem =~ ~s(ruleset: no rule has the id "earthlike.smok")
+    end
+
+    test "bodies and guests need a rule that provides them" do
+      ruleset = %{"preset" => "earthlike", "without" => ["play"]}
+
+      assert problems(Map.put(tiny(), "ruleset", ruleset)) == [
+               "ruleset: the world has bodies (wren), which need :bodies, and no rule in " <>
+                 "this ruleset provides it (play does)",
+               "ruleset: the world takes guests, which need :intents, and no rule in this " <>
+                 "ruleset provides it (play does)"
+             ]
+    end
+
+    test "a world of places and nobody needs no rule for bodies" do
+      json =
+        tiny()
+        |> Map.drop(["characters", "guests"])
+        |> update_in(["entities"], &Enum.reject(&1, fn entity -> entity["id"] == "wren" end))
+        |> Map.put("ruleset", %{"preset" => "earthlike", "without" => ["play"]})
+
+      assert {:ok, _definition} = Definition.decode(json)
+    end
+
     test "rules that do not make a world are refused, all the problems at once" do
       ruleset = %{"preset" => "earthlike", "without" => ["earthlike.weather"]}
       problems = problems(Map.put(tiny(), "ruleset", ruleset))

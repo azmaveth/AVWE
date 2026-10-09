@@ -160,24 +160,30 @@ defmodule Avwe do
     systems
   end
 
-  # The systems a world runs: the ones it is given, or those of its rules.
-  defp systems(opts, ruleset) do
+  # The systems a world runs: the ones it is given, or those of its rules. The
+  # rules are checked against the definition they are for (`nil`: a world from
+  # Quire, which runs the default ruleset).
+  defp systems(opts, definition) do
     case Keyword.fetch(opts, :systems) do
       {:ok, systems} -> {:ok, systems}
-      :error -> ruleset_systems(ruleset)
+      :error -> ruleset_systems(definition)
     end
   end
 
-  defp ruleset_systems(spec) do
-    case Ruleset.plan_for(spec) do
-      {:ok, plan} ->
-        :ok = Ruleset.register(plan)
-        {:ok, Ruleset.systems(plan)}
-
-      {:error, problems} ->
-        {:error, {:invalid_ruleset, problems}}
+  defp ruleset_systems(definition) do
+    with {:ok, modules} <- Ruleset.resolve(definition && definition.ruleset),
+         {:ok, plan} <- Ruleset.plan(modules),
+         [] <- definition_unserved(definition, modules) do
+      :ok = Ruleset.register(plan)
+      {:ok, Ruleset.systems(plan)}
+    else
+      problems when is_list(problems) -> {:error, {:invalid_ruleset, problems}}
+      {:error, problems} -> {:error, {:invalid_ruleset, problems}}
     end
   end
+
+  defp definition_unserved(nil, _modules), do: []
+  defp definition_unserved(definition, modules), do: Definition.unserved(definition, modules)
 
   defp from_quire(id, opts) do
     with {:ok, path} <- quire_path(opts),
@@ -220,7 +226,7 @@ defmodule Avwe do
   defp from_definition(id, source, opts) do
     with :ok <- definition_alone(opts),
          {:ok, definition} <- definition(source),
-         {:ok, systems} <- systems(opts, definition.ruleset) do
+         {:ok, systems} <- systems(opts, definition) do
       region = Definition.region(definition, id: @default_region, systems: systems)
 
       warn_unplaced(

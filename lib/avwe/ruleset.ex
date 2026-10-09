@@ -27,8 +27,11 @@ defmodule Avwe.Ruleset do
   @engine "sim"
   @constraints [:runs_after, :runs_before]
 
-  @typedoc "A world's `ruleset` section: a preset and changes to it, or an explicit list."
-  @type spec :: nil | %{optional(atom()) => term()}
+  @typedoc """
+  A world's `ruleset` section: a preset and changes to it, or an explicit list, as
+  a map or as the keyword list a definition keeps.
+  """
+  @type spec :: nil | keyword() | %{optional(atom()) => term()}
 
   @type plan :: %{
           rules: [map()],
@@ -69,21 +72,36 @@ defmodule Avwe.Ruleset do
     end
   end
 
+  @doc "Whether a rule among `modules` provides `capability`."
+  @spec provides?([module()], atom()) :: boolean()
+  def provides?(modules, capability) do
+    Enum.any?(modules, &(capability in Rule.manifest(&1).provides))
+  end
+
+  @doc "The ids of the rules the packages ship that provide `capability`, sorted."
+  @spec providers_of(atom()) :: [String.t()]
+  def providers_of(capability) do
+    for({id, module} <- known(), capability in Rule.manifest(module).provides, do: id)
+    |> Enum.sort()
+  end
+
   # Resolving what a definition says
 
   @doc """
   The rule modules a `ruleset` section names, sorted by id, with `sim` among
   them. `nil` is the default ruleset (`default/0`). The section is `%{preset: name, with: ids,
-  without: ids}` (`with` and `without` optional) or `%{rules: ids}`.
+  without: ids}` (`with` and `without` optional) or `%{rules: ids}`. A rule named
+  that no package ships, `sim` left out, and a rule both added and left out are
+  refused, each in words.
   """
   @spec resolve(spec()) :: {:ok, [module()]} | {:error, [String.t()]}
   def resolve(spec) do
     known = known()
+    spec = Map.new(spec || default())
 
-    with {:ok, ids} <- ids(Map.new(spec || default())),
-         ids = Enum.uniq([@engine | ids]),
-         [] <- unknown(ids, known) do
-      {:ok, ids |> Enum.sort() |> Enum.map(&Map.fetch!(known, &1))}
+    with {:ok, ids} <- ids(spec),
+         [] <- named_wrongly(spec, known) do
+      {:ok, [@engine | ids] |> Enum.uniq() |> Enum.sort() |> Enum.map(&Map.fetch!(known, &1))}
     else
       problems when is_list(problems) -> {:error, problems}
       {:error, problems} -> {:error, problems}
@@ -96,7 +114,7 @@ defmodule Avwe.Ruleset do
     case Map.fetch(presets(), name) do
       {:ok, ids} ->
         without = Map.get(spec, :without, [])
-        {:ok, (ids ++ Map.get(spec, :with, [])) -- without}
+        {:ok, (ids ++ Map.get(spec, :with, [])) |> Enum.uniq() |> Enum.reject(&(&1 in without))}
 
       :error ->
         {:error, ["no ruleset preset is named #{inspect(name)} (#{list(Map.keys(presets()))})"]}
@@ -106,10 +124,24 @@ defmodule Avwe.Ruleset do
   defp ids(_other),
     do: {:error, ["a ruleset is a preset (with rules added and left out) or a list of rules"]}
 
-  defp unknown(ids, known) do
-    for id <- ids, not is_map_key(known, id) do
-      "no rule has the id #{inspect(id)} (#{list(Map.keys(known))})"
-    end
+  # What the section says that cannot be done: a rule that does not exist, wherever
+  # it is named, the engine's own left out, and a rule both added and left out.
+  defp named_wrongly(spec, known) do
+    added = Map.get(spec, :with, [])
+    left_out = Map.get(spec, :without, [])
+    named = Enum.uniq(Map.get(spec, :rules, []) ++ added ++ left_out)
+
+    unknown =
+      for id <- named, not is_map_key(known, id) do
+        "no rule has the id #{inspect(id)} (#{list(Map.keys(known))})"
+      end
+
+    engine =
+      if @engine in left_out, do: ["#{@engine} always runs and cannot be left out"], else: []
+
+    both = for id <- Enum.uniq(added), id in left_out, do: "#{id} is both added and left out"
+
+    unknown ++ engine ++ both
   end
 
   # The check
@@ -133,6 +165,7 @@ defmodule Avwe.Ruleset do
           ownership(rules) ++
           needs(rules, known) ++
           system_ids(rules) ++
+          options(rules) ++
           order_problems
       )
 
@@ -191,8 +224,26 @@ defmodule Avwe.Ruleset do
   # Names
 
   defp duplicates(rules) do
-    for {id, [_first, _second | _rest]} <- Enum.group_by(rules, & &1.id) do
-      "the rule #{id} is listed twice"
+    rules_twice =
+      for {id, [_first, _second | _rest]} <- Enum.group_by(rules, & &1.id) do
+        "the rule #{id} is listed twice"
+      end
+
+    systems_twice =
+      for rule <- Enum.uniq_by(rules, & &1.id),
+          {name, [_first, _second | _rest]} <- Enum.group_by(rule.systems, & &1.name) do
+        "#{rule.id} lists a system named #{name} twice"
+      end
+
+    rules_twice ++ systems_twice
+  end
+
+  # What a system is listed with: a period, and the order it keeps (`@constraints`).
+  defp options(rules) do
+    for rule <- Enum.uniq_by(rules, & &1.id),
+        system <- rule.systems,
+        problem <- Avwe.System.option_problems(system.options, @constraints) do
+      "#{rule.id} lists its system #{system.name} with #{problem}"
     end
   end
 
@@ -290,6 +341,7 @@ defmodule Avwe.Ruleset do
   defp own_order(rules) do
     for rule <- rules,
         [first, second] <- Enum.chunk_every(rule.systems, 2, 1, :discard),
+        first.id != second.id,
         do: {first.id, second.id}
   end
 
@@ -371,7 +423,25 @@ defmodule Avwe.Ruleset do
 
   defp sorted(by_id, edges) do
     before = Enum.group_by(edges, &elem(&1, 1), &elem(&1, 0))
-    take(Map.keys(by_id) |> Enum.sort(), by_id, before, %{}, [])
+
+    case take(Map.keys(by_id) |> Enum.sort(), by_id, before, %{}, []) do
+      {:cycle, stuck} -> {:cycle, in_loop(stuck, before)}
+      sorted -> sorted
+    end
+  end
+
+  # Of the systems that could not be placed, those that wait for one another round
+  # and round: a system that only waits on a loop is held up by it, and is not in it.
+  defp in_loop(stuck, before) do
+    waited_on =
+      for id <- stuck, predecessor <- Map.get(before, id, []), predecessor in stuck, into: %{} do
+        {predecessor, true}
+      end
+
+    case Enum.filter(stuck, &is_map_key(waited_on, &1)) do
+      ^stuck -> stuck
+      fewer -> in_loop(fewer, before)
+    end
   end
 
   defp take([], _by_id, _before, _done, acc), do: {:ok, Enum.reverse(acc)}

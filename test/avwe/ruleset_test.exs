@@ -29,6 +29,9 @@ defmodule Avwe.RulesetTest do
   defsystem(Z, "test.ruleset.ties_z/step")
   defsystem(LX, "test.ruleset.loop_x/step")
   defsystem(LW, "test.ruleset.loop_w/step")
+  defsystem(T1, "test.ruleset.twice/step")
+  defsystem(O1, "test.ruleset.options/step")
+  defsystem(W1, "test.ruleset.waits/step")
 
   defrule(RA, "test.ruleset.a",
     owns: [{:component, :shared}],
@@ -65,6 +68,19 @@ defmodule Avwe.RulesetTest do
     runs_after: ["test.ruleset.loop_x"],
     systems: [{"step", LW}]
   )
+
+  # Waits on a rule that is in a loop, without being in it.
+  defrule(RWaits, "test.ruleset.waits",
+    runs_after: ["test.ruleset.loop_x"],
+    systems: [{"step", W1}]
+  )
+
+  defrule(RTwice, "test.ruleset.twice", systems: [{"step", T1}, {"step", T1}])
+
+  defrule(RBadPeriod, "test.ruleset.options", systems: [{"step", O1, every: 0}])
+  defrule(RFloatPeriod, "test.ruleset.options", systems: [{"step", O1, every: 60.5}])
+  defrule(RMisspelt, "test.ruleset.options", systems: [{"step", O1, evry: 60}])
+  defrule(RPeriod, "test.ruleset.options", systems: [{"step", O1, every: 300}])
 
   defrule(RTypo, "test.ruleset.typo",
     runs_after: ["test.ruleset.nowhere/step", :nothing_provides_this]
@@ -223,6 +239,84 @@ defmodule Avwe.RulesetTest do
     end
   end
 
+  describe "what a definition says of its rules" do
+    test "a rule left out that no rule has is refused, as one added is" do
+      assert {:error, [message]} =
+               Ruleset.resolve(%{preset: "earthlike", without: ["earthlike.smok"]})
+
+      assert message =~ ~s(no rule has the id "earthlike.smok")
+    end
+
+    test "the engine's own rule cannot be left out" do
+      assert Ruleset.resolve(%{preset: "earthlike", without: ["sim"]}) ==
+               {:error, ["sim always runs and cannot be left out"]}
+    end
+
+    test "a rule added and left out at once is refused, not guessed" do
+      spec = %{preset: "earthlike", with: ["earthlike.fire"], without: ["earthlike.fire"]}
+
+      assert Ruleset.resolve(spec) == {:error, ["earthlike.fire is both added and left out"]}
+    end
+
+    test "a rule added that the preset has, or listed twice, is still one rule" do
+      {:ok, plain} = Ruleset.plan_for(%{preset: "earthlike"})
+      {:ok, added} = Ruleset.plan_for(%{preset: "earthlike", with: ["earthlike.fire"]})
+      {:ok, twice} = Ruleset.plan_for(%{rules: ["play", "play", "earthlike.daylight"]})
+
+      assert ids(added) == ids(plain)
+
+      assert Enum.sort(ids(twice)) ==
+               Enum.sort([
+                 "earthlike.daylight/step",
+                 "sim/miracles",
+                 "play/movement",
+                 "play/waiting",
+                 "play/discovery",
+                 "play/autopilot",
+                 "play/memory"
+               ])
+    end
+
+    test "what is left out is left out, once or however often the preset says it" do
+      {:ok, plan} = Ruleset.plan_for(%{preset: "earthlike", without: ["earthlike.smoke"]})
+
+      refute "earthlike.smoke/step" in ids(plan)
+    end
+
+    test "a ruleset may be given as a keyword list, as a definition keeps it" do
+      assert Ruleset.plan_for(preset: "earthlike", without: ["earthlike.smoke"]) ==
+               Ruleset.plan_for(%{preset: "earthlike", without: ["earthlike.smoke"]})
+    end
+  end
+
+  describe "what a rule says of its systems" do
+    test "a system listed twice is a clash, not a loop" do
+      assert problems([RTwice]) == ["test.ruleset.twice lists a system named step twice"]
+    end
+
+    test "a period is a whole number of seconds above 0" do
+      assert problems([RBadPeriod]) == [
+               "test.ruleset.options lists its system step with every: 0, which is not a " <>
+                 "whole number of seconds above 0"
+             ]
+
+      assert problems([RFloatPeriod]) == [
+               "test.ruleset.options lists its system step with every: 60.5, which is not a " <>
+                 "whole number of seconds above 0"
+             ]
+
+      assert {:ok, plan} = Ruleset.plan([RPeriod])
+      assert Ruleset.systems(plan) == [{"test.ruleset.options/step", [every: 300]}]
+    end
+
+    test "an option that a system does not have is refused, not ignored" do
+      assert problems([RMisspelt]) == [
+               "test.ruleset.options lists its system step with the option :evry, which a " <>
+                 "system does not have (it has :every, :runs_after, :runs_before)"
+             ]
+    end
+  end
+
   describe "order" do
     test "a rule's own systems run as it lists them, and others as they say" do
       {:ok, plan} = Ruleset.plan([RFirst, RLate, REarly])
@@ -258,6 +352,13 @@ defmodule Avwe.RulesetTest do
 
     test "constraints that cannot all be met" do
       assert problems([RLoopX, RLoopW]) == [
+               "these systems each wait for another to run first, so none can: " <>
+                 "test.ruleset.loop_w/step, test.ruleset.loop_x/step"
+             ]
+    end
+
+    test "a system that only waits on a loop is not named as part of it" do
+      assert problems([RLoopX, RLoopW, RWaits]) == [
                "these systems each wait for another to run first, so none can: " <>
                  "test.ruleset.loop_w/step, test.ruleset.loop_x/step"
              ]
