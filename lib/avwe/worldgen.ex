@@ -60,6 +60,10 @@ defmodule Avwe.Worldgen do
   @grid 256
   @default_wind %{from: "south-west", m_s: 2.0}
 
+  @doc "Cells on a side of every world's map."
+  @spec grid() :: pos_integer()
+  def grid, do: @grid
+
   @doc """
   Builds the region. Options: those of `Avwe.Region.new/1`, plus `:terrain`,
   `:hearths`, `:miracles`, `:climate` and `:characters` as above.
@@ -68,6 +72,21 @@ defmodule Avwe.Worldgen do
   def region(quire_world, opts) do
     quire_world
     |> Quire.Seed.region(Keyword.take(opts, [:id, :seed, :time, :dt, :systems]) ++ [grid: @grid])
+    |> build(opts, quire_world)
+  end
+
+  @doc """
+  Adds the world's own settings (`:terrain`, `:hearths`, `:miracles`,
+  `:climate` and `:characters` of `opts`, as above) to a region that already
+  has its places and bodies, and prepares the systems. `region/2` is Quire's
+  places and bodies and then this; a world definition (`Avwe.Definition`)
+  carries the places and bodies itself, so it comes straight here, with no
+  Quire world: a standing miracle then takes its name and description from its
+  own settings.
+  """
+  @spec build(Region.t(), keyword(), Quire.World.t() | nil) :: Region.t()
+  def build(region, opts, quire_world \\ nil) do
+    region
     |> add_terrain(Keyword.get(opts, :terrain))
     |> add_hearths(Keyword.get(opts, :hearths) || [])
     |> add_miracles(Keyword.get(opts, :miracles) || [], quire_world)
@@ -194,14 +213,28 @@ defmodule Avwe.Worldgen do
   # "HH:MM" as seconds of day, checked where a bad one is easiest to
   # explain: the autopilot would never find the moment to cross.
   defp time_of_day!(id, at) do
+    case time_of_day(at) do
+      {:ok, seconds} ->
+        seconds
+
+      :error ->
+        raise ArgumentError, "character #{inspect(id)}: at must be \"HH:MM\", got #{inspect(at)}"
+    end
+  end
+
+  @doc """
+  A time of day written `"HH:MM"` (a routine entry's `:at`) as seconds of the
+  day, or `:error` when it is not one.
+  """
+  @spec time_of_day(term()) :: {:ok, non_neg_integer()} | :error
+  def time_of_day(at) do
     with true <- is_binary(at),
          [hour, minute] <- Regex.run(~r/^(\d\d):(\d\d)$/, at, capture: :all_but_first),
          {hour, minute} when hour < 24 and minute < 60 <-
            {String.to_integer(hour), String.to_integer(minute)} do
-      hour * Calendar.hour() + minute * Calendar.minute()
+      {:ok, hour * Calendar.hour() + minute * Calendar.minute()}
     else
-      _bad ->
-        raise ArgumentError, "character #{inspect(id)}: at must be \"HH:MM\", got #{inspect(at)}"
+      _bad -> :error
     end
   end
 
@@ -399,9 +432,12 @@ defmodule Avwe.Worldgen do
         %{name: title, description: summary}
 
       nil ->
-        %{name: Keyword.get(miracle, :name, id), description: Keyword.get(miracle, :description)}
+        repr(nil, id, miracle)
     end
   end
+
+  defp repr(nil, id, miracle),
+    do: %{name: Keyword.get(miracle, :name, id), description: Keyword.get(miracle, :description)}
 
   defp position_of(region, place) do
     Region.get(region, place, :position) ||

@@ -27,11 +27,15 @@ defmodule Avwe.Store do
           and `:dt` from before the advance, the number of `:steps`, and the
           `:events` emitted.
       Version-1 records (intents inside the advance record) are rejected.
-    * `snap-<step>.bin` - `:erlang.term_to_binary` of `{:avwe_snapshot, 1,
-      region}` for the region at `step`, with the step zero-padded so names
-      sort by step. The `1` is the snapshot version: a file with any other
-      tag is refused with `{:unknown_snapshot, path, tag}`, so a region never
-      resumes from a snapshot that a different build of the code wrote.
+    * `snap-<step>.bin` - `:erlang.term_to_binary` of `{:avwe_snapshot, 2,
+      %{region: region, definition: hash}}` for the region at `step`, with the
+      step zero-padded so names sort by step. The `2` is the snapshot version:
+      a file with any other tag is refused with `{:unknown_snapshot, path,
+      tag}`, so a region never resumes from a snapshot that a different build
+      of the code wrote. `hash` is the hash of the world definition the region
+      was built from (`Avwe.Definition.hash/1`), or `nil` for a world started
+      from Quire and settings; every snapshot carries it, the step-0 one
+      first, so it is the header of the history that follows.
 
   ## Trust
 
@@ -93,7 +97,7 @@ defmodule Avwe.Store do
 
   @version 2
   @snapshot_tag :avwe_snapshot
-  @snapshot_version 1
+  @snapshot_version 2
   @log_name "log"
   @snapshot_prefix "snap-"
   @snapshot_suffix ".bin"
@@ -276,7 +280,9 @@ defmodule Avwe.Store do
   Syncs the log, writes the region as the snapshot for its step, then prunes
   old snapshots. Option `:keep` (default #{@default_keep}) is how many of the
   newest snapshots to keep besides the first one, which is always kept so
-  the whole history can be replayed; `:infinity` keeps them all.
+  the whole history can be replayed; `:infinity` keeps them all. Option
+  `:definition` is the hash of the world definition the region comes from
+  (default `nil`: none).
 
   The log is synced first, on purpose: a snapshot that is on disk before the
   log behind it would, after a crash between the two, leave a gap below the
@@ -287,7 +293,8 @@ defmodule Avwe.Store do
   def snapshot(%__MODULE__{} = store, %Region{} = region, opts \\ []) do
     keep = Keyword.get(opts, :keep, @default_keep)
     path = snapshot_path(store, region.step)
-    binary = :erlang.term_to_binary({@snapshot_tag, @snapshot_version, unsubmit_pending(region)})
+    payload = %{region: unsubmit_pending(region), definition: Keyword.get(opts, :definition)}
+    binary = :erlang.term_to_binary({@snapshot_tag, @snapshot_version, payload})
 
     with :ok <- :disk_log.sync(store.log),
          :ok <- write_atomically(path, binary) do
@@ -309,18 +316,24 @@ defmodule Avwe.Store do
   def latest_snapshot(%__MODULE__{} = store) do
     case snapshots(store) do
       [] -> :none
-      steps -> read_snapshot(store, List.last(steps))
+      steps -> store |> read_snapshot(List.last(steps)) |> without_definition()
     end
   end
 
   @doc "The oldest snapshot (the step-0 one, unless it was removed), or `:none`."
   @spec first_snapshot(t()) :: {:ok, Region.t()} | :none | {:error, term()}
-  def first_snapshot(%__MODULE__{} = store) do
+  def first_snapshot(%__MODULE__{} = store),
+    do: store |> oldest_snapshot() |> without_definition()
+
+  defp oldest_snapshot(store) do
     case snapshots(store) do
       [] -> :none
       [first | _rest] -> read_snapshot(store, first)
     end
   end
+
+  defp without_definition({:ok, region, _definition}), do: {:ok, region}
+  defp without_definition(other), do: other
 
   # The newest snapshot that decodes, skipping (and naming) any that don't.
   defp newest_readable_snapshot(store) do
@@ -331,8 +344,8 @@ defmodule Avwe.Store do
 
   defp newest_readable_snapshot([step | older], store, _last_error) do
     case read_snapshot(store, step) do
-      {:ok, region} ->
-        {:ok, region}
+      {:ok, _region, _definition} = snapshot ->
+        snapshot
 
       {:error, reason} = error ->
         Logger.warning("Skipping snapshot #{snapshot_path(store, step)}: #{inspect(reason)}")
@@ -405,15 +418,21 @@ defmodule Avwe.Store do
   end
 
   # A file that doesn't decode at all is corrupt. One that decodes but isn't
-  # `{:avwe_snapshot, 1, region}` was written by other code: a later version
-  # of this one, or the untagged format from before the tag. The tag names
-  # which, so the error can say what the file is.
+  # `{:avwe_snapshot, 2, %{region: region, definition: hash}}` was written by
+  # other code: an earlier or later version of this one, or the untagged
+  # format from before the tag. The tag names which, so the error can say
+  # what the file is.
   # sobelow_skip ["Misc.BinToTerm"]
   defp decode_snapshot(binary, path) do
     case :erlang.binary_to_term(binary) do
-      {@snapshot_tag, @snapshot_version, %Region{} = region} -> {:ok, region}
-      {@snapshot_tag, @snapshot_version, _not_a_region} -> {:error, {:corrupt_snapshot, path}}
-      other -> {:error, {:unknown_snapshot, path, snapshot_tag(other)}}
+      {@snapshot_tag, @snapshot_version, %{region: %Region{} = region} = payload} ->
+        {:ok, region, Map.get(payload, :definition)}
+
+      {@snapshot_tag, @snapshot_version, _not_a_region} ->
+        {:error, {:corrupt_snapshot, path}}
+
+      other ->
+        {:error, {:unknown_snapshot, path, snapshot_tag(other)}}
     end
   rescue
     ArgumentError -> {:error, {:corrupt_snapshot, path}}
@@ -446,17 +465,30 @@ defmodule Avwe.Store do
   if none can be read. `:none` if nothing was saved.
   """
   @spec rebuild(t()) :: {:ok, Region.t()} | :none | {:error, term()}
-  def rebuild(%__MODULE__{} = store), do: replay_from(store, newest_readable_snapshot(store))
+  def rebuild(%__MODULE__{} = store),
+    do: store |> rebuild_with_definition() |> without_definition()
+
+  @doc """
+  `rebuild/1`, and the hash of the world definition the snapshot it started
+  from was written under (`nil` for a world with none).
+  """
+  @spec rebuild_with_definition(t()) ::
+          {:ok, Region.t(), String.t() | nil} | :none | {:error, term()}
+  def rebuild_with_definition(%__MODULE__{} = store),
+    do: replay_from(store, newest_readable_snapshot(store))
 
   @doc """
   The same state as `rebuild/1`, but reached from the first snapshot through
   the whole log. That the two agree is the determinism check.
   """
   @spec rebuild_from_start(t()) :: {:ok, Region.t()} | :none | {:error, term()}
-  def rebuild_from_start(%__MODULE__{} = store), do: replay_from(store, first_snapshot(store))
+  def rebuild_from_start(%__MODULE__{} = store),
+    do: store |> oldest_snapshot() |> then(&replay_from(store, &1)) |> without_definition()
 
-  defp replay_from(store, {:ok, %Region{} = region}) do
-    with {:ok, records} <- records_after(store, region.step), do: replay_all(region, records)
+  defp replay_from(store, {:ok, %Region{} = region, definition}) do
+    with {:ok, records} <- records_after(store, region.step),
+         {:ok, rebuilt} <- replay_all(region, records),
+         do: {:ok, rebuilt, definition}
   end
 
   defp replay_from(_store, other), do: other

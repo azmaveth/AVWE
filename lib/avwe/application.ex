@@ -24,8 +24,11 @@ defmodule Avwe.Application do
     Supervisor.start_link(children, strategy: :one_for_one, name: Avwe.Supervisor)
   end
 
-  # Starts the worlds listed in `config :avwe, :autostart`.
-  defp autostart do
+  # Starts the worlds listed in `config :avwe, :autostart`, and says in words
+  # why one cannot start (public for the test that reads what it says).
+  @doc false
+  @spec autostart() :: :ok
+  def autostart do
     for {id, opts} <- Application.get_env(:avwe, :autostart, []) do
       case Avwe.start_world(id, opts) do
         {:ok, _pid} ->
@@ -33,9 +36,13 @@ defmodule Avwe.Application do
           Avwe.warm_ground(id)
 
         {:error, reason} ->
-          Logger.warning("Couldn't start world #{inspect(id)}: #{inspect(reason)}")
+          Logger.warning(
+            "Couldn't start world #{inspect(id)}: #{Avwe.Definition.explain(reason)}"
+          )
       end
     end
+
+    :ok
   end
 
   defp mcp do

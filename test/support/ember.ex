@@ -1,7 +1,7 @@
 defmodule Avwe.Test.Ember do
   @moduledoc "Builds the Ember Reach's starting region, as configured, for unit tests."
 
-  alias Avwe.{Calendar, Quire, Region, Worldgen}
+  alias Avwe.{Calendar, Definition, Quire, Region, Worldgen}
   alias Avwe.Test.Fixtures
 
   @systems [
@@ -36,6 +36,20 @@ defmodule Avwe.Test.Ember do
       climate: opts[:climate],
       characters: opts[:characters]
     )
+  end
+
+  @doc """
+  The same region, built the other way: from the fixture's world definition
+  (`Fixtures.ember_reach_definition/1`) and not from Quire and settings. The
+  two must be equal in every respect (`test/avwe/definition/equality_test.exs`).
+  `overrides` are those of `region/2`, and change the definition as they would
+  change the settings.
+  """
+  def region_from_definition(at \\ {813, day: 220, hour: 4}, overrides \\ []) do
+    definition =
+      Fixtures.ember_reach_definition([start: at] ++ Keyword.delete(overrides, :systems))
+
+    Definition.region(definition, id: {0, 0}, systems: Keyword.get(overrides, :systems, @systems))
   end
 
   @doc """

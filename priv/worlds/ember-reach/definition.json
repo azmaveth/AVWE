@@ -1,0 +1,616 @@
+{
+  "schema": 1,
+  "id": "ember-reach",
+  "name": "The Ember Reach",
+  "tagline": "A river valley remembering its last summer.",
+  "description": "Kiln-houses, willow docks, and a river that has begun to forget its own name. The Reach is a place for first notes: a few people, a few rooms, and the year the water went quiet.",
+  "seed": 298840,
+  "dt": 60,
+  "start": {"year": 813, "day": 220, "hour": 4},
+  "rules": {
+    "earthlike.fire": {
+      "hearths": [
+        {
+          "id": "town-hearth",
+          "name": "the kiln-house hearth",
+          "at": "ember-reach",
+          "fuel_kg": 8.0,
+          "power_w": 5000.0
+        },
+        {
+          "id": "lodge-hearth",
+          "name": "the lodge hearth",
+          "at": "ashwarden-lodge",
+          "fuel_kg": 12.0,
+          "power_w": 5000.0
+        }
+      ]
+    },
+    "earthlike.valley": {
+      "clay": [{"place": "ember-reach", "radius_cells": 4}],
+      "rises": [{"place": "ashwarden-lodge", "height_m": 14, "radius_cells": 18}],
+      "river": {
+        "name": "the Ember",
+        "exit": "south",
+        "flow_m3_s": 10.0,
+        "source": {
+          "id": "river-source",
+          "name": "The Source",
+          "description": "A hollow ringed with pale stones, where the Ember once welled up warm. The stones are dry.",
+          "bearing": [20, 70],
+          "cells": [45, 70],
+          "from": "the-dry-bend"
+        },
+        "through": [
+          "the-dry-bend",
+          {"place": "ember-reach", "beside": "east", "cells": 6},
+          "willow-docks"
+        ],
+        "water_c": 40.0
+      }
+    },
+    "earthlike.weather": {"wind": {"from": "south-west", "m_s": 2.0}}
+  },
+  "entities": [
+    {
+      "id": "abbot-malakor",
+      "article": "abbot-malakor",
+      "body": {"species": "Rime-Wrought Ascetic"},
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "repr": {
+        "name": "Abbot Malakor",
+        "description": "The fanatical leader of the Frost-Callers who guards the sleeping leviathan against all intruders."
+      }
+    },
+    {
+      "id": "archon-sael",
+      "article": "archon-sael",
+      "body": {"species": "Rime-Wrought Ascetic"},
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "repr": {
+        "name": "Archon Sael",
+        "description": "An ancient Cistern Keeper transformed into a hulking, frost-armored gatekeeper of the lower flues."
+      }
+    },
+    {
+      "id": "ashwarden-lodge",
+      "place": {"label": "Ashwarden Lodge"},
+      "article": "ashwarden-lodge",
+      "position": [94, 105],
+      "repr": {
+        "name": "Ashwarden Lodge",
+        "description": "The low stone sanctuary on the western grassy rise where the Ashwardens tend the Last Coal."
+      }
+    },
+    {
+      "id": "barrow-vance",
+      "article": "barrow-vance",
+      "body": {"species": "riverfolk"},
+      "home": "ember-reach",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [121, 138],
+      "repr": {
+        "name": "Barrow Vance",
+        "description": "The beleaguered baker of Ember Reach who runs the last public bread oven in town."
+      }
+    },
+    {
+      "id": "brin-vane",
+      "article": "brin-vane",
+      "body": {"species": "riverfolk"},
+      "home": "the-great-kiln",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [107, 149],
+      "repr": {
+        "name": "Brin Vane",
+        "description": "A gifted young metallurgist at the Great Kiln who fears his father's industrial fanaticism."
+      }
+    },
+    {
+      "id": "brother-dennis",
+      "article": "brother-dennis",
+      "body": {"species": "riverfolk"},
+      "home": "ashwarden-lodge",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [94, 105],
+      "repr": {
+        "name": "Brother Dennis",
+        "description": "An archivist at Ashwarden Lodge secretly translating forbidden scrolls of the Cistern Keepers."
+      }
+    },
+    {
+      "id": "ember-reach",
+      "place": {"label": "Ember Reach"},
+      "article": "ember-reach",
+      "position": [121, 138],
+      "repr": {
+        "name": "Ember Reach",
+        "description": "A river town of kiln-houses and willow docks, waiting for a current that has not returned."
+      }
+    },
+    {
+      "id": "jory-saltspray",
+      "article": "jory-saltspray",
+      "body": {"species": "riverfolk"},
+      "home": "the-stranded-keels",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [225, 115],
+      "repr": {
+        "name": "Jory Saltspray",
+        "description": "A scarred, one-eyed veteran mudlark who leads deep dredging expeditions into the dry channel."
+      }
+    },
+    {
+      "id": "kessa-reed-weaver",
+      "article": "kessa-reed-weaver",
+      "body": {"species": "riverfolk"},
+      "home": "ember-reach",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [121, 138],
+      "repr": {
+        "name": "Kessa Reed-Weaver",
+        "description": "An elder apothecary and weaver in Ember Reach who crafts respirators and treats chalk-lung."
+      }
+    },
+    {
+      "id": "maeve-of-the-docks",
+      "article": "maeve-of-the-docks",
+      "body": {"species": "riverfolk"},
+      "home": "willow-docks",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [138, 162],
+      "repr": {
+        "name": "Maeve of the Docks",
+        "description": "The sharp-witted proprietor of The Drunken Pike tavern barge at Willow Docks, trading ale for rumors."
+      }
+    },
+    {
+      "id": "mira-vale",
+      "article": "mira-vale",
+      "body": {"species": "riverfolk"},
+      "home": "ember-reach",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [121, 138],
+      "repr": {
+        "name": "Mira Vale",
+        "description": "A cartographer who maps the dying riverlands and pretends the work is only paper."
+      }
+    },
+    {
+      "id": "orren-kest",
+      "article": "orren-kest",
+      "body": {"species": "riverfolk"},
+      "home": "the-stranded-keels",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [225, 115],
+      "repr": {
+        "name": "Orren Kest",
+        "description": "A scarred barge captain who turned shipwreck into commerce at the Stranded Keels."
+      }
+    },
+    {
+      "id": "talia-of-the-hearth",
+      "article": "talia-of-the-hearth",
+      "body": {"species": "riverfolk"},
+      "home": "ashwarden-lodge",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [94, 105],
+      "repr": {
+        "name": "Talia of the Hearth",
+        "description": "The First Warden who tends the Last Coal, standing between ancient piety and rising desperation."
+      }
+    },
+    {
+      "id": "the-cradle-bowl",
+      "place": {"label": "The Cradle Bowl"},
+      "article": "the-cradle-bowl",
+      "position": [17, 215],
+      "repr": {
+        "name": "The Cradle Bowl",
+        "description": "The ancient mountain brazier in the Pale Basin from which The Last Coal was taken, now rimed in black ice."
+      }
+    },
+    {
+      "id": "the-drowned-vaults",
+      "place": {"label": "The Drowned Vaults"},
+      "article": "the-drowned-vaults",
+      "position": [9, 227],
+      "repr": {
+        "name": "The Drowned Vaults",
+        "description": "A flooded subterranean labyrinth beneath the Pale Basin holding ancient water mechanisms and sluice controls."
+      }
+    },
+    {
+      "id": "the-dry-bend",
+      "place": {"label": "The Dry Bend"},
+      "article": "the-dry-bend",
+      "position": [174, 161],
+      "repr": {
+        "name": "The Dry Bend",
+        "description": "The sweeping eastern oxbow where the Ember river first stopped flowing and mud turned to stone."
+      }
+    },
+    {
+      "id": "the-eastern-salt-flats",
+      "place": {"label": "The Eastern Salt Flats"},
+      "article": "the-eastern-salt-flats",
+      "position": [209, 194],
+      "repr": {
+        "name": "The Eastern Salt Flats",
+        "description": "A blinding alkali basin east of the Stranded Keels, encrusted in crystalline salt and deadly brine pools."
+      }
+    },
+    {
+      "id": "the-gorge-of-whispers",
+      "place": {"label": "The Gorge of Whispers"},
+      "article": "the-gorge-of-whispers",
+      "position": [47, 167],
+      "repr": {
+        "name": "The Gorge of Whispers",
+        "description": "A sheer granite chasm funneled toward the Weeping Weir, filled with whistling drafts and sub-zero seeps."
+      }
+    },
+    {
+      "id": "the-great-kiln",
+      "place": {"label": "The Great Kiln"},
+      "article": "the-great-kiln",
+      "position": [107, 149],
+      "repr": {
+        "name": "The Great Kiln",
+        "description": "The roaring blast-furnace and workshop at the town's edge, headquarters of the Bellows Guild."
+      }
+    },
+    {
+      "id": "the-northern-ridges",
+      "place": {"label": "The Northern Ridges"},
+      "article": "the-northern-ridges",
+      "position": [128, 30],
+      "repr": {
+        "name": "The Northern Ridges",
+        "description": "Windswept shale bluffs and anthracite strip-mines crawling with subterranean vermin."
+      }
+    },
+    {
+      "id": "the-pale-basin",
+      "place": {"label": "The Pale Basin"},
+      "article": "the-pale-basin",
+      "position": [13, 203],
+      "repr": {
+        "name": "The Pale Basin",
+        "description": "A misty highland caldera beyond the Weeping Weir where the river's stolen headwaters lie trapped."
+      }
+    },
+    {
+      "id": "the-stranded-keels",
+      "place": {"label": "The Stranded Keels"},
+      "article": "the-stranded-keels",
+      "position": [225, 115],
+      "repr": {
+        "name": "The Stranded Keels",
+        "description": "A settlement of grounded river barges and rope bridges, turned salvage outpost in the lower flats."
+      }
+    },
+    {
+      "id": "the-weeping-weir",
+      "place": {"label": "The Weeping Weir"},
+      "article": "the-weeping-weir",
+      "position": [21, 170],
+      "repr": {
+        "name": "The Weeping Weir",
+        "description": "A towering cyclopean dam at the western head of the gorge where the river was choked off."
+      }
+    },
+    {
+      "id": "torin-vane",
+      "article": "torin-vane",
+      "body": {"species": "riverfolk"},
+      "home": "ember-reach",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [121, 138],
+      "repr": {
+        "name": "Torin Vane",
+        "description": "The iron-jawed master smith who founded the Bellows Guild and defies the Ashwardens."
+      }
+    },
+    {
+      "id": "vaelen-the-weeping-heart",
+      "article": "vaelen-the-weeping-heart",
+      "body": {"species": "Elder Silt-Leviathan"},
+      "home": "the-drowned-vaults",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [9, 227],
+      "repr": {
+        "name": "Vaelen, the Weeping Heart",
+        "description": "The colossal subterranean river-entity chained beneath the Pale Basin, frozen into Silt-Glass."
+      }
+    },
+    {
+      "id": "warden-kieran",
+      "article": "warden-kieran",
+      "body": {"species": "riverfolk"},
+      "home": "ashwarden-lodge",
+      "knows": [
+        "ashwarden-lodge",
+        "ember-reach",
+        "the-cradle-bowl",
+        "the-drowned-vaults",
+        "the-dry-bend",
+        "the-eastern-salt-flats",
+        "the-gorge-of-whispers",
+        "the-great-kiln",
+        "the-northern-ridges",
+        "the-pale-basin",
+        "the-stranded-keels",
+        "the-weeping-weir",
+        "willow-docks"
+      ],
+      "position": [94, 105],
+      "repr": {
+        "name": "Warden Kieran",
+        "description": "A stoic ridge scout and sentinel who patrols the perimeter between the lodge and the dry flats."
+      }
+    },
+    {
+      "id": "willow-docks",
+      "place": {"label": "Willow Docks"},
+      "article": "willow-docks",
+      "position": [138, 162],
+      "repr": {
+        "name": "Willow Docks",
+        "description": "The weathered timber wharves of Ember Reach, now standing over cracked mud instead of water."
+      }
+    }
+  ],
+  "miracles": [
+    {
+      "id": "the-source-fails",
+      "kind": "event",
+      "target": "river-source",
+      "at": {"year": 812, "day": 200, "hour": 15},
+      "cause": "unknown",
+      "component": "spring",
+      "note": "The Ember's source stops, for reasons nobody knows yet.",
+      "set": {"flow_m3_s": 0.0}
+    },
+    {
+      "id": "the-last-coal",
+      "name": "The Last Coal",
+      "kind": "standing",
+      "description": "An ember that never cools, kept in a bowl at the Ashwarden Lodge.",
+      "at": "ashwarden-lodge",
+      "breaks": ["fuel", "dousing"],
+      "cause": "unknown",
+      "heat_w": 800.0,
+      "note": "Heat without fuel, declared: the Last Coal does not eat wood."
+    }
+  ],
+  "characters": {
+    "mira-vale": {
+      "carries": [
+        {
+          "id": "mira-notebook",
+          "name": "survey notebook",
+          "kind": "notebook",
+          "description": "Her survey, in a tin that once held salt ink."
+        }
+      ],
+      "norms": ["invited_fire"],
+      "routine": [
+        {
+          "at": "04:30",
+          "do": [
+            {"verb": "go", "target": "the-dry-bend"},
+            {"verb": "wait", "params": {"for": 2400}},
+            {"verb": "go", "target": "ember-reach"}
+          ],
+          "note": "walks the banks before dawn"
+        },
+        {
+          "at": "08:00",
+          "do": [
+            {"verb": "go", "target": "the-dry-bend"},
+            {"verb": "wait", "params": {"for": 10800}},
+            {"verb": "go", "target": "ember-reach"}
+          ],
+          "note": "the survey"
+        },
+        {
+          "at": "18:00",
+          "do": [
+            {"verb": "go", "target": "ashwarden-lodge"},
+            {"verb": "wait", "params": {"for": 5400}},
+            {"verb": "go", "target": "ember-reach"}
+          ],
+          "note": "warms her hands at the lodge on the way home"
+        },
+        {
+          "at": "22:00",
+          "do": [{"verb": "go", "target": "ember-reach"}, {"verb": "rest"}]
+        }
+      ]
+    }
+  },
+  "guests": {"arrival": "ember-reach", "max": 8}
+}

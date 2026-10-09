@@ -7,15 +7,57 @@ defmodule Avwe.Test.Fixtures do
   def ember_reach, do: Path.expand("../fixtures/quire/ember-reach", __DIR__)
 
   @doc """
-  Options for starting the Ember Reach as configured (terrain, the river,
-  the 812 miracle, 813 start), but from the fixture copy of its Quire folder.
+  AVWE's own settings for the Ember Reach, as `priv/worlds/ember-reach/source.exs`
+  gives them: its terrain, the river, the 812 miracle, the 813 start, and the
+  rest.
+  """
+  def ember_reach_recipe do
+    {recipe, _bindings} =
+      Code.eval_file(Application.app_dir(:avwe, "priv/worlds/ember-reach/source.exs"))
+
+    recipe
+  end
+
+  @doc """
+  Options for starting the Ember Reach from Quire and its settings (the old
+  way, which the definition is checked against), from the fixture copy of its
+  Quire folder.
   """
   def ember_reach_opts(overrides \\ []) do
-    :avwe
-    |> Application.get_env(:worlds)
-    |> Keyword.fetch!(:ember_reach)
+    ember_reach_recipe()
     |> Keyword.merge(quire: ember_reach(), seed: :erlang.phash2(:ember_reach))
     |> Keyword.merge(overrides)
+  end
+
+  @doc """
+  The Ember Reach's definition made from the fixture copy of its Quire folder
+  and the recipe (`mix avwe.definition.export ember-reach --quire
+  test/fixtures/quire/ember-reach --out test/fixtures/worlds/ember-reach/definition.json`).
+  """
+  def ember_reach_definition_path,
+    do: Path.expand("../fixtures/worlds/ember-reach/definition.json", __DIR__)
+
+  @world_keys [:start, :seed, :dt, :guests]
+  @setting_keys [:terrain, :hearths, :miracles, :climate, :characters]
+
+  @doc """
+  That definition, loaded. `overrides` change it the way the options of a world
+  from Quire do: `:start`, `:seed`, `:dt` and `:guests` replace those of the
+  definition, and `:terrain`, `:hearths`, `:miracles`, `:climate` and
+  `:characters` its settings (`nil` or `[]` leaves one out).
+  """
+  def ember_reach_definition(overrides \\ []) do
+    {:ok, definition} = Avwe.Definitions.load(ember_reach_definition_path())
+    Enum.reduce(overrides, definition, &override/2)
+  end
+
+  defp override({key, value}, definition) when key in @world_keys,
+    do: Map.put(definition, key, value)
+
+  defp override({key, value}, definition) when key in @setting_keys do
+    settings = Keyword.delete(definition.settings, key)
+    settings = if value in [nil, []], do: settings, else: Keyword.put(settings, key, value)
+    %{definition | settings: settings}
   end
 
   @doc """

@@ -1,0 +1,178 @@
+{
+  "schema": 1,
+  "id": "ember-reach",
+  "name": "The Ember Reach",
+  "tagline": "A river valley remembering its last summer.",
+  "description": "Kiln-houses, willow docks, and a river that has begun to forget its own name. The Reach is a place for first notes: a few people, a few rooms, and the year the water went quiet.",
+  "seed": 298840,
+  "dt": 60,
+  "start": {"year": 813, "day": 220, "hour": 4},
+  "rules": {
+    "earthlike.fire": {
+      "hearths": [
+        {
+          "id": "town-hearth",
+          "name": "the kiln-house hearth",
+          "at": "ember-reach",
+          "fuel_kg": 8.0,
+          "power_w": 5000.0
+        },
+        {
+          "id": "lodge-hearth",
+          "name": "the lodge hearth",
+          "at": "ashwarden-lodge",
+          "fuel_kg": 12.0,
+          "power_w": 5000.0
+        }
+      ]
+    },
+    "earthlike.valley": {
+      "clay": [{"place": "ember-reach", "radius_cells": 4}],
+      "rises": [{"place": "ashwarden-lodge", "height_m": 14, "radius_cells": 18}],
+      "river": {
+        "name": "the Ember",
+        "exit": "south",
+        "flow_m3_s": 10.0,
+        "source": {
+          "id": "river-source",
+          "name": "The Source",
+          "description": "A hollow ringed with pale stones, where the Ember once welled up warm. The stones are dry.",
+          "bearing": [20, 70],
+          "cells": [45, 70],
+          "from": "the-dry-bend"
+        },
+        "through": [
+          "the-dry-bend",
+          {"place": "ember-reach", "beside": "east", "cells": 6},
+          "willow-docks"
+        ],
+        "water_c": 40.0
+      }
+    },
+    "earthlike.weather": {"wind": {"from": "south-west", "m_s": 2.0}}
+  },
+  "entities": [
+    {
+      "id": "ashwarden-lodge",
+      "place": {"label": "Ashwarden Lodge"},
+      "article": "the-ashwardens",
+      "position": [94, 105],
+      "repr": {
+        "name": "Ashwarden Lodge",
+        "description": "Keepers of the last living hearths, sworn to treat fire as a guest."
+      }
+    },
+    {
+      "id": "ember-reach",
+      "place": {"label": "Ember Reach"},
+      "article": "ember-reach",
+      "position": [121, 138],
+      "repr": {
+        "name": "Ember Reach",
+        "description": "A river town of kiln-houses and willow docks, waiting for a current that has not returned."
+      }
+    },
+    {
+      "id": "mira-vale",
+      "article": "mira-vale",
+      "body": {"species": "riverfolk"},
+      "home": "ember-reach",
+      "knows": ["ashwarden-lodge", "ember-reach", "the-dry-bend", "willow-docks"],
+      "position": [121, 138],
+      "repr": {
+        "name": "Mira Vale",
+        "description": "A cartographer who maps the dying riverlands and pretends the work is only paper."
+      }
+    },
+    {
+      "id": "the-dry-bend",
+      "place": {"label": "The Dry Bend"},
+      "article": "the-river-runs-dry",
+      "position": [163, 78],
+      "repr": {
+        "name": "The Dry Bend",
+        "description": "The year the Ember river fell silent at the Dry Bend and left its shape in the reeds."
+      }
+    },
+    {
+      "id": "willow-docks",
+      "place": {"label": "Willow Docks"},
+      "article": "kiln-houses",
+      "position": [138, 162],
+      "repr": {
+        "name": "Willow Docks",
+        "description": "How the town is built — ovens that were homes, and homes that still remember heat."
+      }
+    }
+  ],
+  "miracles": [
+    {
+      "id": "the-source-fails",
+      "kind": "event",
+      "target": "river-source",
+      "at": {"year": 812, "day": 200, "hour": 15},
+      "cause": "unknown",
+      "component": "spring",
+      "note": "The Ember's source stops, for reasons nobody knows yet.",
+      "set": {"flow_m3_s": 0.0}
+    },
+    {
+      "id": "the-last-coal",
+      "name": "The Last Coal",
+      "kind": "standing",
+      "description": "An ember that never cools, kept in a bowl at the Ashwarden Lodge.",
+      "at": "ashwarden-lodge",
+      "breaks": ["fuel", "dousing"],
+      "cause": "unknown",
+      "heat_w": 800.0,
+      "note": "Heat without fuel, declared: the Last Coal does not eat wood."
+    }
+  ],
+  "characters": {
+    "mira-vale": {
+      "carries": [
+        {
+          "id": "mira-notebook",
+          "name": "survey notebook",
+          "kind": "notebook",
+          "description": "Her survey, in a tin that once held salt ink."
+        }
+      ],
+      "norms": ["invited_fire"],
+      "routine": [
+        {
+          "at": "04:30",
+          "do": [
+            {"verb": "go", "target": "the-dry-bend"},
+            {"verb": "wait", "params": {"for": 2400}},
+            {"verb": "go", "target": "ember-reach"}
+          ],
+          "note": "walks the banks before dawn"
+        },
+        {
+          "at": "08:00",
+          "do": [
+            {"verb": "go", "target": "the-dry-bend"},
+            {"verb": "wait", "params": {"for": 10800}},
+            {"verb": "go", "target": "ember-reach"}
+          ],
+          "note": "the survey"
+        },
+        {
+          "at": "18:00",
+          "do": [
+            {"verb": "go", "target": "ashwarden-lodge"},
+            {"verb": "wait", "params": {"for": 5400}},
+            {"verb": "go", "target": "ember-reach"}
+          ],
+          "note": "warms her hands at the lodge on the way home"
+        },
+        {
+          "at": "22:00",
+          "do": [{"verb": "go", "target": "ember-reach"}, {"verb": "rest"}]
+        }
+      ]
+    }
+  },
+  "guests": {"arrival": "ember-reach", "max": 8}
+}

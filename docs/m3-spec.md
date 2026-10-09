@@ -93,7 +93,7 @@ for any body.
 
 **What the world must allow.** A world accepts guests when started with
 `guests: [arrival: place_id, max: n]` (`Avwe.start_world/2`; the Ember Reach's
-config says `arrival: "ember-reach", max: 8`). The settings are part of the
+definition says `arrival: "ember-reach", max: 8`). The settings are part of the
 running world's information (`Avwe.worlds/0`), not of its saved state, so a
 world saved before them can take guests as soon as it is started with them. A
 world without them refuses with `:no_guests`.

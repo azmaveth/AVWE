@@ -17,9 +17,12 @@ get there from the Ember Reach.
 
 M0 and M1 are built:
 
-- Worlds load from Quire. Map pins become places, and characters start at home
-  knowing the way to every pinned place. A character whose home is not a pin is
-  nowhere: nobody can play them yet, and the world says so when it starts.
+- A world is a definition: one JSON file with its places and bodies, terrain,
+  hearths, miracles and characters, made from Quire and checked when it is
+  read (`priv/worlds/ember-reach/definition.json`). Map pins become places, and
+  characters start at home knowing the way to every pinned place. A character
+  whose home is not a pin is nowhere: nobody can play them yet, and the world
+  says so when it starts.
 - A deterministic clock with daylight, walking, waiting and speech.
 - Sessions: any controller can take a body (one at a time) or watch, act with
   intents, and receive percepts. Every intent ends in exactly one result.
@@ -68,9 +71,11 @@ silent as the telnet watcher is told of it, and the silt banks cool
 
 ## Playing
 
-Requirements: Erlang/OTP 28 and Elixir 1.19 (see `.tool-versions`), and a Quire
-checkout next to this one (`../quire`), or `AVWE_QUIRE_ROOT` pointing at Quire's
-`data/worlds` folder.
+Requirements: Erlang/OTP 28 and Elixir 1.19 (see `.tool-versions`). The Ember
+Reach runs from its definition, so nothing else is needed; Quire is read only to
+make a definition again (`mix avwe.definition.export ember-reach`, with a Quire
+checkout next to this one, `../quire`, or `AVWE_QUIRE_ROOT` pointing at Quire's
+`data/worlds` folder).
 
 ```bash
 mix deps.get
@@ -98,7 +103,9 @@ goes back to its routine, shown as "- " lines, until your next command.
 
 If you ran the Ember Reach before M1, delete `worlds/ember_reach` once: a
 world resumed from its saved state keeps its saved characters, so Mira would
-have no notebook.
+have no notebook. The same once for the move to world definitions: a snapshot
+now records the definition's hash, and a world saved under one definition does
+not start under another (it says so, and where its folder is).
 
 ## Playing in a browser
 
@@ -202,8 +209,17 @@ an hour before its source fails:
 ```elixir
 # iex -S mix
 Avwe.stop_world(:ember_reach)
-Avwe.start_world(:ember_reach, start: {812, day: 200, hour: 14}, clock: {:live, 1_000})
+{:ok, ember_reach} = Avwe.Definitions.load("ember-reach")
+Avwe.start_world(:ember_reach,
+  definition: %{ember_reach | start: {812, day: 200, hour: 14}},
+  clock: {:live, 1_000},
+  data_dir: nil
+)
 ```
+
+A definition is the whole of a world, so a different start is a different
+definition (`data_dir: nil` keeps this one out of the folder the real one saves
+in).
 
 ## From Elixir
 
