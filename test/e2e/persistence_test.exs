@@ -564,8 +564,14 @@ defmodule Avwe.E2E.PersistenceTest do
 
     [characters] = lines(log, "ignoring :characters")
     [wanted, kept] = String.split(characters, "; the world's characters are ")
-    assert wanted =~ ~r/"mira-vale" => %\{[^}]*norms: \[\]/ and wanted =~ "at: 18000"
-    assert kept =~ ~r/"mira-vale" => %\{[^}]*norms: \[:invited_fire\]/ and kept =~ "at: 16200"
+    # Her map holds a list of maps, and the order a map's keys print in is the
+    # order the VM first saw their atoms, which depends on which module loaded
+    # first: so each part is matched alone, not "norms before routine".
+    assert wanted =~ ~s("mira-vale" => %{) and wanted =~ "norms: []" and wanted =~ "at: 18000"
+
+    assert kept =~ ~s("mira-vale" => %{) and kept =~ "norms: [:invited_fire]" and
+             kept =~ "at: 16200"
+
     assert String.ends_with?(characters, delete)
     refute log =~ "ignoring :seed"
     assert live_hash() == hash
@@ -597,20 +603,20 @@ defmodule Avwe.E2E.PersistenceTest do
     {:ok, region} = Store.first_snapshot(store)
     :ok = Store.close(store)
     path = Path.join([store_dir(tmp_dir), "0-0", "snap-0000000000.bin"])
-    File.write!(path, :erlang.term_to_binary({:avwe_snapshot, 2, region}))
+    File.write!(path, :erlang.term_to_binary({:avwe_snapshot, 3, region}))
 
     log =
       capture_log(fn ->
         assert {:error,
                 {:shutdown,
                  {:failed_to_start_child, _child,
-                  {:store, {:unknown_snapshot, ^path, {:avwe_snapshot, 2}}}}}} =
+                  {:store, {:unknown_snapshot, ^path, {:avwe_snapshot, 3}}}}}} =
                  Avwe.start_world(@world, ember_reach_opts(data_dir: tmp_dir))
       end)
 
     assert log =~
-             "no snapshot this build can read; #{path} is tagged {:avwe_snapshot, 2} " <>
-               "and this build reads {:avwe_snapshot, 1}. " <>
+             "no snapshot this build can read; #{path} is tagged {:avwe_snapshot, 3} " <>
+               "and this build reads {:avwe_snapshot, 2}. " <>
                "Delete the world folder #{store_dir(tmp_dir)} to start over."
 
     assert Avwe.World.whereis(@world) == nil
@@ -628,7 +634,7 @@ defmodule Avwe.E2E.PersistenceTest do
     {:ok, region} = Store.latest_snapshot(store)
     :ok = Store.close(store)
     newest = Path.join([store_dir(tmp_dir), "0-0", "snap-0000000020.bin"])
-    File.write!(newest, :erlang.term_to_binary({:avwe_snapshot, 2, region}))
+    File.write!(newest, :erlang.term_to_binary({:avwe_snapshot, 3, region}))
 
     log = capture_log(fn -> :ok = start(tmp_dir, snapshot_every: 10) end)
 

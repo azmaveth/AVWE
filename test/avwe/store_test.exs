@@ -256,14 +256,38 @@ defmodule Avwe.StoreTest do
       assert Region.state_hash(rebuilt) == Region.state_hash(live)
     end
 
-    test "a snapshot is the region wrapped in its version tag", %{store: store, dir: dir} do
+    test "a snapshot is the region and its definition wrapped in its version tag", %{
+      store: store,
+      dir: dir
+    } do
       region = Ember.region() |> Region.advance(3)
-      :ok = Store.snapshot(store, region)
+      :ok = Store.snapshot(store, region, definition: "abc123")
 
-      assert {:avwe_snapshot, 1, %Region{step: 3} = saved} =
+      assert {:avwe_snapshot, 2, %{region: %Region{step: 3} = saved, definition: "abc123"}} =
                dir |> snapshot_file(3) |> File.read!() |> :erlang.binary_to_term()
 
       assert Region.state_hash(saved) == Region.state_hash(region)
+    end
+
+    test "a world without a definition is saved with none", %{store: store, dir: dir} do
+      :ok = Store.snapshot(store, Ember.region())
+
+      assert {:avwe_snapshot, 2, %{definition: nil}} =
+               dir |> snapshot_file(0) |> File.read!() |> :erlang.binary_to_term()
+
+      assert {:ok, _region, nil} = Store.rebuild_with_definition(store)
+    end
+
+    test "the definition comes back with the rebuilt region, from any snapshot", %{store: store} do
+      start = Ember.region()
+      :ok = Store.snapshot(store, start, definition: "abc123")
+      midway = play(store, start)
+      :ok = Store.snapshot(store, midway, definition: "abc123")
+      live = play(store, midway)
+
+      assert {:ok, rebuilt, "abc123"} = Store.rebuild_with_definition(store)
+      assert Region.state_hash(rebuilt) == Region.state_hash(live)
+      assert {:ok, ^rebuilt} = Store.rebuild(store)
     end
 
     test "a snapshot with another version's tag is refused, naming the file", %{
@@ -272,16 +296,24 @@ defmodule Avwe.StoreTest do
     } do
       region = Ember.region()
       newer = snapshot_file(dir, 3)
-      File.write!(newer, :erlang.term_to_binary({:avwe_snapshot, 2, region}))
+      File.write!(newer, :erlang.term_to_binary({:avwe_snapshot, 3, region}))
 
       assert Store.latest_snapshot(store) ==
-               {:error, {:unknown_snapshot, newer, {:avwe_snapshot, 2}}}
+               {:error, {:unknown_snapshot, newer, {:avwe_snapshot, 3}}}
 
       # The format from before the tag: a bare region.
       untagged = snapshot_file(dir, 4)
       File.write!(untagged, :erlang.term_to_binary(region))
 
       assert Store.latest_snapshot(store) == {:error, {:unknown_snapshot, untagged, :untagged}}
+
+      # The format from before a snapshot carried its definition: a world saved
+      # then is not resumed, and is told why.
+      before_definitions = snapshot_file(dir, 5)
+      File.write!(before_definitions, :erlang.term_to_binary({:avwe_snapshot, 1, region}))
+
+      assert Store.latest_snapshot(store) ==
+               {:error, {:unknown_snapshot, before_definitions, {:avwe_snapshot, 1}}}
     end
 
     test "a half-written snapshot is removed on open", %{store: store, dir: dir} do
@@ -490,7 +522,7 @@ defmodule Avwe.StoreTest do
       live = play(store, midway)
 
       latest = snapshot_file(dir, 38)
-      File.write!(latest, :erlang.term_to_binary({:avwe_snapshot, 2, midway}))
+      File.write!(latest, :erlang.term_to_binary({:avwe_snapshot, 3, midway}))
 
       log =
         capture_log(fn ->
@@ -500,18 +532,18 @@ defmodule Avwe.StoreTest do
         end)
 
       assert log =~
-               "Skipping snapshot #{latest}: {:unknown_snapshot, #{inspect(latest)}, {:avwe_snapshot, 2}}"
+               "Skipping snapshot #{latest}: {:unknown_snapshot, #{inspect(latest)}, {:avwe_snapshot, 3}}"
     end
 
     test "it is an error when every snapshot is of an unknown version", %{store: store, dir: dir} do
       region = Ember.region()
       :ok = Store.snapshot(store, region)
       first = snapshot_file(dir, 0)
-      File.write!(first, :erlang.term_to_binary({:avwe_snapshot, 2, region}))
-      File.write!(snapshot_file(dir, 3), :erlang.term_to_binary({:avwe_snapshot, 2, region}))
+      File.write!(first, :erlang.term_to_binary({:avwe_snapshot, 3, region}))
+      File.write!(snapshot_file(dir, 3), :erlang.term_to_binary({:avwe_snapshot, 3, region}))
 
       capture_log(fn ->
-        assert Store.rebuild(store) == {:error, {:unknown_snapshot, first, {:avwe_snapshot, 2}}}
+        assert Store.rebuild(store) == {:error, {:unknown_snapshot, first, {:avwe_snapshot, 3}}}
       end)
     end
   end

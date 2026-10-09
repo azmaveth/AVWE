@@ -141,7 +141,7 @@ defmodule AvweTest do
              Avwe.start_world(@world, quire: Fixtures.ember_reach())
   end
 
-  test "a world without a Quire folder doesn't start" do
-    assert {:error, :no_quire_path} = Avwe.start_world(:nowhere)
+  test "a world with neither a definition nor a Quire folder doesn't start" do
+    assert {:error, :no_world_source} = Avwe.start_world(:nowhere)
   end
 end

@@ -20,10 +20,17 @@ defmodule Avwe.RegionServer do
   restarts, and how the supervisor brings a crashed region back where it was.
   The saved state wins for state (seed, time, terrain, components, fields,
   env), but the systems come from the region the server was given: they are
-  code, not state, and the rules may change while the world runs. The region
-  it was given is otherwise ignored, with a warning for each setting of it
-  (seed, climate, hearths, miracles, characters, the items they carry
-  included) that differs from the saved world.
+  code, not state, and the rules may change while the world runs.
+
+  What the region was built from is checked first. A world built from a
+  definition (`Avwe.Definition`) passes the hash of it as `:definition`, and
+  every snapshot records it: a saved world is resumed only under the
+  definition it was saved under, and refuses to start under another, or under
+  none (`{:definition_changed, saved, given}`), since the saved state belongs
+  to the world that definition described. A world built from Quire and settings
+  has no definition, and the region it was given is ignored, with a warning for
+  each setting of it (seed, climate, hearths, miracles, characters, the items
+  they carry included) that differs from the saved world.
 
   A body still held when its world stopped is held by nobody once the world
   starts again (sessions end with their world and do not release it), so
@@ -117,7 +124,9 @@ defmodule Avwe.RegionServer do
     world = Keyword.fetch!(opts, :world)
     keep = Keyword.get(opts, :snapshot_keep, @default_snapshot_keep)
 
-    case open_store(Keyword.get(opts, :store), Keyword.fetch!(opts, :region), keep) do
+    definition = Keyword.get(opts, :definition)
+
+    case open_store(Keyword.get(opts, :store), Keyword.fetch!(opts, :region), keep, definition) do
       {:ok, store, region} ->
         table = :ets.new(__MODULE__, [:set, :protected, read_concurrency: true])
         {:ok, _owner} = Registry.register(Avwe.Registry, {:region, world, region.id}, table)
@@ -130,7 +139,8 @@ defmodule Avwe.RegionServer do
             table: table,
             store: store,
             snapshot_every: Keyword.get(opts, :snapshot_every, @default_snapshot_every),
-            snapshot_keep: keep
+            snapshot_keep: keep,
+            definition: definition
           })
 
         publish(table, state.region)
@@ -179,32 +189,28 @@ defmodule Avwe.RegionServer do
   # Without a store the region starts as given. With one, saved state wins
   # over the given region, and a fresh store gets the given region as its
   # step-0 snapshot so the whole history can be replayed from it.
-  defp open_store(nil, region, _keep), do: {:ok, nil, region}
+  defp open_store(nil, region, _keep, _definition), do: {:ok, nil, region}
 
-  defp open_store(dir, region, keep) do
+  defp open_store(dir, region, keep, definition) do
     with {:ok, store} <- Store.open(dir, region.id, owner: true),
-         {:ok, region} <- resume(store, region, keep) do
+         {:ok, region} <- resume(store, region, keep, definition) do
       {:ok, store, region}
     end
   end
 
-  defp resume(store, region, keep) do
-    case Store.rebuild(store) do
-      {:ok, saved} ->
-        Logger.info(
-          "Resumed region #{inspect(saved.id)} at step #{saved.step} from #{store.path}"
-        )
-
-        resumed = reconfigure(saved, region, store.dir)
-        with :ok <- snapshot_if_rules_changed(store, saved, resumed, keep), do: {:ok, resumed}
+  defp resume(store, region, keep, definition) do
+    case Store.rebuild_with_definition(store) do
+      {:ok, saved, saved_definition} ->
+        with :ok <- same_definition(saved, saved_definition, definition, store.dir),
+             do: resume_saved(store, saved, region, keep, definition)
 
       :none ->
-        start_fresh(store, region, keep)
+        start_fresh(store, region, keep, definition)
 
       {:error, {:unknown_snapshot, path, tag}} = error ->
         Logger.error(
           "Region #{inspect(region.id)}: no snapshot this build can read; #{path} is " <>
-            "tagged #{inspect(tag)} and this build reads {:avwe_snapshot, 1}. " <>
+            "tagged #{inspect(tag)} and this build reads {:avwe_snapshot, 2}. " <>
             "Delete the world folder #{store.dir} to start over."
         )
 
@@ -215,26 +221,58 @@ defmodule Avwe.RegionServer do
     end
   end
 
+  defp resume_saved(store, saved, given, keep, definition) do
+    Logger.info("Resumed region #{inspect(saved.id)} at step #{saved.step} from #{store.path}")
+
+    resumed = reconfigure(saved, given, store.dir, definition)
+
+    with :ok <- snapshot_if_rules_changed(store, saved, resumed, keep, definition),
+         do: {:ok, resumed}
+  end
+
+  # The saved state belongs to the world its definition described, so it is
+  # resumed under that definition and no other.
+  defp same_definition(_saved, definition, definition, _dir), do: :ok
+
+  defp same_definition(saved, saved_definition, definition, dir) do
+    Logger.error(
+      "Region #{inspect(saved.id)}: the world was saved #{described(saved_definition)} " <>
+        "but is now given #{described(definition)}. Give it the definition it was " <>
+        "saved under, or delete the world folder #{dir} to start over."
+    )
+
+    {:error, {:definition_changed, saved_definition, definition}}
+  end
+
+  defp described(nil), do: "without a definition (from Quire and settings)"
+  defp described(hash), do: "under the definition #{String.slice(hash, 0, 12)}"
+
   # Replay runs the systems of the snapshot it starts from, so a log written
   # under new systems must begin at a snapshot that carries them.
-  defp snapshot_if_rules_changed(_store, %{systems: same}, %{systems: same}, _keep), do: :ok
+  defp snapshot_if_rules_changed(_store, %{systems: same}, %{systems: same}, _keep, _definition),
+    do: :ok
 
-  defp snapshot_if_rules_changed(store, _saved, resumed, keep),
-    do: Store.snapshot(store, resumed, keep: keep)
+  defp snapshot_if_rules_changed(store, _saved, resumed, keep, definition),
+    do: Store.snapshot(store, resumed, keep: keep, definition: definition)
 
   # A log with no snapshot to replay it onto can't be resumed and must not be
   # started over: the world fails to start instead.
-  defp start_fresh(store, region, keep) do
+  defp start_fresh(store, region, keep, definition) do
     if Store.empty?(store),
-      do: with(:ok <- Store.snapshot(store, region, keep: keep), do: {:ok, region}),
+      do:
+        with(
+          :ok <- Store.snapshot(store, region, keep: keep, definition: definition),
+          do: {:ok, region}
+        ),
       else: {:error, :log_without_snapshot}
   end
 
   # Configuration beats the snapshot for code; the snapshot wins for state.
   # The settings the given region was built from (`Avwe.Worldgen`) are state
   # too, so each one that differs from the saved world is named and ignored.
-  defp reconfigure(saved, given, dir) do
-    for {setting, phrase, wanted, kept} <- ignored_settings(saved, given) do
+  # Under a definition there is nothing to compare: it is the same one.
+  defp reconfigure(saved, given, dir, definition) do
+    for {setting, phrase, wanted, kept} <- ignored_settings(saved, given, definition) do
       Logger.warning(
         "Region #{inspect(saved.id)}: ignoring :#{setting} #{inspect(wanted)}; " <>
           "the world's #{phrase} #{inspect(kept)}; delete #{dir} to start over"
@@ -254,7 +292,9 @@ defmodule Avwe.RegionServer do
 
   # The settings of `given` that the saved world cannot take on, as
   # `{setting, "what is", wanted, kept}` for the warning.
-  defp ignored_settings(saved, given) do
+  defp ignored_settings(_saved, _given, definition) when definition != nil, do: []
+
+  defp ignored_settings(saved, given, nil) do
     lit = lit_hearths(saved)
 
     [
@@ -374,7 +414,8 @@ defmodule Avwe.RegionServer do
   defp persist(%{store: store} = state, before, steps, dt, events, region) do
     with :ok <- Store.append(store, Store.advance_record(before, steps, dt, events)) do
       if snapshot_due?(before.step, region.step, state.snapshot_every),
-        do: Store.snapshot(store, region, keep: state.snapshot_keep),
+        do:
+          Store.snapshot(store, region, keep: state.snapshot_keep, definition: state.definition),
         else: :ok
     end
   end

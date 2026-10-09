@@ -3,13 +3,14 @@ defmodule Avwe do
   Azmaveth's Virtual World Engine: a headless world simulator.
 
   AVWE owns a world's rules and state. Clients connect and present it however
-  they like. Worlds come from Quire. See `docs/DESIGN.md`.
+  they like. A world is run from a definition (`Avwe.Definition`), a JSON file
+  compiled from Quire. See `docs/DESIGN.md`.
 
   ## Quick start
 
-  In `iex -S mix`, with Quire checked out next to this repo:
+  In `iex -S mix`:
 
-      {:ok, _pid} = Avwe.start_world(:ember_reach)
+      {:ok, _pid} = Avwe.start_world(:ember_reach, definition: "ember-reach")
       Avwe.now(:ember_reach)          # "813 AR, day 220, 04:00"
       {:ok, mira} = Avwe.connect(:ember_reach, body: "mira-vale")
       Avwe.Session.act(mira, :go, target: "the-dry-bend")
@@ -24,7 +25,18 @@ defmodule Avwe do
       {:ok, %{status: :done}} = Avwe.Mind.act(mind, [{:go, target: "the-dry-bend"}, {:write, params: %{text: "Dry."}}])
   """
 
-  alias Avwe.{Calendar, Clock, GroundCache, Quire, RegionServer, Terrain}
+  alias Avwe.{
+    Calendar,
+    Clock,
+    Definition,
+    Definitions,
+    GroundCache,
+    Quire,
+    Region,
+    RegionServer,
+    Terrain,
+    Worldgen
+  }
 
   require Logger
 
@@ -45,13 +57,32 @@ defmodule Avwe do
   ]
 
   @doc """
-  Loads a world from Quire and starts it.
+  Starts a world, from a definition or from Quire.
 
   Options are read from `config :avwe, :worlds` under `id`, then overridden by
-  `opts`:
+  `opts`. A world has one source:
 
-    * `:quire` - the Quire world folder. A relative path is resolved against
-      `config :avwe, :quire_root`.
+    * `:definition` - a world definition (`Avwe.Definition`), as its name
+      (`"ember-reach"`, read from `priv/worlds/ember-reach/definition.json`),
+      the path to a `.json` file, or an `Avwe.Definition` struct. It holds
+      everything the world is: its places, bodies, terrain, hearths, miracles,
+      characters, guests, start and seed. So none of `:start`, `:seed`,
+      `:terrain`, `:hearths`, `:miracles`, `:climate`, `:characters` and
+      `:guests` may be given with it (`{:error, {:settings_with_definition,
+      keys}}`): a different world is a different definition, and a changed
+      definition has a different hash, which a saved world refuses.
+    * `:quire` - the Quire world folder, with the world's settings in the
+      options below: how a world is made from Quire and settings directly,
+      without a definition file, for tests and for trying a Quire world. A
+      relative path is resolved against `config :avwe, :quire_root`.
+
+  Both together fail with `:definition_and_quire`, neither with
+  `:no_world_source`, and a definition that cannot be read with
+  `{:invalid_definition, path, problems}` (every problem at once; see
+  `Avwe.Definition.explain/1`).
+
+  The rest are for a world from Quire, and for how a world is run:
+
     * `:start` - world time to start at, as an integer or `{year, opts}` for
       `Avwe.Calendar.at/2`. Default: the start of 0 AR.
     * `:seed` - world seed. Default: derived from `id`.
@@ -67,13 +98,17 @@ defmodule Avwe do
     * `:data_dir` - where worlds keep their logs and snapshots; this world's
       go under `<data_dir>/<id>`. Default: `config :avwe, :data_dir`. `nil`
       means no persistence. A world whose state is already there resumes
-      from it: `:start`, `:seed`, `:terrain`, `:hearths`, `:miracles`,
-      `:climate` and `:characters` are ignored (with a warning naming each
+      from it. One started from a definition resumes only under the
+      definition it was saved under, and refuses another (and a world started
+      from Quire refuses a saved definition world); `:systems` is applied
+      either way, since the rules are code, not state. One started from Quire
+      and settings ignores `:start`, `:seed`, `:terrain`, `:hearths`,
+      `:miracles`, `:climate` and `:characters` (with a warning naming each
       of `:seed`, `:climate`, `:hearths`, `:miracles` and `:characters` that
-      differs from the saved world), but `:systems` is applied, since the
-      rules are code, not state. Replaying a log is only valid under the systems it was recorded
-      with; after changing them, the region is snapshotted at once so the
-      log from that point on belongs to the new rules.
+      differs from the saved world). Replaying a log is only valid under the
+      systems it was recorded with; after changing them, the region is
+      snapshotted at once so the log from that point on belongs to the new
+      rules.
     * `:snapshot_every` - steps between snapshots. A snapshot is written at
       the end of any advance that crosses a multiple of this; a multi-step
       advance that crosses one snapshots at the end of that advance, not at
@@ -85,15 +120,54 @@ defmodule Avwe do
   def start_world(id, opts \\ []) do
     opts = :avwe |> Application.get_env(:worlds, []) |> Keyword.get(id, []) |> Keyword.merge(opts)
 
+    with {:ok, world} <- build_world(id, opts) do
+      DynamicSupervisor.start_child(
+        Avwe.Worlds,
+        {Avwe.World,
+         id: id,
+         regions: [world.region],
+         clock: Keyword.get(opts, :clock, :manual),
+         info: %{
+           name: world.name,
+           tagline: world.tagline,
+           clock: Keyword.get(opts, :clock, :manual),
+           dt: world.region.dt,
+           guests: world.guests,
+           definition: world.definition
+         },
+         store: store_dir(id, Keyword.get(opts, :data_dir, Application.get_env(:avwe, :data_dir))),
+         definition: world.definition,
+         snapshot_every: Keyword.get(opts, :snapshot_every, 1_000),
+         snapshot_keep: Keyword.get(opts, :snapshot_keep, 5)}
+      )
+    end
+  end
+
+  # What a world needs to start: its region, what it says of itself, the guests
+  # it takes and the hash of the definition it was built from (`nil` for none).
+  defp build_world(id, opts) do
+    case {Keyword.fetch(opts, :definition), Keyword.has_key?(opts, :quire)} do
+      {{:ok, _definition}, true} -> {:error, :definition_and_quire}
+      {{:ok, definition}, false} -> from_definition(id, definition, opts)
+      {:error, true} -> from_quire(id, opts)
+      {:error, false} -> {:error, :no_world_source}
+    end
+  end
+
+  defp from_quire(id, opts) do
     with {:ok, path} <- quire_path(opts),
          {:ok, quire_world} <- Quire.load(path) do
-      warn_unplaced(id, Quire.Seed.unplaced(quire_world))
+      warn_unplaced(
+        id,
+        Enum.map(Quire.Seed.unplaced(quire_world), &unplaced_name/1),
+        "A character is placed at its home when the home is a pin on the map."
+      )
 
       region =
-        Avwe.Worldgen.region(quire_world,
+        Worldgen.region(quire_world,
           id: @default_region,
           seed: Keyword.get_lazy(opts, :seed, fn -> :erlang.phash2(id) end),
-          time: start_time(Keyword.get(opts, :start, 0)),
+          time: Definition.time(Keyword.get(opts, :start, 0)),
           systems: Keyword.get(opts, :systems, @default_systems),
           terrain: Keyword.get(opts, :terrain),
           hearths: Keyword.get(opts, :hearths, []),
@@ -102,44 +176,84 @@ defmodule Avwe do
           characters: Keyword.get(opts, :characters, [])
         )
 
-      DynamicSupervisor.start_child(
-        Avwe.Worlds,
-        {Avwe.World,
-         id: id,
-         regions: [region],
-         clock: Keyword.get(opts, :clock, :manual),
-         info: %{
-           name: quire_world.name,
-           tagline: quire_world.tagline,
-           clock: Keyword.get(opts, :clock, :manual),
-           dt: region.dt,
-           guests: guests!(region, Keyword.get(opts, :guests))
-         },
-         store: store_dir(id, Keyword.get(opts, :data_dir, Application.get_env(:avwe, :data_dir))),
-         snapshot_every: Keyword.get(opts, :snapshot_every, 1_000),
-         snapshot_keep: Keyword.get(opts, :snapshot_keep, 5)}
-      )
+      {:ok,
+       %{
+         region: region,
+         name: quire_world.name,
+         tagline: quire_world.tagline,
+         guests: guests!(region, Keyword.get(opts, :guests)),
+         definition: nil
+       }}
     end
   end
+
+  # What a definition holds cannot also be given as an option: the world would
+  # be partly the file and partly the options, and its hash would not say which.
+  @definition_owns [:start, :seed, :terrain, :hearths, :miracles, :climate, :characters, :guests]
+
+  defp from_definition(id, source, opts) do
+    with :ok <- definition_alone(opts),
+         {:ok, definition} <- definition(source) do
+      region =
+        Definition.region(definition,
+          id: @default_region,
+          systems: Keyword.get(opts, :systems, @default_systems)
+        )
+
+      warn_unplaced(
+        id,
+        unplaced_names(region),
+        "A character is placed when its entity has a position."
+      )
+
+      {:ok,
+       %{
+         region: region,
+         name: definition.name,
+         tagline: definition.tagline,
+         guests: guests!(region, definition.guests),
+         definition: Definition.hash(definition)
+       }}
+    end
+  end
+
+  defp definition_alone(opts) do
+    case Enum.filter(@definition_owns, &Keyword.has_key?(opts, &1)) do
+      [] -> :ok
+      given -> {:error, {:settings_with_definition, given}}
+    end
+  end
+
+  defp definition(%Definition{} = definition), do: {:ok, definition}
+  defp definition(name_or_path), do: Definitions.load(name_or_path)
 
   # A character whose home is not a pin on the map gets a body that is nowhere
   # (`Avwe.Quire.Seed`), and nobody can play it. Whoever runs the world, and
   # whoever writes its canon, should hear of it.
-  defp warn_unplaced(_world, []), do: :ok
+  defp warn_unplaced(_world, [], _hint), do: :ok
 
-  defp warn_unplaced(world, unplaced) do
-    count = length(unplaced)
+  defp warn_unplaced(world, names, hint) do
+    count = length(names)
     noun = if count == 1, do: "1 character is", else: "#{count} characters are"
-    names = Enum.map_join(unplaced, ", ", &unplaced_name/1)
 
     Logger.warning(
-      "#{world}: #{noun} not placed, so nobody can play them yet: #{names}. " <>
-        "A character is placed at its home when the home is a pin on the map."
+      "#{world}: #{noun} not placed, so nobody can play them yet: #{Enum.join(names, ", ")}. #{hint}"
     )
   end
 
   defp unplaced_name(%{name: name, home: nil}), do: "#{name} (no home)"
   defp unplaced_name(%{name: name, home: home}), do: "#{name} (home: #{home})"
+
+  # The same, in a world that comes from a definition: the bodies it gives no
+  # position, by name.
+  defp unplaced_names(region) do
+    for id <- Region.with_components(region, [:body]), Region.get(region, id, :position) == nil do
+      case Region.get(region, id, :repr) do
+        %{name: name} -> name
+        _no_repr -> id
+      end
+    end
+  end
 
   # The settings guests arrive under, checked here where a bad one is easiest
   # to explain, as a bad hearth is: the place must be a place of the world.
@@ -225,8 +339,10 @@ defmodule Avwe do
   @doc """
   Every running world as `{id, info}`: its `name` and `tagline`, and how
   its time passes, its `clock` (`:manual` or `{:live, interval_ms}`) and
-  `dt`, the world seconds of each step, and the `guests` it takes, `nil` or
-  `%{arrival: place, max: n}`.
+  `dt`, the world seconds of each step, the `guests` it takes, `nil` or
+  `%{arrival: place, max: n}`, and the `definition` it was made from, the hash
+  of its world definition (`Avwe.Definition.hash/1`), or `nil` for a world made
+  from Quire and settings.
   """
   @spec worlds() :: [{atom(), map()}]
   def worlds, do: Avwe.World.list()
@@ -339,7 +455,4 @@ defmodule Avwe do
       :error -> {:error, :no_quire_path}
     end
   end
-
-  defp start_time({year, opts}), do: Calendar.at(year, opts)
-  defp start_time(time) when is_integer(time), do: time
 end

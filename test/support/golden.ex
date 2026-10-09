@@ -37,7 +37,10 @@ defmodule Avwe.Test.Golden do
   def scenarios, do: [:ember_813, :ember_812]
 
   @doc """
-  The scenario called `name`.
+  The scenario called `name`, with its region built from `source`: `:quire` (the
+  Ember Reach from Quire and its settings, the way the record was made) or
+  `:definition` (from its world definition, the way a world runs now). Both
+  must give the record.
 
   `:ember_813` is Mira under a controller on the morning of 813 AR, day 220: she
   lights the town hearth, speaks and writes, walks the banks, follows the
@@ -49,11 +52,13 @@ defmodule Avwe.Test.Golden do
   after: the miracle, the channel running dry reach by reach, the silt cooling,
   the hearths, the smoke, and Mira's routine.
   """
-  @spec scenario(atom()) :: map()
-  def scenario(:ember_813) do
+  @spec scenario(atom(), :quire | :definition) :: map()
+  def scenario(name, source \\ :quire)
+
+  def scenario(:ember_813, source) do
     %{
       name: :ember_813,
-      region: Ember.region({813, day: 220, hour: 4}),
+      region: region(source, {813, day: 220, hour: 4}),
       steps: 2_880,
       watchers: [nil, @mira, "guest-tomas-reed"],
       script: %{
@@ -83,15 +88,18 @@ defmodule Avwe.Test.Golden do
     }
   end
 
-  def scenario(:ember_812) do
+  def scenario(:ember_812, source) do
     %{
       name: :ember_812,
-      region: Ember.region({812, day: 199, hour: 14}),
+      region: region(source, {812, day: 199, hour: 14}),
       steps: 4_320,
       watchers: [nil, @mira],
       script: %{}
     }
   end
+
+  defp region(:quire, at), do: Ember.region(at)
+  defp region(:definition, at), do: Ember.region_from_definition(at)
 
   defp arrival do
     {:ok, offer} = Guests.offer(@tomas, "A salvage diver from Willow Docks.")
@@ -110,10 +118,11 @@ defmodule Avwe.Test.Golden do
   Runs a scenario and records it: the normalised events, percepts and looks, in
   order (`streams`), and the digests that stand for them (`digests`).
   """
-  @spec run(atom() | map()) :: %{streams: map(), digests: map()}
-  def run(scenario) when is_atom(scenario), do: run(scenario(scenario))
+  @spec run(atom() | map(), :quire | :definition) :: %{streams: map(), digests: map()}
+  def run(scenario, source \\ :quire)
+  def run(scenario, source) when is_atom(scenario), do: run(scenario(scenario, source))
 
-  def run(%{region: region, steps: steps} = scenario) do
+  def run(%{region: region, steps: steps} = scenario, _source) do
     start = %{
       region: region,
       events: [],
