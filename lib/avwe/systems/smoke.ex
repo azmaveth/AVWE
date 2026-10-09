@@ -106,6 +106,9 @@ defmodule Avwe.Systems.Smoke do
   def default_wind, do: @default_wind
 
   @impl Avwe.System
+  def system_id, do: "earthlike.smoke/step"
+
+  @impl Avwe.System
   def prepare(region), do: %{region | fields: Map.put_new(region.fields, :smoke, new())}
 
   @impl Avwe.System

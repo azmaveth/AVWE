@@ -11,9 +11,10 @@ defmodule Avwe.Region do
       just an id that appears in one or more component maps.
     * **fields**, dense per-cell values such as temperature or water.
     * **env**, region-wide values such as light.
-    * **terrain**, the static shape of the land (`Avwe.Terrain`), or `nil`.
-    * an **inbox** of intents waiting for the next step, and an **outbox** of
-      events emitted since it was last drained.
+    * **terrain**, the static shape of the land, opaque to the simulation and
+      owned by one rule, or `nil`.
+    * an **inbox** of inputs waiting for the next step (`Avwe.Input`), and an
+      **outbox** of events emitted since it was last drained.
 
   Build one with `new/1`, change it with the reducers, move it through time
   with `advance/3`, and read it with the converters.
@@ -26,10 +27,17 @@ defmodule Avwe.Region do
   depend on map iteration order.
   """
 
-  alias Avwe.{Actions, Event, Intent, Tick}
+  alias Avwe.{Calendar, Event, Input, Space, SystemTable, Tick}
 
   @type entity_id :: String.t()
   @type component :: atom()
+
+  @typedoc """
+  A system the region runs: its stable id (`Avwe.System`) and its options.
+  `every: seconds` makes it run only in a step that reaches a multiple of that
+  many seconds.
+  """
+  @type system :: {SystemTable.id(), keyword()}
 
   @enforce_keys [:id, :seed]
   defstruct [
@@ -39,6 +47,7 @@ defmodule Avwe.Region do
     step: 0,
     time: 0,
     dt: 60,
+    calendar: %Avwe.Calendar{},
     systems: [],
     components: %{},
     fields: %{},
@@ -51,15 +60,16 @@ defmodule Avwe.Region do
   @type t :: %__MODULE__{
           id: term(),
           seed: integer(),
-          terrain: Avwe.Terrain.t() | nil,
+          terrain: term(),
           step: non_neg_integer(),
           time: Avwe.Calendar.time(),
           dt: pos_integer(),
-          systems: [module()],
+          calendar: Calendar.t(),
+          systems: [system()],
           components: %{component() => %{entity_id() => term()}},
           fields: %{atom() => term()},
           env: %{atom() => term()},
-          inbox: [Intent.t()],
+          inbox: [Input.t()],
           next_seq: non_neg_integer(),
           outbox: [Event.t()]
         }
@@ -70,7 +80,10 @@ defmodule Avwe.Region do
   Creates an empty region.
 
   Options: `:id` and `:seed` (required), `:time` (default 0), `:dt` (step length
-  in world seconds, default 60) and `:systems` (run in order every step).
+  in world seconds, default 60), `:calendar` (default the Earth's,
+  `Avwe.Calendar.earth/0`) and `:systems` (run in order every step).
+  Systems are given as modules, as ids, or as `{module_or_id, options}`
+  (`systems/1`).
   """
   @spec new(keyword()) :: t()
   def new(opts) do
@@ -79,9 +92,47 @@ defmodule Avwe.Region do
       seed: Keyword.fetch!(opts, :seed),
       time: Keyword.get(opts, :time, 0),
       dt: Keyword.get(opts, :dt, 60),
-      systems: Keyword.get(opts, :systems, [])
+      calendar: Keyword.get(opts, :calendar, Calendar.earth()),
+      systems: systems(Keyword.get(opts, :systems, []))
     }
   end
+
+  @doc """
+  The systems a region runs, as the region keeps them: `{id, options}`. A
+  module is registered under its id (`Avwe.SystemTable.register/1`); an id
+  must already be one some module runs, or this raises. What `new/1` and
+  `put_systems/2` do to what they are given, and what a list that is already
+  in this form comes through unchanged.
+  """
+  @spec systems([module() | String.t() | {module() | String.t(), keyword()}]) :: [system()]
+  def systems(given) when is_list(given), do: Enum.map(given, &system/1)
+
+  defp system({module_or_id, options}) when is_list(options) do
+    id = system_id(module_or_id)
+
+    case Avwe.System.option_problems(options) do
+      [] ->
+        {id, options}
+
+      problems ->
+        raise ArgumentError, "the system #{id} is listed with #{Enum.join(problems, "; ")}"
+    end
+  end
+
+  defp system(module_or_id), do: {system_id(module_or_id), []}
+
+  defp system_id(module) when is_atom(module), do: SystemTable.register(module)
+
+  defp system_id(id) when is_binary(id) do
+    case SystemTable.fetch(id) do
+      {:ok, _module} -> id
+      :error -> raise ArgumentError, SystemTable.unknown(id)
+    end
+  end
+
+  @doc "Replaces the systems the region runs (`systems/1`)."
+  @spec put_systems(t(), [module() | String.t() | {module() | String.t(), keyword()}]) :: t()
+  def put_systems(%__MODULE__{} = region, given), do: %{region | systems: systems(given)}
 
   # Reducers
 
@@ -119,12 +170,12 @@ defmodule Avwe.Region do
   end
 
   @doc """
-  Queues an intent for the next step and numbers it. Intents are applied at
-  the start of the step, sorted by `{body, seq}`.
+  Queues an input (`Avwe.Input`) for the next step and numbers it. Inputs are
+  applied at the start of the step, sorted by `{order_key, seq}`.
   """
-  @spec submit(t(), Intent.t()) :: t()
-  def submit(%__MODULE__{inbox: inbox, next_seq: seq} = region, %Intent{} = intent) do
-    %{region | inbox: [%{intent | seq: seq} | inbox], next_seq: seq + 1}
+  @spec submit(t(), Input.t()) :: t()
+  def submit(%__MODULE__{inbox: inbox, next_seq: seq} = region, input) do
+    %{region | inbox: [Input.put_seq(input, seq) | inbox], next_seq: seq + 1}
   end
 
   @doc "Sets a region-wide environment value."
@@ -138,70 +189,115 @@ defmodule Avwe.Region do
   `c:Avwe.System.prepare/1`). Call once, after building the region and before
   the first step.
 
-  Pass `only: systems` to prepare just those (a region resumed from disk
-  prepares only the systems added since it was saved).
+  Pass `only: systems` (system ids, or entries as `systems/1` gives them) to
+  prepare just those (a region resumed from disk prepares only the systems
+  added since it was saved).
   """
   @spec prepare(t(), keyword()) :: t()
   def prepare(%__MODULE__{systems: systems} = region, opts \\ []) do
-    chosen = Keyword.get(opts, :only, systems)
+    chosen = opts |> Keyword.get(:only, systems) |> Enum.map(&entry_id/1)
 
-    Enum.reduce(Enum.filter(systems, &(&1 in chosen)), region, fn system, acc ->
-      Code.ensure_loaded!(system)
-      if function_exported?(system, :prepare, 1), do: system.prepare(acc), else: acc
-    end)
+    systems
+    |> Enum.map(&entry_id/1)
+    |> Enum.filter(&(&1 in chosen))
+    |> Enum.reduce(region, fn id, acc -> prepare_system(SystemTable.fetch!(id), acc) end)
   end
+
+  defp prepare_system(module, region) do
+    Code.ensure_loaded!(module)
+    if function_exported?(module, :prepare, 1), do: module.prepare(region), else: region
+  end
+
+  defp entry_id({id, _options}), do: id
+  defp entry_id(id), do: id
 
   @doc """
   Advances the region by `steps` steps.
 
-  Options: `:dt` overrides the region's step length for these steps. Events
-  emitted along the way collect in the outbox; take them with
-  `drain_events/1`.
+  Options: `:dt` overrides the region's step length for these steps, and
+  `:observe` is a function called after each system has run, with the system's
+  id and the region before and after it (for tools that measure what a system
+  changes; `Avwe.RuleCase`). Events emitted along the way collect in the outbox;
+  take them with `drain_events/1`.
   """
   @spec advance(t(), non_neg_integer(), keyword()) :: t()
   def advance(%__MODULE__{} = region, steps \\ 1, opts \\ [])
       when is_integer(steps) and steps >= 0 do
     dt = Keyword.get(opts, :dt, region.dt)
-    Enum.reduce(List.duplicate(dt, steps), region, &step(&2, &1))
+    observe = Keyword.get(opts, :observe)
+    Enum.reduce(List.duplicate(dt, steps), region, &step(&2, &1, observe))
   end
 
   # A step starts with an empty outbox, so `step_events/2` reads only its
   # own events, and puts the earlier ones back behind them when it ends:
   # that costs the step's own events, not the whole undrained outbox.
-  defp step(%__MODULE__{outbox: earlier} = region, dt) do
+  defp step(%__MODULE__{outbox: earlier} = region, dt, observe) do
     tick = %Tick{
       step: region.step,
       time: region.time,
       dt: dt,
       seed: region.seed,
-      region: region.id
+      region: region.id,
+      calendar: region.calendar
     }
 
     stepped =
       %{region | outbox: []}
-      |> apply_intents(tick)
-      |> run_systems(tick)
+      |> apply_inputs(tick)
+      |> run_systems(tick, observe)
       |> finish_step(tick)
 
     %{stepped | outbox: stepped.outbox ++ earlier}
   end
 
-  defp apply_intents(%__MODULE__{inbox: []} = region, _tick), do: region
+  defp apply_inputs(%__MODULE__{inbox: []} = region, _tick), do: region
 
-  defp apply_intents(%__MODULE__{inbox: inbox} = region, tick) do
+  defp apply_inputs(%__MODULE__{inbox: inbox} = region, tick) do
     inbox
-    |> Enum.sort_by(&{&1.body, &1.seq})
-    |> Enum.reduce(%{region | inbox: []}, fn intent, acc ->
-      {acc, events} = Actions.handle(acc, intent, tick)
+    |> Enum.sort_by(&{Input.order_key(&1), Input.seq(&1)})
+    |> Enum.reduce(%{region | inbox: []}, fn input, acc ->
+      {acc, events} = Input.handle(input, acc, tick)
       emit(acc, events, tick)
     end)
   end
 
-  defp run_systems(region, tick) do
-    Enum.reduce(region.systems, region, fn system, acc ->
-      {acc, events} = system.run(acc, tick)
-      emit(acc, events, tick)
+  defp run_systems(region, tick, observe) do
+    Enum.reduce(region.systems, region, fn {id, options}, acc ->
+      case due(options, tick) do
+        :skip -> acc
+        system_tick -> run_system(acc, id, system_tick, tick, observe)
+      end
     end)
+  end
+
+  # The system runs on its tick (which a period may have changed), and what
+  # it emits is stamped by the step's.
+  defp run_system(region, id, system_tick, tick, observe) do
+    {ran, events} = SystemTable.fetch!(id).run(region, system_tick)
+    if observe, do: observe.(id, region, ran)
+    emit(ran, events, tick)
+  end
+
+  # A system with a period runs in the step that reaches a multiple of it,
+  # whatever the step length (so the choice depends on time, never on counting
+  # steps, and many steps at once are the same as one by one). It is told the
+  # period it covers: a step as long as the period or longer is its own tick; a
+  # shorter one reaches at most one multiple, and the system is told the `every`
+  # seconds that ended there, so the periods it is told tile time even when the
+  # step does not divide the period. It sees the region as the step left it.
+  defp due(options, tick) do
+    case Keyword.get(options, :every) do
+      nil ->
+        tick
+
+      every when tick.dt >= every ->
+        tick
+
+      every ->
+        if Tick.crossed?(tick, every),
+          do: %{tick | time: Tick.last_occurrence(tick, every) - every, dt: every},
+          else: :skip
+    end
   end
 
   defp emit(region, events, tick) do
@@ -243,13 +339,30 @@ defmodule Avwe.Region do
     |> Enum.sort()
   end
 
-  @doc "The intents waiting for the next step, in the order they were submitted."
-  @spec pending(t()) :: [Intent.t()]
+  @doc """
+  Ids of the entities within `radius_m` metres of `location` (a `position`, as
+  the space understands it) that have every one of `components`, sorted. An
+  entity with no `:position` is nowhere and never near. Who is near is a
+  question of the region, not a scan the caller writes: it scans today, and may
+  use an index later without any caller changing.
+  """
+  @spec near(t(), term(), number(), [component()]) :: [entity_id()]
+  def near(%__MODULE__{} = region, location, radius_m, components \\ []) do
+    [:position | components]
+    |> Enum.uniq()
+    |> then(&with_components(region, &1))
+    |> Enum.filter(fn id ->
+      Space.distance(get(region, id, :position), location) * Space.cell_size_m() <= radius_m
+    end)
+  end
+
+  @doc "The inputs waiting for the next step, in the order they were submitted."
+  @spec pending(t()) :: [Input.t()]
   def pending(%__MODULE__{inbox: inbox}), do: Enum.reverse(inbox)
 
   @doc """
   The events emitted so far in the step `tick` describes, oldest first: the
-  intents' and those of the systems that ran before the caller. For a
+  inputs' and those of the systems that ran before the caller. For a
   system that reacts to what happened earlier in the same step. A step
   runs on an outbox of its own (earlier events wait aside until it ends),
   so this is the same whether the region is advanced one step at a time

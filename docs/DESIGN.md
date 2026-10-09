@@ -139,10 +139,16 @@ which is what keeps the core deterministic and testable.
 ```
 avwe/
   lib/avwe/              simulation core, no I/O
-    world.ex region.ex tick.ex system.ex
+    world.ex region.ex tick.ex system.ex calendar.ex
     systems/             daylight, miracles, weather, river, fire, heat,
                          movement, waiting, discovery, autopilot, smoke,
                          memory (built); needs to come
+    system_table.ex      which module runs a system id (E2)
+    rule.ex rule_package.ex ruleset.ex rules/  the rules a world runs, and the
+                         check that they make a world: ownership, needs,
+                         order (E2)
+    input.ex hooks.ex    what a region is sent from outside, and what the
+                         layers above ask of it when it comes back (E2)
     autopilot.ex         the brain: candidates, routine plans, the invited rule
     actions.ex           what each verb does, notebook pages included
     perception.ex prose.ex  what a body senses, and how it reads
@@ -223,7 +229,8 @@ The model is plain data owned by the region process:
   step: 0,
   time: 25_657_704_000,                # 813 AR, day 220, 04:00, in world seconds
   dt: 60,
-  systems: [Avwe.Systems.Daylight, ...],   # run in this order every step
+  calendar: %Avwe.Calendar{},              # 24-hour days, 365-day years, "AR"
+  systems: [{"earthlike.daylight/step", []}, ...],   # ids, run in this order every step
   components: %{
     position: %{"mira-vale" => {121, 138}},
     repr:     %{"mira-vale" => %{name: "Mira Vale", description: "..."}},
@@ -245,9 +252,18 @@ Systems implement one behaviour:
 
 ```elixir
 defmodule Avwe.System do
+  @callback system_id() :: String.t()                 # "earthlike.heat/step"
   @callback run(Avwe.Region.t(), Avwe.Tick.t()) :: {Avwe.Region.t(), [Avwe.Event.t()]}
 end
 ```
+
+A region lists system **ids**, not modules, and `Avwe.SystemTable` says which
+module runs one, so moving or renaming a module breaks no saved world; the id
+is what the state hash and every snapshot see. A system may be listed with a
+period, `every: seconds`, and then runs only in a step that reaches a multiple
+of it. Which systems a world runs, and in what order, is its **ruleset**
+(`Avwe.Ruleset`, `docs/engine-spec.md` section 4.2 and "E2 as built"): the
+rules it lists, each saying what it owns, needs and runs after.
 
 A system that only acts at certain moments (sunrise, every hour) checks
 `Avwe.Tick.crossed?/3` instead of counting steps, because steps vary in length.
@@ -275,13 +291,16 @@ that snapshot in parallel. This is where the BEAM's concurrency pays off.
 
 Each tick, in order:
 
-1. Take the intents that arrived since the last tick and sort them by
-   `(body_id, intent_seq)`.
+1. Take the inputs that arrived since the last tick (the agent layer's
+   intents; `Avwe.Input`) and sort them by `{order_key, seq}`: an intent's key
+   is its body.
 2. Validate each one against the body's affordances. Reject with a `blocked`
    result, or start or continue the action.
-3. Run systems in a fixed order. Built: daylight → miracles → weather →
+3. Run systems in a fixed order, the one the world's rules give (each says
+   what it runs after; the rest are sorted by id, so one ruleset has one
+   order). Built, for the Earth-like ruleset: daylight → miracles → weather →
    river → fire → heat → movement → waiting → discovery → autopilot →
-   smoke. The order is load-bearing: weather before the river so water
+   smoke → memory. The order is load-bearing: weather before the river so water
    cools toward the real air; river and fire before heat so the ground sees
    this step's reach state and burn; autopilot after movement and waiting
    so it sees this step's results and arrivals, and queues its intents for

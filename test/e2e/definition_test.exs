@@ -407,7 +407,7 @@ defmodule Avwe.E2E.DefinitionTest do
       assert {:ok, rebuilt, definition} = Store.rebuild_with_definition(store)
       :ok = Store.close(store)
 
-      assert rebuilt.systems == systems
+      assert rebuilt.systems == Enum.map(systems, &{Avwe.SystemTable.id(&1), []})
       assert rebuilt.step == 10
       assert definition == Definition.hash(ember_reach_definition())
     end

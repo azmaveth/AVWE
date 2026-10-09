@@ -13,6 +13,7 @@ defmodule Avwe.Definition.Check do
 
   alias Avwe.Definition
   alias Avwe.Definition.Schema
+  alias Avwe.Ruleset
   alias Avwe.Systems.River
   alias Avwe.Worldgen
 
@@ -22,9 +23,62 @@ defmodule Avwe.Definition.Check do
     world = world(definition)
 
     Enum.flat_map(
-      [&ids/2, &entities/2, &terrain/2, &hearths/2, &miracles/2, &characters/2, &guests/2],
+      [
+        &ruleset/2,
+        &ids/2,
+        &entities/2,
+        &terrain/2,
+        &hearths/2,
+        &miracles/2,
+        &characters/2,
+        &guests/2
+      ],
       & &1.(definition, world)
     )
+  end
+
+  # The rules the world runs make a world (`Avwe.Ruleset`), and the rules the
+  # file tells things to are among them.
+  defp ruleset(definition, _world) do
+    case Ruleset.resolve(definition.ruleset) do
+      {:ok, modules} ->
+        listed = MapSet.new(modules, & &1.id())
+
+        composition(modules) ++
+          not_run(definition, listed) ++
+          ruleset_problems(Definition.unserved(definition, modules))
+
+      {:error, problems} ->
+        ruleset_problems(problems)
+    end
+  end
+
+  defp composition(modules) do
+    case Ruleset.plan(modules) do
+      {:ok, _plan} -> []
+      {:error, problems} -> ruleset_problems(problems)
+    end
+  end
+
+  defp ruleset_problems(problems), do: Enum.map(problems, &("ruleset: " <> &1))
+
+  defp not_run(definition, listed) do
+    for {rule, _parameters} <- Enum.sort(told(definition)), rule not in listed do
+      "rules.#{rule}: this world does not run that rule"
+    end
+  end
+
+  # The rules the file gives parameters to, by id.
+  defp told(definition) do
+    settings = definition.settings
+
+    [
+      {"earthlike.valley", Keyword.get(settings, :terrain)},
+      {"earthlike.fire", Keyword.get(settings, :hearths)},
+      {"earthlike.weather", Keyword.get(settings, :climate)}
+    ]
+    |> Enum.reject(fn {_rule, parameters} -> parameters in [nil, []] end)
+    |> Map.new()
   end
 
   # What exists once the world is built, by kind.

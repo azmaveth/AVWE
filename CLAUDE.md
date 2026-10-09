@@ -7,11 +7,15 @@ changing anything structural; it records the decisions and the reasons.
 
 - **The simulation core does no I/O.** `Avwe.Region`, `Avwe.Tick`, systems and
   `Avwe.Quire.Seed` are pure. Files, sockets, the wall clock and LLMs belong in
-  `Avwe.Quire`, servers and adapters.
+  `Avwe.Quire`, servers and adapters. The one piece of state they share is
+  `Avwe.SystemTable`, which says which module declares each system id; it is
+  written from the code alone (`Region.new/1`, a ruleset's plan, the
+  application's start), so a run depends on nothing but the code.
 - **Determinism.** Systems use only `Avwe.Tick.rng/2` for randomness, never
   plain `:rand`. Never depend on map iteration order; use
-  `Region.with_components/2`, which sorts. Use `tick.dt`; never assume a step
-  is one minute. Moments in time are checked with `Tick.crossed?/3`.
+  `Region.with_components/2` or, for who is within a distance, `Region.near/4`,
+  which sort. Use `tick.dt`; never assume a step is one minute. Moments in time
+  are checked with `Tick.crossed?/3`.
 - **Quire is canon and read-only.** AVWE never writes to Quire's files except
   the chronicle (M4).
 - **No back doors.** Every controller (human, Arbor agent, Claude) will act
@@ -59,6 +63,24 @@ changing anything structural; it records the decisions and the reasons.
   tick with `Region.submit/2`, never journaled, and regenerated on replay;
   the brain (`Avwe.Autopilot`) must stay a pure function of the region and
   the tick.
+- **A system belongs to a rule and has an id.** `system_id/0` is
+  `"<rule id>/<name>"`, the rule lists the system in its `systems/0` and says what
+  it runs after, and a world's ruleset (`Avwe.Ruleset`) orders them, ties by id. A
+  region and its snapshots hold ids, never modules, so moving or renaming a
+  module is free and renaming an id is a change to every saved world. A rule
+  lists in `owns/0` the state keys its systems write (two owners of one key is a
+  load error; `test/avwe/rules_test.exs` measures that a system writes nothing
+  else); what it needs of another rule it says as a capability in
+  `requires/0` or `uses/0`.
+- **The kernel names nothing above it.** `test/avwe/kernel_test.exs` lists the
+  simulation's files (`Region`, `Tick`, `Store`, `RegionServer`, the rules'
+  check and the rest of what is to become `avwe_sim`); none of them refers to a
+  module outside that list or uses one of the words the test lists (body,
+  percept, intent, hearth, river, smoke, weather, `earthlike` and the like), in
+  code or in documentation. What the kernel needs of the
+  layers above it (an input's order, a refusal at submit, what to do when a
+  region is started again) is a protocol or a hook (`Avwe.Input`, `Avwe.Hooks`),
+  never a call.
 - **Replay must be exact.** `Avwe.Store.rebuild_from_start/1` has to reproduce
   `Region.state_hash/1`; anything that would make live and replay differ
   (reading map order, the wall clock, `:rand` without `Tick.rng`) is a bug.

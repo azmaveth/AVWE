@@ -1,17 +1,18 @@
 defmodule Avwe.Store do
   @moduledoc """
-  A region's state on disk: an append-only log of every intent and every
+  A region's state on disk: an append-only log of every input and every
   advance, and snapshots every so often.
 
   This is the only module that touches the disk for the simulation. The core
   (`Avwe.Region` and the systems) stays pure; `Avwe.RegionServer` calls in
-  here when it accepts an intent and after each advance.
+  here when it accepts an input and after each advance.
 
   A world is deterministic given its seed, its starting state and its input
   log (`docs/DESIGN.md`, 6.4), so the log records exactly what replay needs:
-  each intent as it was accepted, with the sequence number the region gave
-  it, and each advance with its step length. Events are logged too, for the
-  chronicle, but replay ignores them and lets the systems emit them again.
+  each input (`Avwe.Input`, an opaque term to this module) as it was
+  accepted, with the sequence number the region gave it, and each advance with
+  its step length. Events are logged too, for the chronicle, but replay
+  ignores them and lets the systems emit them again.
 
   ## Layout
 
@@ -21,15 +22,15 @@ defmodule Avwe.Store do
     * `log` - an Erlang `:disk_log` (halt log, internal format). Every record
       is `{:avwe, 2, kind}`, where the `2` is the record version and the kind
       is one of:
-        * `{:submit, step, intent}` - an intent accepted while the region was
+        * `{:submit, step, input}` - an input accepted while the region was
           at `step`, with the `seq` the region assigned.
         * `{:advance, entry}` - an advance; the entry has `:step`, `:time`
           and `:dt` from before the advance, the number of `:steps`, and the
           `:events` emitted.
-      Version-1 records (intents inside the advance record) are rejected.
-    * `snap-<step>.bin` - `:erlang.term_to_binary` of `{:avwe_snapshot, 2,
+      Version-1 records (inputs inside the advance record) are rejected.
+    * `snap-<step>.bin` - `:erlang.term_to_binary` of `{:avwe_snapshot, 3,
       %{region: region, definition: hash}}` for the region at `step`, with the
-      step zero-padded so names sort by step. The `2` is the snapshot version:
+      step zero-padded so names sort by step. The `3` is the snapshot version:
       a file with any other tag is refused with `{:unknown_snapshot, path,
       tag}`, so a region never resumes from a snapshot that a different build
       of the code wrote. `hash` is the hash of the world definition the region
@@ -51,9 +52,10 @@ defmodule Avwe.Store do
 
   ## Durability
 
-  Intents are journaled when they are accepted, so an intent the region
-  acknowledged survives the region crashing before its next advance; that is
-  what keeps "every intent ends in exactly one result percept" true across a
+  Inputs are journaled when they are accepted, so an input the region
+  acknowledged survives the region crashing before its next advance; whatever
+  the layers above promise about what becomes of every input they send (the
+  agent layer's: that each ends in exactly one result) stays true across a
   restart. `:disk_log.log/2` hands the record to the log's own process, which
   keeps it in a write cache and writes the cache out after 2 s, when it
   reaches 64 KB, or when the log is synced or closed. The contract is:
@@ -70,19 +72,18 @@ defmodule Avwe.Store do
       log, never a gap below a snapshot. The snapshot itself is written to a
       `.tmp` file, fsynced and renamed, so it is either complete or absent.
 
-  ## Snapshots and pending intents
+  ## Snapshots and pending inputs
 
   A snapshot stands for the state *between* advances, so it holds no pending
-  journaled intents: any still in the inbox are left out and `next_seq` is
+  journaled inputs: any still in the inbox are left out and `next_seq` is
   wound back by as many, as if they had never been submitted. Their
   `:submit` records re-submit them on replay, which gives them the same
-  sequence numbers again. The intents `Avwe.Systems.Autopilot` queued during
-  the last step (their refs start with `auto-`) are kept: they are derived
-  state, never journaled, and the next step's replay must apply them as the
-  live step did. The ref is the mark, not the intent's `controller`: what
-  reaches the journal is kept out of the snapshot whoever submitted it.
-  `Avwe.RegionServer` only snapshots right after an advance, when nothing
-  else is pending anyway.
+  sequence numbers again. The inputs a system queued during the last step are
+  kept (`Avwe.Input.derived?/1`): they are derived state, never journaled,
+  and the next step's replay must apply them as the live step did. The input
+  says what it is, not who submitted it: what reaches the journal is kept out
+  of the snapshot whoever submitted it. `Avwe.RegionServer` only snapshots
+  right after an advance, when nothing else is pending anyway.
 
   ## Ownership
 
@@ -91,13 +92,13 @@ defmodule Avwe.Store do
   read what a running region writes); each closes its own handle.
   """
 
-  alias Avwe.{Event, Intent, Region}
+  alias Avwe.{Event, Input, Region, SystemTable}
 
   require Logger
 
   @version 2
   @snapshot_tag :avwe_snapshot
-  @snapshot_version 2
+  @snapshot_version 3
   @log_name "log"
   @snapshot_prefix "snap-"
   @snapshot_suffix ".bin"
@@ -123,10 +124,14 @@ defmodule Avwe.Store do
         }
 
   @type record ::
-          {:avwe, 2, {:submit, non_neg_integer(), Intent.t()}}
+          {:avwe, 2, {:submit, non_neg_integer(), Input.t()}}
           | {:avwe, 2, {:advance, advance()}}
 
   # Opening and closing
+
+  @doc "The tag and version of the snapshots this build writes and reads."
+  @spec snapshot_tag() :: {atom(), pos_integer()}
+  def snapshot_tag, do: {@snapshot_tag, @snapshot_version}
 
   @doc "The folder name of a region's state under the store's dir."
   @spec region_dirname(term()) :: String.t()
@@ -201,12 +206,12 @@ defmodule Avwe.Store do
   # The log
 
   @doc """
-  The record of accepting `intent` while the region was at `step`. The intent
-  must carry the `seq` the region assigned it.
+  The record of accepting `input` while the region was at `step`. The input
+  must carry the `seq` the region assigned it (`Avwe.Input.seq/1`).
   """
-  @spec submit_record(non_neg_integer(), Intent.t()) :: record()
-  def submit_record(step, %Intent{} = intent) when is_integer(step) do
-    {:avwe, @version, {:submit, step, intent}}
+  @spec submit_record(non_neg_integer(), Input.t()) :: record()
+  def submit_record(step, input) when is_integer(step) do
+    {:avwe, @version, {:submit, step, input}}
   end
 
   @doc """
@@ -221,7 +226,7 @@ defmodule Avwe.Store do
 
   @doc "Appends one record to the log."
   @spec append(t(), record()) :: :ok | {:error, term()}
-  def append(%__MODULE__{log: log}, {:avwe, @version, {:submit, _step, %Intent{}}} = record) do
+  def append(%__MODULE__{log: log}, {:avwe, @version, {:submit, _step, _input}} = record) do
     :disk_log.log(log, record)
   end
 
@@ -353,19 +358,16 @@ defmodule Avwe.Store do
     end
   end
 
-  # Autopilot's intents stay: they are derived state, queued by a system
-  # during the step and never journaled, so a snapshot that dropped them
-  # would lose a decision on replay. They were queued during the advance,
-  # before any journaled intent that is still pending, so the pending
-  # journaled ones hold the highest seqs and winding back by their count
-  # leaves autopilot's seqs as they were. Autopilot's refs are its mark
-  # (`Avwe.Session` refuses them to controllers).
+  # Derived inputs stay: they are derived state, queued by a system during
+  # the step and never journaled, so a snapshot that dropped them would lose
+  # a decision on replay. They were queued during the advance, before any
+  # journaled input that is still pending, so the pending journaled ones hold
+  # the highest seqs and winding back by their count leaves the derived ones'
+  # seqs as they were.
   defp unsubmit_pending(%Region{inbox: inbox, next_seq: next_seq} = region) do
-    kept = Enum.filter(inbox, &derived?/1)
+    kept = Enum.filter(inbox, &Input.derived?/1)
     %{region | inbox: kept, outbox: [], next_seq: next_seq - (length(inbox) - length(kept))}
   end
-
-  defp derived?(%{ref: ref}), do: String.starts_with?(ref, "auto-")
 
   # Written to a .tmp file, fsynced, then renamed into place, so the snapshot
   # is either whole or not there at all.
@@ -418,7 +420,7 @@ defmodule Avwe.Store do
   end
 
   # A file that doesn't decode at all is corrupt. One that decodes but isn't
-  # `{:avwe_snapshot, 2, %{region: region, definition: hash}}` was written by
+  # `{:avwe_snapshot, 3, %{region: region, definition: hash}}` was written by
   # other code: an earlier or later version of this one, or the untagged
   # format from before the tag. The tag names which, so the error can say
   # what the file is.
@@ -486,12 +488,21 @@ defmodule Avwe.Store do
     do: store |> oldest_snapshot() |> then(&replay_from(store, &1)) |> without_definition()
 
   defp replay_from(store, {:ok, %Region{} = region, definition}) do
-    with {:ok, records} <- records_after(store, region.step),
+    with :ok <- known_systems(region),
+         {:ok, records} <- records_after(store, region.step),
          {:ok, rebuilt} <- replay_all(region, records),
          do: {:ok, rebuilt, definition}
   end
 
   defp replay_from(_store, other), do: other
+
+  # A snapshot lists its systems by id; replaying it needs a module for each.
+  defp known_systems(%Region{systems: systems}) do
+    case systems |> Enum.map(&elem(&1, 0)) |> SystemTable.missing() do
+      [] -> :ok
+      ids -> {:error, {:unknown_systems, ids}}
+    end
+  end
 
   defp replay_all(region, records) do
     Enum.reduce_while(records, {:ok, region}, fn record, {:ok, acc} ->
@@ -502,11 +513,11 @@ defmodule Avwe.Store do
     end)
   end
 
-  # Re-submitting an intent at the step it was accepted gives it the same seq
+  # Re-submitting an input at the step it was accepted gives it the same seq
   # it had live, and so the same order of application. The log carries the
   # live seq, so a mismatch means the order or `next_seq` has drifted.
-  defp replay(%Region{step: step} = region, {:avwe, @version, {:submit, step, intent}}) do
-    resubmit(region, intent)
+  defp replay(%Region{step: step} = region, {:avwe, @version, {:submit, step, input}}) do
+    resubmit(region, input)
   end
 
   defp replay(%Region{step: step} = region, {:avwe, @version, {:advance, %{step: step} = entry}}) do
@@ -526,11 +537,9 @@ defmodule Avwe.Store do
 
   defp replay(_region, record), do: {:error, {:unknown_record, record}}
 
-  defp resubmit(%Region{next_seq: seq} = region, %Intent{seq: seq} = intent) do
-    {:ok, Region.submit(region, intent)}
-  end
-
-  defp resubmit(%Region{next_seq: seq, step: step}, %Intent{} = intent) do
-    {:error, {:seq_mismatch, step, intent.seq, seq}}
+  defp resubmit(%Region{next_seq: seq} = region, input) do
+    if Input.seq(input) == seq,
+      do: {:ok, Region.submit(region, input)},
+      else: {:error, {:seq_mismatch, region.step, Input.seq(input), seq}}
   end
 end

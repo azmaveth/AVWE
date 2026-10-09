@@ -4,20 +4,22 @@ defmodule Avwe.Tick do
 
   A step covers world time after `time`, up to and including `time + dt`.
   Systems must use `dt` and never assume a step is one minute, because history
-  mode takes larger steps.
+  mode takes larger steps. It carries the region's calendar (`Avwe.Calendar`),
+  for a system that needs the length of a day or a year of this world.
   """
 
   alias Avwe.Rng
 
   @enforce_keys [:step, :time, :dt, :seed, :region]
-  defstruct [:step, :time, :dt, :seed, :region]
+  defstruct [:step, :time, :dt, :seed, :region, calendar: %Avwe.Calendar{}]
 
   @type t :: %__MODULE__{
           step: non_neg_integer(),
           time: Avwe.Calendar.time(),
           dt: pos_integer(),
           seed: integer(),
-          region: term()
+          region: term(),
+          calendar: Avwe.Calendar.t()
         }
 
   @doc "World time at the end of the step."

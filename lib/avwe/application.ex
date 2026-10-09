@@ -7,6 +7,8 @@ defmodule Avwe.Application do
 
   @impl Application
   def start(_type, _args) do
+    :ok = Avwe.Ruleset.register_known()
+
     children =
       [
         {Registry, keys: :unique, name: Avwe.Registry},

@@ -10,11 +10,15 @@ defmodule Avwe.Definition.Schema do
     * `seed` and `start` (a date, `{"year": 813, "day": 220, "hour": 4}`, or a
       number of seconds) and optionally `dt` (seconds of world time to a step,
       60): the numbers the world begins from
+    * `ruleset` (optional): the rules the world runs, as a preset with rules
+      added and left out (`{"preset": "earthlike", "without": ["earthlike.smoke"]}`)
+      or an explicit list (`{"rules": ["play", "earthlike.fire"]}`); the Earth-like
+      preset when it is left out (`Avwe.Ruleset`)
     * `rules`: what each rule is told, by its id. `earthlike.valley` takes the
       terrain (a `river`, `rises` and `clay`), `earthlike.fire` the `hearths`
-      and `earthlike.weather` the `wind`. The ids are the rules' names in
-      `docs/engine-spec.md`; until the rules exist as modules (E2) a world
-      always runs the engine's own systems
+      and `earthlike.weather` the `wind`. The ids are those of the rules
+      (`Avwe.Rules.Earthlike`), and a rule that is told something must be one
+      the world runs (`ruleset`)
     * `entities`: the places and bodies, by id, with their components (`place`,
       `position`, `repr`, `article`, `body`, `knows`, `home`): what
       `Avwe.Quire.Seed` builds from a Quire world
@@ -61,6 +65,7 @@ defmodule Avwe.Definition.Schema do
        seed: :integer,
        dt: {:opt, {:where, :integer, &(&1 > 0), "a whole number above 0"}},
        start: :calendar_time,
+       ruleset: {:opt, ruleset()},
        rules: {:opt, rules()},
        entities: {:opt, {:list, entity()}},
        miracles: {:opt, {:list, miracle()}},
@@ -74,6 +79,31 @@ defmodule Avwe.Definition.Schema do
 
   defp at_least(n), do: {:where, :number, &(&1 >= n), "a number, #{n} or more"}
   defp above(n), do: {:where, :number, &(&1 > n), "a number above #{n}"}
+
+  # The ruleset: a preset and what is changed in it, or a list of rules.
+  defp ruleset do
+    {:where,
+     {:keyword,
+      [
+        preset: {:opt, text()},
+        with: {:opt, {:list, text()}},
+        without: {:opt, {:list, text()}},
+        rules: {:opt, {:list, text()}}
+      ]}, &ruleset?/1, "a preset (with rules added or left out) or a list of rules, not both"}
+  end
+
+  defp ruleset?(given) do
+    case {Keyword.has_key?(given, :preset), Keyword.has_key?(given, :rules)} do
+      {true, false} ->
+        true
+
+      {false, true} ->
+        not Keyword.has_key?(given, :with) and not Keyword.has_key?(given, :without)
+
+      _both_or_neither ->
+        false
+    end
+  end
 
   # Rules
 

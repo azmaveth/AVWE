@@ -25,7 +25,7 @@ defmodule Avwe.Definition do
   starting region; `encode/1`, `to_json/1` and `hash/1` write it out.
   """
 
-  alias Avwe.{Calendar, Region, Worldgen}
+  alias Avwe.{Calendar, Region, Ruleset, Worldgen}
   alias Avwe.Definition.{Check, Codec, Json, Schema}
 
   @default_dt 60
@@ -39,6 +39,7 @@ defmodule Avwe.Definition do
     :seed,
     :start,
     dt: @default_dt,
+    ruleset: nil,
     entities: [],
     settings: [],
     guests: nil
@@ -49,7 +50,9 @@ defmodule Avwe.Definition do
   `Avwe.Worldgen.build/3` takes (`:terrain`, `:hearths`, `:miracles`,
   `:climate`, `:characters`), those the file gives, in that order; `guests` is
   `[arrival: place, max: n]` or `nil`; `start` is a date, `{year, opts}`, or a
-  time in seconds.
+  time in seconds; `ruleset` is what the file says of the rules the world runs
+  (`[preset: name, with: ids, without: ids]` or `[rules: ids]`), or `nil` for
+  the default preset (`Avwe.Ruleset`).
   """
   @type t :: %__MODULE__{
           id: String.t(),
@@ -59,6 +62,7 @@ defmodule Avwe.Definition do
           seed: integer(),
           start: {integer(), keyword()} | integer(),
           dt: pos_integer(),
+          ruleset: keyword() | nil,
           entities: [{String.t(), map()}],
           settings: keyword(),
           guests: keyword() | nil
@@ -105,6 +109,7 @@ defmodule Avwe.Definition do
       seed: top.seed,
       start: top.start,
       dt: Map.get(top, :dt, @default_dt),
+      ruleset: top[:ruleset],
       entities: top |> Map.get(:entities, []) |> Enum.map(&entity/1) |> Enum.sort(),
       settings: settings(top),
       guests: top[:guests]
@@ -159,6 +164,7 @@ defmodule Avwe.Definition do
     }
     |> put_unless_nil(:tagline, definition.tagline)
     |> put_unless_nil(:description, definition.description)
+    |> put_unless_nil(:ruleset, definition.ruleset)
     |> put_unless_nil(:rules, rules(definition.settings))
     |> put_unless_nil(:miracles, miracles(definition.settings))
     |> put_unless_nil(:characters, definition.settings[:characters])
@@ -206,12 +212,42 @@ defmodule Avwe.Definition do
     :sha256 |> :crypto.hash(canonical) |> Base.encode16(case: :lower)
   end
 
+  # Serving
+
+  @doc """
+  What the definition puts in the world that the rules of `modules` cannot serve,
+  in words, or `[]`: bodies need a rule that provides `:bodies`, and the guests
+  who arrive in them one that provides `:intents` (`Avwe.Ruleset`). Without it
+  nobody would act on what they are told.
+  """
+  @spec unserved(t(), [module()]) :: [String.t()]
+  def unserved(%__MODULE__{} = definition, modules) do
+    bodies = for {id, %{body: _body}} <- definition.entities, do: id
+
+    wanted = [
+      {bodies != [], :bodies, "the world has bodies (#{some(bodies)})"},
+      {definition.guests != nil, :intents, "the world takes guests"}
+    ]
+
+    for {true, capability, what} <- wanted, not Ruleset.provides?(modules, capability) do
+      "#{what}, which need :#{capability}, and no rule in this ruleset provides it" <>
+        who_does(Ruleset.providers_of(capability))
+    end
+  end
+
+  defp some(ids) when length(ids) <= 3, do: Enum.join(ids, ", ")
+  defp some(ids), do: Enum.join(Enum.take(ids, 3), ", ") <> " and #{length(ids) - 3} more"
+
+  defp who_does([]), do: ""
+  defp who_does([one]), do: " (#{one} does)"
+  defp who_does(several), do: " (#{Enum.join(several, " and ")} do)"
+
   # Building
 
   @doc """
   The world's starting region. Options: `:id` (the region's id, required) and
-  `:systems` (run in order every step; default none, since the systems are code
-  and not part of what a world is: `Avwe.start_world/2` gives its own).
+  `:systems` (run in order every step; default none: they are the code of the
+  world's rules, and `Avwe.start_world/2` gives those of its `ruleset`).
   """
   @spec region(t(), keyword()) :: Region.t()
   def region(%__MODULE__{} = definition, opts) do
@@ -247,6 +283,13 @@ defmodule Avwe.Definition do
     do:
       Enum.join(
         ["#{path} is not a valid world definition:" | Enum.map(problems, &("  " <> &1))],
+        "\n"
+      )
+
+  def explain({:invalid_ruleset, problems}),
+    do:
+      Enum.join(
+        ["the world's rules do not make a world:" | Enum.map(problems, &("  " <> &1))],
         "\n"
       )
 

@@ -205,7 +205,7 @@ defmodule Avwe.DefinitionTest do
         |> put_in(["rules", "earthlike.weather", "wind", "gusts"], 3)
 
       assert problems(json) == [
-               ~s|colour: not a key of this (it has "schema", "id", "name", "tagline", "description", "seed", "dt", "start", "rules", "entities", "miracles", "characters", "guests")|,
+               ~s|colour: not a key of this (it has "schema", "id", "name", "tagline", "description", "seed", "dt", "start", "ruleset", "rules", "entities", "miracles", "characters", "guests")|,
                ~s|rules.earthlike.weather.wind.gusts: not a key of this (it has "from", "m_s")|
              ]
     end
@@ -470,6 +470,112 @@ defmodule Avwe.DefinitionTest do
     end
   end
 
+  describe "the rules it runs" do
+    test "a definition without a ruleset runs the Earth-like one, and does not write one" do
+      definition = decode!(tiny())
+
+      assert definition.ruleset == nil
+      refute Map.has_key?(Definition.encode(definition), "ruleset")
+    end
+
+    test "a preset with rules left out is read, written again, and part of what the world is" do
+      ruleset = %{"preset" => "earthlike", "without" => ["earthlike.smoke"]}
+      definition = decode!(Map.put(tiny(), "ruleset", ruleset))
+
+      assert definition.ruleset == [preset: "earthlike", without: ["earthlike.smoke"]]
+      assert Definition.encode(definition)["ruleset"] == ruleset
+      refute Definition.hash(definition) == Definition.hash(decode!(tiny()))
+    end
+
+    test "a list of rules is read as well" do
+      ruleset = %{"rules" => ["play", "earthlike.daylight"]}
+
+      definition =
+        decode!(
+          Map.put(tiny() |> Map.delete("rules") |> Map.delete("miracles"), "ruleset", ruleset)
+        )
+
+      assert definition.ruleset == [rules: ["play", "earthlike.daylight"]]
+      assert Definition.encode(definition)["ruleset"] == ruleset
+    end
+
+    test "a preset and a list together, or neither, is refused" do
+      for ruleset <- [
+            %{"preset" => "earthlike", "rules" => ["play"]},
+            %{"with" => ["earthlike.smoke"]},
+            %{"rules" => ["play"], "without" => ["earthlike.smoke"]}
+          ] do
+        assert [problem] = problems(Map.put(tiny(), "ruleset", ruleset))
+
+        assert problem =~
+                 "ruleset: expected a preset (with rules added or left out) or a list of rules, not both"
+      end
+    end
+
+    test "an unknown rule or preset is refused, naming it" do
+      assert [problem] =
+               problems(
+                 Map.put(tiny(), "ruleset", %{
+                   "preset" => "earthlike",
+                   "with" => ["earthlike.fyre"]
+                 })
+               )
+
+      assert problem =~ ~s(ruleset: no rule has the id "earthlike.fyre")
+
+      assert [problem] = problems(Map.put(tiny(), "ruleset", %{"preset" => "medieval"}))
+      assert problem =~ ~s(ruleset: no ruleset preset is named "medieval")
+    end
+
+    test "a rule left out that no rule has is refused, naming it" do
+      ruleset = %{"preset" => "earthlike", "without" => ["earthlike.smok"]}
+
+      assert [problem] = problems(Map.put(tiny(), "ruleset", ruleset))
+      assert problem =~ ~s(ruleset: no rule has the id "earthlike.smok")
+    end
+
+    test "bodies and guests need a rule that provides them" do
+      ruleset = %{"preset" => "earthlike", "without" => ["play"]}
+
+      assert problems(Map.put(tiny(), "ruleset", ruleset)) == [
+               "ruleset: the world has bodies (wren), which need :bodies, and no rule in " <>
+                 "this ruleset provides it (play does)",
+               "ruleset: the world takes guests, which need :intents, and no rule in this " <>
+                 "ruleset provides it (play does)"
+             ]
+    end
+
+    test "a world of places and nobody needs no rule for bodies" do
+      json =
+        tiny()
+        |> Map.drop(["characters", "guests"])
+        |> update_in(["entities"], &Enum.reject(&1, fn entity -> entity["id"] == "wren" end))
+        |> Map.put("ruleset", %{"preset" => "earthlike", "without" => ["play"]})
+
+      assert {:ok, _definition} = Definition.decode(json)
+    end
+
+    test "rules that do not make a world are refused, all the problems at once" do
+      ruleset = %{"preset" => "earthlike", "without" => ["earthlike.weather"]}
+      problems = problems(Map.put(tiny(), "ruleset", ruleset))
+
+      assert ("ruleset: earthlike.heat needs :air_temperature, which no rule in this ruleset " <>
+                "provides (earthlike.weather does)") in problems
+
+      assert ("ruleset: earthlike.smoke needs :wind, which no rule in this ruleset provides " <>
+                "(earthlike.weather does)") in problems
+
+      assert "rules.earthlike.weather: this world does not run that rule" in problems
+    end
+
+    test "a rule that is told things must be one the world runs" do
+      ruleset = %{"preset" => "earthlike", "without" => ["earthlike.smoke", "earthlike.fire"]}
+
+      assert problems(Map.put(tiny(), "ruleset", ruleset)) ==
+               ["rules.earthlike.fire: this world does not run that rule"]
+    end
+  end
+
   describe "writing" do
     test "the order of entities in a file is not part of the definition" do
       json = update_in(tiny(), ["entities"], &Enum.reverse/1)
@@ -613,7 +719,7 @@ defmodule Avwe.DefinitionTest do
     test "is a region with the entities, the settings and the start the file gives" do
       region = tiny() |> decode!() |> Definition.region(id: {0, 0}, systems: [Avwe.Systems.Fire])
 
-      assert %Region{id: {0, 0}, seed: 7, dt: 60, systems: [Avwe.Systems.Fire]} = region
+      assert %Region{id: {0, 0}, seed: 7, dt: 60, systems: [{"earthlike.fire/step", []}]} = region
       assert region.time == Avwe.Calendar.at(1, day: 3, hour: 6)
 
       assert Region.get(region, "green", :position) == {10, 10}

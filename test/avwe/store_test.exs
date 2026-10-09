@@ -263,7 +263,7 @@ defmodule Avwe.StoreTest do
       region = Ember.region() |> Region.advance(3)
       :ok = Store.snapshot(store, region, definition: "abc123")
 
-      assert {:avwe_snapshot, 2, %{region: %Region{step: 3} = saved, definition: "abc123"}} =
+      assert {:avwe_snapshot, 3, %{region: %Region{step: 3} = saved, definition: "abc123"}} =
                dir |> snapshot_file(3) |> File.read!() |> :erlang.binary_to_term()
 
       assert Region.state_hash(saved) == Region.state_hash(region)
@@ -272,7 +272,7 @@ defmodule Avwe.StoreTest do
     test "a world without a definition is saved with none", %{store: store, dir: dir} do
       :ok = Store.snapshot(store, Ember.region())
 
-      assert {:avwe_snapshot, 2, %{definition: nil}} =
+      assert {:avwe_snapshot, 3, %{definition: nil}} =
                dir |> snapshot_file(0) |> File.read!() |> :erlang.binary_to_term()
 
       assert {:ok, _region, nil} = Store.rebuild_with_definition(store)
@@ -296,10 +296,10 @@ defmodule Avwe.StoreTest do
     } do
       region = Ember.region()
       newer = snapshot_file(dir, 3)
-      File.write!(newer, :erlang.term_to_binary({:avwe_snapshot, 3, region}))
+      File.write!(newer, :erlang.term_to_binary({:avwe_snapshot, 4, region}))
 
       assert Store.latest_snapshot(store) ==
-               {:error, {:unknown_snapshot, newer, {:avwe_snapshot, 3}}}
+               {:error, {:unknown_snapshot, newer, {:avwe_snapshot, 4}}}
 
       # The format from before the tag: a bare region.
       untagged = snapshot_file(dir, 4)
@@ -522,7 +522,7 @@ defmodule Avwe.StoreTest do
       live = play(store, midway)
 
       latest = snapshot_file(dir, 38)
-      File.write!(latest, :erlang.term_to_binary({:avwe_snapshot, 3, midway}))
+      File.write!(latest, :erlang.term_to_binary({:avwe_snapshot, 4, midway}))
 
       log =
         capture_log(fn ->
@@ -532,18 +532,18 @@ defmodule Avwe.StoreTest do
         end)
 
       assert log =~
-               "Skipping snapshot #{latest}: {:unknown_snapshot, #{inspect(latest)}, {:avwe_snapshot, 3}}"
+               "Skipping snapshot #{latest}: {:unknown_snapshot, #{inspect(latest)}, {:avwe_snapshot, 4}}"
     end
 
     test "it is an error when every snapshot is of an unknown version", %{store: store, dir: dir} do
       region = Ember.region()
       :ok = Store.snapshot(store, region)
       first = snapshot_file(dir, 0)
-      File.write!(first, :erlang.term_to_binary({:avwe_snapshot, 3, region}))
-      File.write!(snapshot_file(dir, 3), :erlang.term_to_binary({:avwe_snapshot, 3, region}))
+      File.write!(first, :erlang.term_to_binary({:avwe_snapshot, 4, region}))
+      File.write!(snapshot_file(dir, 3), :erlang.term_to_binary({:avwe_snapshot, 4, region}))
 
       capture_log(fn ->
-        assert Store.rebuild(store) == {:error, {:unknown_snapshot, first, {:avwe_snapshot, 3}}}
+        assert Store.rebuild(store) == {:error, {:unknown_snapshot, first, {:avwe_snapshot, 4}}}
       end)
     end
   end

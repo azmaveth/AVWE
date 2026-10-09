@@ -6,11 +6,11 @@ defmodule Avwe.RegionServer do
   readers never block the tick and never call this process. Events go to
   subscribers registered with `Avwe.subscribe/2`, together with a view of the
   state they happened in (`Avwe.Region.view/1`); a step with no events is told
-  only to those that asked to hear of every step. Intents queue in the
-  region's inbox until the next step.
+  only to those that asked to hear of every step. Inputs (`Avwe.Input`) queue in
+  the region's inbox until the next step.
 
   With a `:store` dir the region persists itself through `Avwe.Store`: every
-  intent is journaled as it is accepted, every advance is appended to the log
+  input is journaled as it is accepted, every advance is appended to the log
   before it is published, and a snapshot is written whenever an advance
   crosses a multiple of `:snapshot_every` steps (a multi-step advance that
   crosses one snapshots at the end of that advance). `:snapshot_keep` is how
@@ -27,17 +27,14 @@ defmodule Avwe.RegionServer do
   every snapshot records it: a saved world is resumed only under the
   definition it was saved under, and refuses to start under another, or under
   none (`{:definition_changed, saved, given}`), since the saved state belongs
-  to the world that definition described. A world built from Quire and settings
-  has no definition, and the region it was given is ignored, with a warning for
-  each setting of it (seed, climate, hearths, miracles, characters, the items
-  they carry included) that differs from the saved world.
+  to the world that definition described. A world built without a definition
+  has the region it was given ignored where it differs, and the layers above say
+  so (`Avwe.Hooks`: `on_reconfigure/3`).
 
-  A body still held when its world stopped is held by nobody once the world
-  starts again (sessions end with their world and do not release it), so
-  on starting the server releases every body whose holder has no live
-  lease in this world: one `:release` intent each, submitted and journaled
-  as a session's would be, so the routine takes the body at the next step
-  and the next player is told what it did meanwhile.
+  What those layers need done when a region has been started again (a hold that
+  nobody keeps any more, for the agent layer) is theirs to say too, as inputs that
+  are accepted and journaled as if they had come from outside
+  (`Avwe.Hooks`: `on_resume/2`).
 
   A log is only valid under the systems it was recorded with, and replay
   runs the systems of the snapshot it starts from. So when the systems
@@ -48,7 +45,7 @@ defmodule Avwe.RegionServer do
 
   use GenServer
 
-  alias Avwe.{Guests, Intent, Region, Store}
+  alias Avwe.{Input, Region, Store}
 
   require Logger
 
@@ -74,14 +71,14 @@ defmodule Avwe.RegionServer do
   end
 
   @doc """
-  Queues an intent for the region's next step. A guest's arrival
-  (`Avwe.Guests`) is checked first, against the guests there and the arrivals
-  already waiting, and refused with the reason before anything is journaled.
+  Queues an input for the region's next step. An input that a system made
+  (`Avwe.Input.derived?/1`) is refused with `{:error, :derived_input}`; the
+  others are asked whether the region would take them (`Avwe.Input.validate/2`)
+  and refused with the reason before anything is journaled.
   """
-  @spec submit(term(), term(), Avwe.Intent.t()) ::
-          :ok | {:error, :not_found | Avwe.Guests.reason()}
-  def submit(world, region_id, intent) do
-    call(world, region_id, {:submit, intent})
+  @spec submit(term(), term(), Input.t()) :: :ok | {:error, :not_found | term()}
+  def submit(world, region_id, input) do
+    call(world, region_id, {:submit, input})
   end
 
   @doc "The hash of the live region's state (`Avwe.Region.state_hash/1`)."
@@ -125,22 +122,26 @@ defmodule Avwe.RegionServer do
     keep = Keyword.get(opts, :snapshot_keep, @default_snapshot_keep)
 
     definition = Keyword.get(opts, :definition)
+    hooks = Keyword.get(opts, :hooks, [])
+    config = %{world: world, keep: keep, definition: definition, hooks: hooks}
 
-    case open_store(Keyword.get(opts, :store), Keyword.fetch!(opts, :region), keep, definition) do
+    case open_store(Keyword.get(opts, :store), Keyword.fetch!(opts, :region), config) do
       {:ok, store, region} ->
         table = :ets.new(__MODULE__, [:set, :protected, read_concurrency: true])
         {:ok, _owner} = Registry.register(Avwe.Registry, {:region, world, region.id}, table)
         :ets.insert(table, {:terrain, region.terrain})
 
         state =
-          release_unheld(%{
+          resumed_by_hooks(%{
             world: world,
             region: region,
             table: table,
             store: store,
+            dir: store && store.dir,
             snapshot_every: Keyword.get(opts, :snapshot_every, @default_snapshot_every),
             snapshot_keep: keep,
-            definition: definition
+            definition: definition,
+            hooks: hooks
           })
 
         publish(table, state.region)
@@ -152,14 +153,14 @@ defmodule Avwe.RegionServer do
   end
 
   @impl GenServer
-  def handle_call({:submit, %Intent{verb: :arrive} = intent}, _from, state) do
-    case Guests.check(state.region, intent) do
-      :ok -> {:reply, :ok, accept(state, intent)}
+  def handle_call({:submit, input}, _from, state) do
+    with :ok <- not_derived(input),
+         :ok <- Input.validate(input, state.region) do
+      {:reply, :ok, accept(state, input)}
+    else
       {:error, _reason} = refused -> {:reply, refused, state}
     end
   end
-
-  def handle_call({:submit, intent}, _from, state), do: {:reply, :ok, accept(state, intent)}
 
   def handle_call({:advance, steps}, _from, state) do
     before = state.region
@@ -189,29 +190,38 @@ defmodule Avwe.RegionServer do
   # Without a store the region starts as given. With one, saved state wins
   # over the given region, and a fresh store gets the given region as its
   # step-0 snapshot so the whole history can be replayed from it.
-  defp open_store(nil, region, _keep, _definition), do: {:ok, nil, region}
+  defp open_store(nil, region, _config), do: {:ok, nil, region}
 
-  defp open_store(dir, region, keep, definition) do
+  defp open_store(dir, region, config) do
     with {:ok, store} <- Store.open(dir, region.id, owner: true),
-         {:ok, region} <- resume(store, region, keep, definition) do
+         {:ok, region} <- resume(store, region, config) do
       {:ok, store, region}
     end
   end
 
-  defp resume(store, region, keep, definition) do
+  defp resume(store, region, config) do
     case Store.rebuild_with_definition(store) do
       {:ok, saved, saved_definition} ->
-        with :ok <- same_definition(saved, saved_definition, definition, store.dir),
-             do: resume_saved(store, saved, region, keep, definition)
+        with :ok <- same_definition(saved, saved_definition, config.definition, store.dir),
+             do: resume_saved(store, saved, region, config)
 
       :none ->
-        start_fresh(store, region, keep, definition)
+        start_fresh(store, region, config)
 
       {:error, {:unknown_snapshot, path, tag}} = error ->
         Logger.error(
           "Region #{inspect(region.id)}: no snapshot this build can read; #{path} is " <>
-            "tagged #{inspect(tag)} and this build reads {:avwe_snapshot, 2}. " <>
+            "tagged #{inspect(tag)} and this build reads #{inspect(Store.snapshot_tag())}. " <>
             "Delete the world folder #{store.dir} to start over."
+        )
+
+        error
+
+      {:error, {:unknown_systems, ids}} = error ->
+        Logger.error(
+          "Region #{inspect(region.id)}: the world was saved with systems this build does " <>
+            "not have: #{Enum.join(ids, ", ")}. Run a build that has them, or delete the " <>
+            "world folder #{store.dir} to start over."
         )
 
         error
@@ -221,12 +231,12 @@ defmodule Avwe.RegionServer do
     end
   end
 
-  defp resume_saved(store, saved, given, keep, definition) do
+  defp resume_saved(store, saved, given, config) do
     Logger.info("Resumed region #{inspect(saved.id)} at step #{saved.step} from #{store.path}")
 
-    resumed = reconfigure(saved, given, store.dir, definition)
+    resumed = reconfigure(saved, given, store.dir, config)
 
-    with :ok <- snapshot_if_rules_changed(store, saved, resumed, keep, definition),
+    with :ok <- snapshot_if_rules_changed(store, saved, resumed, config),
          do: {:ok, resumed}
   end
 
@@ -249,34 +259,31 @@ defmodule Avwe.RegionServer do
 
   # Replay runs the systems of the snapshot it starts from, so a log written
   # under new systems must begin at a snapshot that carries them.
-  defp snapshot_if_rules_changed(_store, %{systems: same}, %{systems: same}, _keep, _definition),
-    do: :ok
+  defp snapshot_if_rules_changed(_store, %{systems: same}, %{systems: same}, _config), do: :ok
 
-  defp snapshot_if_rules_changed(store, _saved, resumed, keep, definition),
-    do: Store.snapshot(store, resumed, keep: keep, definition: definition)
+  defp snapshot_if_rules_changed(store, _saved, resumed, config),
+    do: Store.snapshot(store, resumed, keep: config.keep, definition: config.definition)
 
   # A log with no snapshot to replay it onto can't be resumed and must not be
   # started over: the world fails to start instead.
-  defp start_fresh(store, region, keep, definition) do
+  defp start_fresh(store, region, config) do
     if Store.empty?(store),
       do:
         with(
-          :ok <- Store.snapshot(store, region, keep: keep, definition: definition),
+          :ok <- Store.snapshot(store, region, keep: config.keep, definition: config.definition),
           do: {:ok, region}
         ),
       else: {:error, :log_without_snapshot}
   end
 
   # Configuration beats the snapshot for code; the snapshot wins for state.
-  # The settings the given region was built from (`Avwe.Worldgen`) are state
-  # too, so each one that differs from the saved world is named and ignored.
-  # Under a definition there is nothing to compare: it is the same one.
-  defp reconfigure(saved, given, dir, definition) do
-    for {setting, phrase, wanted, kept} <- ignored_settings(saved, given, definition) do
-      Logger.warning(
-        "Region #{inspect(saved.id)}: ignoring :#{setting} #{inspect(wanted)}; " <>
-          "the world's #{phrase} #{inspect(kept)}; delete #{dir} to start over"
-      )
+  # What else of the given region differs from the saved one is for the layers
+  # above to name (`Avwe.Hooks`), and ignore.
+  defp reconfigure(saved, given, dir, config) do
+    context = %{world: config.world, dir: dir, definition: config.definition}
+
+    for hook <- config.hooks, hooked?(hook, :on_reconfigure, 3) do
+      :ok = hook.on_reconfigure(saved, given, context)
     end
 
     if given.systems != saved.systems do
@@ -286,128 +293,46 @@ defmodule Avwe.RegionServer do
       )
     end
 
-    added = given.systems -- saved.systems
+    # A system whose options changed is the same system: only the ids that are new
+    # are prepared (preparing a live system again would reset what it keeps).
+    known = Enum.map(saved.systems, &elem(&1, 0))
+    added = for {id, _options} <- given.systems, id not in known, do: id
     Region.prepare(%{saved | systems: given.systems}, only: added)
   end
 
-  # The settings of `given` that the saved world cannot take on, as
-  # `{setting, "what is", wanted, kept}` for the warning.
-  defp ignored_settings(_saved, _given, definition) when definition != nil, do: []
+  defp hooked?(hook, callback, arity),
+    do: Code.ensure_loaded?(hook) and function_exported?(hook, callback, arity)
 
-  defp ignored_settings(saved, given, nil) do
-    lit = lit_hearths(saved)
-
-    [
-      {:seed, "seed is", & &1.seed},
-      {:climate, "wind is", &Map.get(&1.env, :wind)},
-      {:hearths, "hearths are", &hearths(&1, lit)},
-      {:miracles, "miracles are", &miracles/1},
-      {:characters, "characters are", &characters/1}
-    ]
-    |> Enum.map(fn {setting, phrase, declared} ->
-      {setting, phrase, declared.(given), declared.(saved)}
-    end)
-    |> Enum.reject(fn {_setting, _phrase, wanted, kept} -> wanted == kept end)
+  # An input a system made is derived state: regenerated on replay, never
+  # journaled (`Avwe.Input`). It is not something to send in, and one that was
+  # journaled would be numbered twice when the region is rebuilt.
+  defp not_derived(input) do
+    if Input.derived?(input), do: {:error, :derived_input}, else: :ok
   end
 
-  # A hearth as declared: its power and the wood laid in it. A hearth that
-  # has been lit has burned some of that wood, so for those (`lit`) the fuel
-  # is state by now and only the power is compared. Standing miracles carry
-  # a hearth too, but are declared as miracles.
-  defp hearths(region, lit) do
-    for id <- Region.with_components(region, [:hearth]),
-        Region.get(region, id, :miracle) == nil,
-        into: %{} do
-      keys = if id in lit, do: [:power_w], else: [:fuel_kg, :power_w]
-      {id, region |> Region.get(id, :hearth) |> Map.take(keys)}
-    end
-  end
-
-  defp lit_hearths(region) do
-    for id <- Region.with_components(region, [:hearth]),
-        Region.get(region, id, :hearth).lit_at != nil,
-        do: id
-  end
-
-  # A miracle as declared: everything but when it was applied.
-  defp miracles(region) do
-    for id <- Region.with_components(region, [:miracle]), into: %{} do
-      {id, region |> Region.get(id, :miracle) |> Map.delete(:applied_at)}
-    end
-  end
-
-  # A character as declared: the routine and norms of every body that has
-  # any, and the ids of the items it carries (what is written in a notebook
-  # is state, not declaration). A guest is not declared: it arrived.
-  defp characters(region) do
-    carried =
-      region
-      |> Region.with_components([:item, :carried_by])
-      |> Enum.group_by(&Region.get(region, &1, :carried_by))
-
-    for id <- Region.with_components(region, [:body]),
-        Region.get(region, id, :guest) == nil,
-        declared = Map.take(Region.entity(region, id), [:routine, :norms]),
-        declared = put_carries(declared, carried[id]),
-        declared != %{},
-        into: %{},
-        do: {id, declared}
-  end
-
-  defp put_carries(declared, nil), do: declared
-  defp put_carries(declared, items), do: Map.put(declared, :carries, items)
-
-  # Queues an intent for the next step and journals it.
-  defp accept(state, intent) do
-    region = Region.submit(state.region, intent)
+  # Queues an input for the next step and journals it.
+  defp accept(state, input) do
+    region = Region.submit(state.region, input)
     :ok = journal(state, region.step, region |> Region.pending() |> List.last())
     %{state | region: region}
   end
 
-  # A body is held by a session's lease, and sessions end with their world
-  # without releasing (`Avwe.Session`), so a world that starts again, or a
-  # region that crashed after its world stopped, finds holders written on
-  # bodies that nobody holds any more. Each of them is released at the next
-  # step, by an intent submitted and journaled like a session's own, so
-  # replay gives the same; the routine then takes the body. A body whose
-  # holder is a live session of this world (a region that crashed and came
-  # back while its sessions ran) is left alone.
-  defp release_unheld(state) do
-    world_pid = Avwe.World.whereis(state.world)
-    pending = Region.pending(state.region)
+  # What the layers above ask of a region that has been started again
+  # (`Avwe.Hooks`): inputs, accepted as if they came from outside.
+  defp resumed_by_hooks(state) do
+    context = %{world: state.world, dir: state.dir, definition: state.definition}
 
-    for body <- Region.with_components(state.region, [:control]),
-        holder = holder_after(Region.get(state.region, body, :control).holder, pending, body),
-        holder != nil,
-        not leased?(state.world, world_pid, body),
-        reduce: state do
-      acc ->
-        ref = "resume-release-#{System.unique_integer([:positive])}"
-        accept(acc, Intent.new(body, :release, ref: ref, controller: holder))
-    end
-  end
-
-  # Who will hold the body once the lease intents already waiting for the
-  # next step (journaled before the world stopped) are applied, in order.
-  defp holder_after(holder, pending, body) do
-    Enum.reduce(pending, holder, fn
-      %Intent{body: ^body, verb: :control, controller: controller}, _held -> controller
-      %Intent{body: ^body, verb: :release}, _held -> nil
-      _other, held -> held
+    Enum.reduce(state.hooks, state, fn hook, acc ->
+      if hooked?(hook, :on_resume, 2),
+        do: Enum.reduce(hook.on_resume(acc.region, context), acc, &accept(&2, &1)),
+        else: acc
     end)
   end
 
-  defp leased?(world, world_pid, body) do
-    match?(
-      [{_session, {_controller, ^world_pid}}],
-      Registry.lookup(Avwe.Registry, {:lease, world, body})
-    )
-  end
+  defp journal(%{store: nil}, _step, _input), do: :ok
 
-  defp journal(%{store: nil}, _step, _intent), do: :ok
-
-  defp journal(%{store: store}, step, intent),
-    do: Store.append(store, Store.submit_record(step, intent))
+  defp journal(%{store: store}, step, input),
+    do: Store.append(store, Store.submit_record(step, input))
 
   defp persist(%{store: nil}, _before, _steps, _dt, _events, _region), do: :ok
 

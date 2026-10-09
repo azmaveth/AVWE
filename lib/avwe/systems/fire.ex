@@ -91,6 +91,9 @@ defmodule Avwe.Systems.Fire do
   def ground_share, do: @f_ground
 
   @impl Avwe.System
+  def system_id, do: "earthlike.fire/step"
+
+  @impl Avwe.System
   def run(region, tick) do
     region
     |> Region.with_components([:hearth, :position])

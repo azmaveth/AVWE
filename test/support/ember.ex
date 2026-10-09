@@ -4,21 +4,6 @@ defmodule Avwe.Test.Ember do
   alias Avwe.{Calendar, Definition, Quire, Region, Worldgen}
   alias Avwe.Test.Fixtures
 
-  @systems [
-    Avwe.Systems.Daylight,
-    Avwe.Systems.Miracles,
-    Avwe.Systems.Weather,
-    Avwe.Systems.River,
-    Avwe.Systems.Fire,
-    Avwe.Systems.Heat,
-    Avwe.Systems.Movement,
-    Avwe.Systems.Waiting,
-    Avwe.Systems.Discovery,
-    Avwe.Systems.Autopilot,
-    Avwe.Systems.Smoke,
-    Avwe.Systems.Memory
-  ]
-
   @doc "The Ember Reach's region at a time given as `{year, opts}`."
   def region(at \\ {813, day: 220, hour: 4}, overrides \\ []) do
     {:ok, quire} = Quire.load(Fixtures.ember_reach())
@@ -29,7 +14,7 @@ defmodule Avwe.Test.Ember do
       id: {0, 0},
       seed: opts[:seed],
       time: Calendar.at(year, day_opts),
-      systems: Keyword.get(overrides, :systems, @systems),
+      systems: Keyword.get_lazy(overrides, :systems, &Avwe.default_systems/0),
       terrain: opts[:terrain],
       hearths: opts[:hearths],
       miracles: opts[:miracles],
@@ -49,7 +34,10 @@ defmodule Avwe.Test.Ember do
     definition =
       Fixtures.ember_reach_definition([start: at] ++ Keyword.delete(overrides, :systems))
 
-    Definition.region(definition, id: {0, 0}, systems: Keyword.get(overrides, :systems, @systems))
+    Definition.region(definition,
+      id: {0, 0},
+      systems: Keyword.get_lazy(overrides, :systems, &Avwe.default_systems/0)
+    )
   end
 
   @doc """

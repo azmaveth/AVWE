@@ -30,6 +30,9 @@ defmodule Avwe.Systems.Memory do
   def keep, do: @keep
 
   @impl Avwe.System
+  def system_id, do: "play/memory"
+
+  @impl Avwe.System
   def run(region, tick) do
     case region |> Region.step_events(tick) |> Enum.reject(&reading?/1) do
       [] ->

@@ -20,10 +20,11 @@ defmodule Avwe.World do
   else `Avwe.start_world/2` tells of it: `:clock`, `:dt`, `:guests` and
   `:definition`), `:store` (a dir for the regions' logs and snapshots, or `nil`
   for no persistence), `:snapshot_every` (steps between snapshots),
-  `:snapshot_keep` (how many of the newest snapshots to keep) and `:definition`
+  `:snapshot_keep` (how many of the newest snapshots to keep), `:definition`
   (the hash of the world definition the regions were built from, or `nil`: it
-  is recorded in every snapshot, and a saved world refuses another). See
-  `Avwe.RegionServer`.
+  is recorded in every snapshot, and a saved world refuses another) and
+  `:hooks` (modules that say what a layer above needs when a region has been
+  started again, `Avwe.Hooks`). See `Avwe.RegionServer`.
   """
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts) do
@@ -73,7 +74,8 @@ defmodule Avwe.World do
     id = Keyword.fetch!(opts, :id)
     regions = Keyword.fetch!(opts, :regions)
 
-    persistence = Keyword.take(opts, [:store, :snapshot_every, :snapshot_keep, :definition])
+    persistence =
+      Keyword.take(opts, [:store, :snapshot_every, :snapshot_keep, :definition, :hooks])
 
     region_children =
       Enum.map(regions, &{RegionServer, [world: id, region: &1] ++ persistence})

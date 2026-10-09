@@ -6,6 +6,13 @@ import Config
 # `mix avwe.definition.export ember-reach`; Quire is not read when it runs.
 config :avwe, :worlds, ember_reach: [definition: "ember-reach"]
 
+# The rules a world can run (docs/engine-spec.md, 4): packages of them, and
+# the preset a definition that names no ruleset runs. `sim`, the kernel's own
+# rule, is always known and always runs.
+config :avwe,
+  rule_packages: [Avwe.Rules.PlayPackage, Avwe.Rules.Earthlike],
+  default_preset: "earthlike"
+
 # The web client (AvweWeb), on Bandit. Where it listens and its secret are
 # per environment. A page's socket is opened only from the origin the page
 # came from (`:conn`: same scheme, host and port as the request), and
