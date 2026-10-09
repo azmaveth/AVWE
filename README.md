@@ -11,7 +11,8 @@ is the Ember Reach.
 The design is in [docs/DESIGN.md](docs/DESIGN.md). AVWE is meant to run many
 kinds of world, not one: a world is a ruleset plus a world definition, and
 [docs/engine-spec.md](docs/engine-spec.md) says how the engines (sim and play)
-get there from the Ember Reach.
+get there from the Ember Reach. The simulation engine, the kernel, is a project
+of its own, [avwe_sim](https://github.com/azmaveth/avwe_sim), that AVWE depends on.
 
 ## Status
 
@@ -71,13 +72,15 @@ silent as the telnet watcher is told of it, and the silt banks cool
 
 ## Playing
 
-Requirements: Erlang/OTP 28 and Elixir 1.19 (see `.tool-versions`). The Ember
-Reach runs from its definition, so nothing else is needed; Quire is read only to
-make a definition again (`mix avwe.definition.export ember-reach`, with a Quire
-checkout next to this one, `../quire`, or `AVWE_QUIRE_ROOT` pointing at Quire's
-`data/worlds` folder).
+Requirements: Erlang/OTP 28 and Elixir 1.19 (see `.tool-versions`), and the
+simulation kernel cloned next to this repository (`../avwe_sim`, or any directory
+named in `AVWE_SIM_PATH`). The Ember Reach runs from its definition, so nothing
+else is needed; Quire is read only to make a definition again (`mix
+avwe.definition.export ember-reach`, with a Quire checkout next to this one,
+`../quire`, or `AVWE_QUIRE_ROOT` pointing at Quire's `data/worlds` folder).
 
 ```bash
+git clone https://github.com/azmaveth/avwe_sim ../avwe_sim
 mix deps.get
 mix run --no-halt
 ```

@@ -1,7 +1,9 @@
 # CLAUDE.md
 
 AVWE is a headless world simulator in Elixir. Read `docs/DESIGN.md` before
-changing anything structural; it records the decisions and the reasons.
+changing anything structural; it records the decisions and the reasons. Its
+simulation kernel is a project of its own, `avwe_sim`, beside this one (see the
+rule about it below).
 
 ## Rules
 
@@ -10,7 +12,9 @@ changing anything structural; it records the decisions and the reasons.
   `Avwe.Quire`, servers and adapters. The one piece of state they share is
   `Avwe.SystemTable`, which says which module declares each system id; it is
   written from the code alone (`Region.new/1`, a ruleset's plan, the
-  application's start), so a run depends on nothing but the code.
+  application's start), so a run depends on nothing but the code. (`Region`,
+  `Tick`, `SystemTable` and the rest of the kernel are in `avwe_sim`, which has
+  the same rule.)
 - **Determinism.** Systems use only `Avwe.Tick.rng/2` for randomness, never
   plain `:rand`. Never depend on map iteration order; use
   `Region.with_components/2` or, for who is within a distance, `Region.near/4`,
@@ -72,15 +76,24 @@ changing anything structural; it records the decisions and the reasons.
   load error; `test/avwe/rules_test.exs` measures that a system writes nothing
   else); what it needs of another rule it says as a capability in
   `requires/0` or `uses/0`.
-- **The kernel names nothing above it.** `test/avwe/kernel_test.exs` lists the
-  simulation's files (`Region`, `Tick`, `Store`, `RegionServer`, the rules'
-  check and the rest of what is to become `avwe_sim`); none of them refers to a
-  module outside that list or uses one of the words the test lists (body,
-  percept, intent, hearth, river, smoke, weather, `earthlike` and the like), in
-  code or in documentation. What the kernel needs of the
-  layers above it (an input's order, a refusal at submit, what to do when a
-  region is started again) is a protocol or a hook (`Avwe.Input`, `Avwe.Hooks`),
-  never a call.
+- **The simulation kernel is a project of its own.** `avwe_sim`
+  (github.com/azmaveth/avwe_sim, cloned beside this repository; modules keep their
+  `Avwe.*` names) has `Region`, `Tick`, `Rng`, `Event`, `Calendar`, `Space`, the
+  systems' table and behaviour, the rules and the check that a set of them makes a
+  world (`Rule`, `RulePackage`, `Ruleset`, and its own rule `sim` with
+  `Systems.Miracles`), `Input` and `Hooks`, `Store`, `RegionServer`, `World` and
+  `Clock`, and starts the registries `Avwe.Registry` and `Avwe.PubSub` and the
+  supervisor `Avwe.Worlds`. It depends on nothing of ours, so the compiler holds it
+  to naming nothing above it, and its own test holds it to the words (body,
+  percept, intent, hearth, river, smoke, weather, `earthlike` and the like). What
+  it needs of the layers above it (an input's order, a refusal at submit, what to do
+  when a region is started again) is a protocol or a hook (`Avwe.Input`,
+  `Avwe.Hooks`), never a call. AVWE depends on it by path (`../avwe_sim`, or the
+  directory in `AVWE_SIM_PATH`, which a worktree of this repository somewhere else
+  needs), and says which rules a world can run in `config :avwe_sim`. **A change to
+  the kernel is a pull request in its repository; one that spans both is two, the
+  kernel's first.** CI here checks the kernel out beside the code: the branch of the
+  same name as the pull request's if there is one, otherwise master.
 - **Replay must be exact.** `Avwe.Store.rebuild_from_start/1` has to reproduce
   `Region.state_hash/1`; anything that would make live and replay differ
   (reading map order, the wall clock, `:rand` without `Tick.rng`) is a bug.
@@ -103,12 +116,13 @@ changing anything structural; it records the decisions and the reasons.
 ## Commands
 
 ```bash
-mix test
+mix test                    # AVWE's; the kernel's own: `mix test` in ../avwe_sim
 mix test --include perf     # also runs the per-step cost bound (< 10 ms)
 mix test --only playwright  # the page in a real browser (test/browser); needs
                             # `npm ci --prefix assets` and, in assets/, `npx playwright
                             # install chromium` once, and `mix assets.build`
-mix setup                   # once: deps, esbuild, and the web client's bundle
+mix setup                   # once: deps (the kernel must be in ../avwe_sim or AVWE_SIM_PATH),
+                            # esbuild, and the web client's bundle
 npm test --prefix assets    # the page's drawing arithmetic, with Node's own runner
                             # (CI runs it; nothing to install, Node 20 or later)
 mix assets.build            # the bundle again, after changing assets/ (the dev server
@@ -130,7 +144,8 @@ mix hex.audit               # advisories in the locked deps; needs the network
 ## Checks: hooks and CI
 
 Everything above runs in CI (`.github/workflows/`) for every pull request and
-push to master: Lint, Test, Dialyzer and Sobelow in `ci.yml`, and
+push to master (with the kernel checked out beside the code, `.github/actions/kernel`):
+Lint, Test, Dialyzer and Sobelow in `ci.yml`, and
 `mix hex.audit` in `audit.yml`, which also runs weekly because advisories
 appear without any change here. A change is not done until they all pass.
 `browser.yml` runs the Playwright tests the same way, but it is new and
@@ -151,7 +166,7 @@ fine, say so where the tool reads it, with the reason beside it, so the next
 finding of that kind still fails:
 
 - **Sobelow:** a `# sobelow_skip ["Module"]` comment above the function (see
-  `lib/avwe/store.ex`). Ignoring a whole check goes in `.sobelow-conf`, only
+  `lib/avwe/definitions.ex`). Ignoring a whole check goes in `.sobelow-conf`, only
   for one that cannot apply (`Config.HTTPS`: nothing here terminates TLS; every
   listener is on loopback, and whatever exposes one puts TLS in front).
 - **Dialyzer:** fix the spec or the code. There is no ignore file; if one is
