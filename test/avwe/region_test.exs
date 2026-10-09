@@ -94,6 +94,54 @@ defmodule Avwe.RegionTest do
     end
   end
 
+  describe "near/4" do
+    defp placed(cells) do
+      cells
+      |> Enum.with_index()
+      |> Enum.reduce(Region.new(id: {0, 0}, seed: 1), fn {cell, n}, acc ->
+        Region.put_entity(acc, "e#{n}", position: cell, tag: n)
+      end)
+    end
+
+    test "is the ids within the radius in metres, sorted, the edge included" do
+      region = placed([{10, 10}, {13, 10}, {10, 14}, {14, 13}, {40, 40}])
+
+      # Cells are 10 m: three cells is 30 m, and {14, 13} is five cells away.
+      assert Region.near(region, {10, 10}, 30) == ["e0", "e1"]
+      assert Region.near(region, {10, 10}, 29.9) == ["e0"]
+      assert Region.near(region, {10, 10}, 50) == ["e0", "e1", "e2", "e3"]
+      assert Region.near(region, {10, 10}, 0) == ["e0"]
+    end
+
+    test "asks for the components it is given, and for a position whatever it is asked" do
+      region =
+        placed([{1, 1}, {2, 2}])
+        |> Region.put_component("e0", :place, %{label: "Here"})
+        |> Region.put_entity("nowhere", place: %{label: "Nowhere"})
+
+      assert Region.near(region, {1, 1}, 100, [:place]) == ["e0"]
+      assert Region.near(region, {1, 1}, 100, [:place, :position]) == ["e0"]
+      assert Region.near(region, {1, 1}, 100) == ["e0", "e1"]
+      assert Region.near(region, {1, 1}, 100, [:missing]) == []
+    end
+
+    property "is what a scan of every entity gives" do
+      check all cells <- list_of({integer(0..30), integer(0..30)}, max_length: 25),
+                center <- {integer(0..30), integer(0..30)},
+                radius <- integer(0..400) do
+        region = placed(cells)
+
+        expected =
+          for id <- Region.with_components(region, [:position]),
+              Avwe.Space.distance(Region.get(region, id, :position), center) *
+                Avwe.Space.cell_size_m() <= radius,
+              do: id
+
+        assert Region.near(region, center, radius) == expected
+      end
+    end
+  end
+
   describe "determinism" do
     property "the same seed and steps always give the same state" do
       check all seed <- integer(), steps <- integer(1..30) do

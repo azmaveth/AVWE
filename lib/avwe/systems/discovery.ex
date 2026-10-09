@@ -10,19 +10,16 @@ defmodule Avwe.Systems.Discovery do
 
   @behaviour Avwe.System
 
-  alias Avwe.{Event, Region, Space}
+  alias Avwe.{Event, Region}
 
-  @discover_cells 3
+  # Three cells, in metres.
+  @discover_m 30
 
   @impl Avwe.System
   def system_id, do: "play/discovery"
 
   @impl Avwe.System
   def run(region, _tick) do
-    places =
-      for id <- Region.with_components(region, [:place, :position]),
-          do: {id, Region.get(region, id, :position)}
-
     region
     |> Region.with_components([:body, :position, :knows])
     |> Enum.reduce({region, []}, fn body, {acc, events} ->
@@ -30,9 +27,8 @@ defmodule Avwe.Systems.Discovery do
       knows = Region.get(acc, body, :knows)
 
       found =
-        for {place, place_position} <- places,
+        for place <- Region.near(acc, position, @discover_m, [:place]),
             not MapSet.member?(knows, place),
-            Space.distance(position, place_position) <= @discover_cells,
             do: place
 
       learned = Region.put_component(acc, body, :knows, Enum.into(found, knows))

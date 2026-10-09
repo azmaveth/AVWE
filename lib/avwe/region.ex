@@ -27,7 +27,7 @@ defmodule Avwe.Region do
   depend on map iteration order.
   """
 
-  alias Avwe.{Event, Input, SystemTable, Tick}
+  alias Avwe.{Event, Input, Space, SystemTable, Tick}
 
   @type entity_id :: String.t()
   @type component :: atom()
@@ -321,6 +321,23 @@ defmodule Avwe.Region do
     |> Map.keys()
     |> Enum.filter(fn id -> Enum.all?(others, &Map.has_key?(&1, id)) end)
     |> Enum.sort()
+  end
+
+  @doc """
+  Ids of the entities within `radius_m` metres of `location` (a `position`, as
+  the space understands it) that have every one of `components`, sorted. An
+  entity with no `:position` is nowhere and never near. Who is near is a
+  question of the region, not a scan the caller writes: it scans today, and may
+  use an index later without any caller changing.
+  """
+  @spec near(t(), term(), number(), [component()]) :: [entity_id()]
+  def near(%__MODULE__{} = region, location, radius_m, components \\ []) do
+    [:position | components]
+    |> Enum.uniq()
+    |> then(&with_components(region, &1))
+    |> Enum.filter(fn id ->
+      Space.distance(get(region, id, :position), location) * Space.cell_size_m() <= radius_m
+    end)
   end
 
   @doc "The inputs waiting for the next step, in the order they were submitted."
