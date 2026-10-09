@@ -1,7 +1,7 @@
 defmodule Avwe.Rule do
   @moduledoc """
-  A rule: one self-contained feature of a world (`earthlike.fire`,
-  `earthlike.weather`), the unit a world's **ruleset** is made of. This is the
+  A rule: one self-contained feature of a world (`station.power`,
+  `station.atmosphere`), the unit a world's **ruleset** is made of. This is the
   rule's **model**, the half that needs nothing but the simulation: the state
   it owns, the systems that move it, and what it needs of the other rules. (Its
   embodiment, the verbs and senses by which a world's inhabitants meet it, is a second module
@@ -17,8 +17,8 @@ defmodule Avwe.Rule do
       systems may change a key it does not own, because that is what they are
       for (a scheduled change of any component), says so in `c:edits/0`.
     * **`provides/0`, `requires/0`, `uses/0`**, what it needs by capability, not
-      by rule: `provides: [:air_temperature]`, `requires: [:air_temperature]`,
-      `uses: [:river_water]`. An unmet `requires` is an error; an unmet `uses`
+      by rule: `provides: [:power]`, `requires: [:power]`,
+      `uses: [:coolant]`. An unmet `requires` is an error; an unmet `uses`
       means the rule runs without it. A capability is a state key, a pure
       query, or both.
     * **`runs_after/0`, `runs_before/0`**, what it must run after or before, by
@@ -27,7 +27,7 @@ defmodule Avwe.Rule do
     * **`conflicts/0`**, rules it cannot run beside.
     * **`systems/0`**, its systems, `{name, module}` or `{name, module,
       options}`; the system's id is the rule's id, a slash and the name
-      (`"earthlike.heat/step"`), and the module declares the same id
+      (`"station.power/step"`), and the module declares the same id
       (`c:Avwe.System.system_id/0`). A rule's own systems run in the order
       listed.
 
@@ -40,7 +40,7 @@ defmodule Avwe.Rule do
 
   @type system :: {String.t(), module()} | {String.t(), module(), keyword()}
 
-  @doc "The rule's id: `\"earthlike.fire\"`."
+  @doc "The rule's id: `\"station.power\"`."
   @callback id() :: String.t()
 
   @doc "The rule's version, `\"major.minor\"`."
@@ -78,7 +78,7 @@ defmodule Avwe.Rule do
 
   @doc """
   The module that is this rule's embodiment for a layer, by the layer's name:
-  `%{play: Avwe.Earthlike.Fire.Play}`. Sim hands each facet to the layer that
+  `%{play: Station.Power.Play}`. Sim hands each facet to the layer that
   registered for it, and knows no more of it.
   """
   @callback facets() :: %{atom() => module()}

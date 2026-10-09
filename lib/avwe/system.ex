@@ -8,7 +8,7 @@ defmodule Avwe.System do
   counting steps, because steps vary in length.
 
   A system has a stable **id** (`c:system_id/0`): its rule's id, a slash and its name
-  (`"earthlike.heat/step"`). A region lists ids, not modules, and
+  (`"station.power/step"`). A region lists ids, not modules, and
   `Avwe.SystemTable` says which module runs one, so a module can be moved or
   renamed without breaking a saved world. A system may also be given a
   **period** when it is listed (`{id, every: seconds}`): it then runs only in

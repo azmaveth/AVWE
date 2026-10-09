@@ -7,7 +7,10 @@ changing anything structural; it records the decisions and the reasons.
 
 - **The simulation core does no I/O.** `Avwe.Region`, `Avwe.Tick`, systems and
   `Avwe.Quire.Seed` are pure. Files, sockets, the wall clock and LLMs belong in
-  `Avwe.Quire`, servers and adapters.
+  `Avwe.Quire`, servers and adapters. The one piece of state they share is
+  `Avwe.SystemTable`, which says which module declares each system id; it is
+  written from the code alone (`Region.new/1`, a ruleset's plan, the
+  application's start), so a run depends on nothing but the code.
 - **Determinism.** Systems use only `Avwe.Tick.rng/2` for randomness, never
   plain `:rand`. Never depend on map iteration order; use
   `Region.with_components/2` or, for who is within a distance, `Region.near/4`,
@@ -72,8 +75,9 @@ changing anything structural; it records the decisions and the reasons.
 - **The kernel names nothing above it.** `test/avwe/kernel_test.exs` lists the
   simulation's files (`Region`, `Tick`, `Store`, `RegionServer`, the rules'
   check and the rest of what is to become `avwe_sim`); none of them refers to a
-  module outside that list or uses a word for a body, a percept, an intent or
-  Earth-like physics, in code or in documentation. What the kernel needs of the
+  module outside that list or uses one of the words the test lists (body,
+  percept, intent, hearth, river, smoke, weather, `earthlike` and the like), in
+  code or in documentation. What the kernel needs of the
   layers above it (an input's order, a refusal at submit, what to do when a
   region is started again) is a protocol or a hook (`Avwe.Input`, `Avwe.Hooks`),
   never a call.

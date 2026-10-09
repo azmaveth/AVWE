@@ -113,6 +113,29 @@ defmodule Avwe.E2E.SystemIdsTest do
     SystemTable.put("test.e2e.marker/step", Marker)
   end
 
+  test "a world with a periodic system resumes and replays to the same state", %{
+    tmp_dir: tmp_dir
+  } do
+    # Steps of a minute against a period of 100 s: the periods it is told do not
+    # line up with the steps, which the replay must reproduce.
+    {:ok, _pid} = start(tmp_dir, [{Tally, every: 100}])
+    Avwe.step(@world, 5)
+    :ok = Avwe.stop_world(@world)
+
+    {:ok, _pid} = start(tmp_dir, [{Tally, every: 100}])
+    Avwe.step(@world, 4)
+    {:ok, live} = RegionServer.state_hash(@world, @region)
+    assert {:ok, %{env: %{last: {_time, 100}}}} = Avwe.snapshot(@world)
+    :ok = Avwe.stop_world(@world)
+
+    {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+    assert Store.snapshots(store) == [0]
+    assert {:ok, rebuilt} = Store.rebuild_from_start(store)
+    :ok = Store.close(store)
+
+    assert Region.state_hash(rebuilt) == live
+  end
+
   test "a world resumed with another period for a system is not prepared again, and replays", %{
     tmp_dir: tmp_dir
   } do

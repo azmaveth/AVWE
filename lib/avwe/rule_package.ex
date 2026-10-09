@@ -2,8 +2,8 @@ defmodule Avwe.RulePackage do
   @moduledoc """
   A set of rules shipped together, with the presets that name some of them
   (`docs/engine-spec.md`, 4.1). The agent layer's `play` is one package
-  and the Earth-like physics another; a world that runs other physics lists the
-  rules of another package. `Avwe.Ruleset` finds the packages in `config :avwe,
+  and a physics another; a world that runs other physics lists the rules of
+  another package. `Avwe.Ruleset` finds the packages in `config :avwe,
   :rule_packages`, and always knows the kernel's own rule, `sim`.
   """
 
@@ -11,8 +11,8 @@ defmodule Avwe.RulePackage do
   @callback rules() :: [module()]
 
   @doc """
-  Named sets of rule ids: a preset `earthlike` is a list of them, `play`,
-  `earthlike.fire` and so on.
+  Named sets of rule ids: a preset `station` is a list of them, `play`,
+  `station.power` and so on.
   """
   @callback presets() :: %{String.t() => [String.t()]}
 end

@@ -4,8 +4,8 @@ defmodule Avwe.Systems.Miracles do
 
   A miracle event is an entity with a `:miracle` component:
 
-      %{kind: :event, at: time, target: "spring-1", component: :spring,
-        set: %{flow_m3_s: 0.0}, cause: :unknown, note: "...", applied_at: nil}
+      %{kind: :event, at: time, target: "lamp-1", component: :lamp,
+        set: %{power_w: 0.0}, cause: :unknown, note: "...", applied_at: nil}
 
   When its time comes, `set` is merged into the target's component, along with
   `miracle: id` and `changed_at: at`, so the change is annotated where it

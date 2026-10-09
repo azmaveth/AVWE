@@ -766,7 +766,9 @@ the rule, a slash, the name), a region keeps `{id, options}` for each system, an
 runs an id. `Region.new/1` registers the modules it is given, `Ruleset.register/1`
 those of a plan, and the application registers every system of every rule the
 packages ship when it starts; the table also looks there itself, once, before it
-says an id is unknown, so a saved world resolves whatever it is started under.
+says an id is unknown, so a saved world resolves whatever it is started under (it
+fills in only the ids it has nothing for, so it never undoes a move: `put/2` is
+what says that a system moved).
 Two modules that declare one id are refused when the second is registered; a
 module that declares none is known as `"module:" <> inspect(module)`, which is
 for tests and which a rename changes. A resume that finds an id no rule declares
@@ -774,9 +776,14 @@ is refused in plain words (`{:unknown_systems, ids}`), and a renamed module
 under an unchanged id resumes. A system listed with `every: seconds` runs in a
 step that reaches a multiple of that many seconds, decided by `Tick.crossed?/3`
 and so by time and not by counting steps (one advance of many steps and many
-advances of one are the same). A step shorter than the period hands it a tick for
-the whole period (`dt: every`, ending where the step does); a step as long as
-the period or longer hands it the step as it is.
+advances of one are the same). A step shorter than the period reaches at most one
+multiple, and hands the system a tick for the period that ended there (`dt:
+every`, ending at the multiple: `Tick.last_occurrence/3`), so the periods it is told
+tile time whatever the step, and it sees the region as that step left it; a step as
+long as the period or longer hands it the step as it is. The first period of a
+region that starts in the middle of one began before the region did. A period is a
+whole number of seconds above 0, and a system has no other option: a region refuses
+what it cannot run, in words (`Avwe.System.option_problems/2`).
 
 **Rules and the composition check** (`Avwe.Rule`, `Avwe.RulePackage`,
 `Avwe.Ruleset`). A rule module implements `Avwe.Rule`: `id/0` and `version/0`,
@@ -790,12 +797,14 @@ reads a module into a map with the defaults filled in. `config :avwe,
 refuses, all at once, sorted, in plain words: two rules owning one state key; a
 `requires` that no rule of the set provides, naming the rules that would
 ("earthlike.river needs :air_temperature, which no rule in this ruleset provides
-(earthlike.weather does)"); rules that conflict; a rule listed twice; a system
-module whose own id is not the one its rule gives it; a `runs_after` or
+(earthlike.weather does)"); rules that conflict; a rule listed twice, or a system
+name twice in one rule; a system module whose own id is not the one its rule
+gives it; a system listed with a period that is not a whole number of seconds
+above 0 or with an option a system does not have; a `runs_after` or
 `runs_before` that is no rule, system or capability (a slip, which is not the same
 as a rule that was left out: that is not an error); and constraints that cannot all
-be met, naming the systems that wait for each other. What the constraints leave
-open is sorted by id, so a ruleset has one order whatever order its rules were
+be met, naming the systems that wait for each other (and not those that only wait
+on them). What the constraints leave open is sorted by id, so a ruleset has one order whatever order its rules were
 written in. A rule's own systems run in the order it lists them; others say what
 they run after, by system id, rule id or capability.
 
@@ -823,15 +832,40 @@ played session and the hour of a miracle, and requires it to be in `owns` or
 `edits`), and another that the Earth-like plan runs the engine's systems in the
 order the engine always ran them, with the golden journal for the rest.
 
+**What a rule says of order is what its systems read of one another's state.** A
+constraint that names a rule the world does not have changes nothing, so an
+order that holds in the whole set only because a chain of other rules gives it
+is lost when one of them is left out. The Earth-like rules stated only part of
+what they read, and 20 of the 88 sets of them that the check accepts made a
+different world from the old order of the rules that remained (smoke before the
+fire whose smoke it reads, heat before the weather whose air it reads, the
+physics after the bodies). Each system now says what it reads: heat the air, the
+light, the hearths' burn and the river's reaches; smoke the hearths' burn and the
+wind; the river and the fire the scheduled changes that set a spring's flow and
+a hearth's fuel; and the physics all run before the bodies move. A test runs every
+set the check accepts, in the order the plan gives and in the old order of the
+systems that remain, over a morning with a lit hearth and the hour a source
+fails, and requires the same world where the orders differ
+(`test/avwe/rules_composition_test.exs`). The check cannot see a dependency the
+manifest leaves out, so a rule from outside the package is tested the same way by
+whoever writes it.
+
 **The `ruleset` section of a definition** (`Avwe.Definition.Schema`, `Check`):
 `{"preset": "earthlike", "with": [...], "without": [...]}` or `{"rules": [...]}`,
 not both; with none the world runs the default preset. Reading checks it with
 the other references and gives every problem with the path `ruleset`, and a
 `rules` entry (the parameters of a rule) for a rule the world does not run is an
-error. `Avwe.start_world/2` plans the ruleset and gives `{:invalid_ruleset,
+error, as is a rule named in `with`, `without` or `rules` that no package ships, `sim`
+left out, and a rule both added and left out. What a definition contains has to be
+served by its rules: bodies need one that provides `:bodies`, and guests one that
+provides `:intents` (`Avwe.Definition.unserved/2`; without `play` they would be
+told nothing). `Avwe.start_world/2` plans the ruleset, checks it against the
+definition it is for (a struct as well as a file) and gives `{:invalid_ruleset,
 problems}` for a bad one (`Definition.explain/1` writes the list); `:systems`,
 when given, replaces the plan, for the tests that run one system. The hash covers
-`ruleset`, so a saved world resumes under the rules it was saved with.
+an explicit `ruleset`; a definition that names none runs the default preset of the
+build that starts it, and if that preset's systems are not the saved world's the
+world is snapshotted at once, as for any change of systems.
 `Avwe.default_systems/0` is the default ruleset's systems.
 
 **Inputs and hooks** (`Avwe.Input`, `Avwe.Hooks`). `Input` is a protocol on the
@@ -842,7 +876,10 @@ applies the inbox sorted by `{order_key, seq}`; `RegionServer.submit/3` asks
 and the snapshot hold inputs as opaque terms with the `seq` the region gave
 them, and a snapshot keeps those that are `derived?` (autopilot's). `Avwe.Intent`
 implements it: `Actions` handles it, its body orders it, `Guests` validates an
-arrival, and autopilot's are derived. A world is started with `:hooks` (default
+arrival, and autopilot's are derived. An input a system made is not something to
+send in, and `RegionServer.submit/3` refuses one that says it is `derived?`
+(`{:error, :derived_input}`), since a journaled one would be numbered twice when
+the region is rebuilt. A world is started with `:hooks` (default
 `Avwe.Hooks.Play` and `Avwe.Hooks.Settings`), and the server asks each for what
 it defines: `on_resume/2`, the inputs to accept and journal when a region has
 been started again (play's releases the bodies whose holder has no live lease in
@@ -874,8 +911,9 @@ kernel's files (`region`, `tick`, `rng`, `event`, `system`, `system_table`,
 `calendar`, `space`, `store`, `region_server`, `world`, `clock`, `input`, `hooks`,
 `rule`, `rule_package`, `ruleset`, `rules/sim`, `systems/miracles`) refer to no
 module outside the kernel (read from each file's code with its aliases resolved,
-so a name in a type or a spec counts) and use no word for a body, a percept or an
-intent, nor for the Earth-like physics, in code or in documentation. Getting there
+so a name in a type or a spec counts) and use none of the words the test lists
+(`body`, `percept`, `intent`; `earthlike`, `hearth`, `river`, `smoke`, `silt`, `kiln`,
+`weather`, `spring`, `wind`, `heat`, `fire`), in code or in documentation. Getting there
 made the region's terrain an opaque slot, the ruleset's packages and default
 preset configuration, `Region` stop calling `Actions`, and `Store` and
 `RegionServer` stop naming `Intent` and `Guests`. The test's list is what E2b
@@ -891,7 +929,11 @@ or `invariants/0` yet (the schema and `Worldgen` still know what the three
 Earth-like rules are told, and the conformance suite of section 6 is later), and
 nothing hands out `facets/0` (there is no layer to register for one until `play`
 is a project). The "names" check covers rules and system ids; verbs, behaviours
-and modalities are E3 and after. `Calendar` is a value and not a behaviour. The
+and modalities are E3 and after. `Calendar` is a value and not a behaviour. Two
+rules may provide one capability. `Rule.version/0` is declared and not yet
+recorded, so a change to what a system does under an unchanged id is not noticed
+by a resume (a change to a module's code never was; what 4.3 calls "snapshotted
+at once" is done for a change of the systems list or of their options). The
 definition (`Definition`, its schema and its check, `Export`) stays in this
 project, since its schema names Earth-like things; it moves apart when the rules
 carry their own parameters (E7).

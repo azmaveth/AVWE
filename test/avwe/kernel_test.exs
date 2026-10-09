@@ -22,7 +22,8 @@ defmodule Avwe.KernelTest do
   @names ["Avwe.Registry", "Avwe.PubSub"]
 
   @agent_words ~w(body bodies percept percepts intent intents)
-  @physics_words ~w(hearth hearths river rivers smoke silt kiln kilns)
+  @physics_words ~w(earthlike earth-like hearth hearths river rivers smoke silt kiln kilns
+                    weather spring wind heat fire)
 
   defp path(file), do: Path.expand("../../lib/avwe/#{file}.ex", __DIR__)
 
