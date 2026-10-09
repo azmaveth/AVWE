@@ -29,6 +29,28 @@ defmodule Avwe.RulesCompositionTest do
     "play/memory"
   ]
 
+  # What a system reads of another's state in a step, so that the other runs first:
+  # {runs first, then reads it}. The scenarios below find a dependency that is
+  # missing here only if they happen to exercise it; this says them all.
+  @flows [
+    {"sim/miracles", "earthlike.river/step"},
+    {"sim/miracles", "earthlike.fire/step"},
+    {"earthlike.weather/step", "earthlike.heat/step"},
+    {"earthlike.weather/step", "earthlike.smoke/step"},
+    {"earthlike.river/step", "earthlike.heat/step"},
+    {"earthlike.fire/step", "earthlike.heat/step"},
+    {"earthlike.fire/step", "earthlike.smoke/step"},
+    # The bodies act on the world as the physics left it.
+    {"earthlike.daylight/step", "play/movement"},
+    {"earthlike.weather/step", "play/movement"},
+    {"earthlike.river/step", "play/movement"},
+    {"earthlike.fire/step", "play/movement"},
+    {"earthlike.heat/step", "play/movement"},
+    # And smell is judged where they ended up, before the step is remembered.
+    {"play/autopilot", "earthlike.smoke/step"},
+    {"earthlike.smoke/step", "play/memory"}
+  ]
+
   # Every set of the preset's rules (play among them) that makes a world.
   defp accepted do
     ids = Ruleset.presets()["earthlike"]
@@ -67,6 +89,16 @@ defmodule Avwe.RulesCompositionTest do
 
     assert length(accepted) > 50
     assert {Ruleset.presets()["earthlike"], @legacy} in accepted
+  end
+
+  test "every set the check accepts runs a system after the systems whose state it reads" do
+    for {subset, planned} <- accepted(),
+        {first, then} <- @flows,
+        first in planned,
+        then in planned do
+      assert Enum.find_index(planned, &(&1 == first)) < Enum.find_index(planned, &(&1 == then)),
+             "#{inspect(subset)} runs #{then} before #{first}, whose state it reads"
+    end
   end
 
   test "every set the check accepts makes the world the old order makes of the rules that remain" do
