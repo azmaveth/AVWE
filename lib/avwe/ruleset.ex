@@ -3,7 +3,7 @@ defmodule Avwe.Ruleset do
   The rules a world runs, and the check that they make a world.
 
   A ruleset is a list of rules (`Avwe.Rule`), named in a world's definition by
-  a preset (`"earthlike"`), rules added to it and rules left out, or by an
+  a preset (`"station"`), rules added to it and rules left out, or by an
   explicit list; `sim` always runs. `resolve/1` turns that into rule modules,
   and `plan/2` checks them and says in what order their systems run:
 
@@ -19,7 +19,8 @@ defmodule Avwe.Ruleset do
 
   Everything wrong is reported at once, each problem in plain words (`"station.scrubbers
   needs :power, which no rule in this ruleset provides (station.grid does)"`).
-  Pure but for reading `config :avwe, :rule_packages`.
+  Pure but for reading `config :avwe, :rule_packages` and, in `register/1` and
+  `register_known/0`, writing `Avwe.SystemTable`.
   """
 
   alias Avwe.{Rule, SystemTable}
@@ -204,13 +205,14 @@ defmodule Avwe.Ruleset do
   @doc """
   Makes every system of every rule the packages ship known to
   `Avwe.SystemTable`, so that a saved world can be replayed whatever ruleset it
-  is now started under. The application does it when it starts.
+  is now started under. The application does it when it starts. Ids the table
+  already has are left as they are.
   """
   @spec register_known() :: :ok
   def register_known do
     for module <- Map.values(known()),
         system <- Rule.manifest(module).systems,
-        do: SystemTable.put(system.id, system.module)
+        do: SystemTable.put_new(system.id, system.module)
 
     :ok
   end

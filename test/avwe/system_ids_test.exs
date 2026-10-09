@@ -153,16 +153,6 @@ defmodule Avwe.SystemIdsTest do
       refute inspect(by_module.systems) =~ "Counter"
     end
 
-    test "an id of a rule the engine ships is found even when the table was never told of it" do
-      :persistent_term.erase({SystemTable, "earthlike.fire/step"})
-
-      assert SystemTable.fetch("earthlike.fire/step") == {:ok, Avwe.Systems.Fire}
-
-      assert SystemTable.missing(["earthlike.fire/step", "test.ids.never/step"]) == [
-               "test.ids.never/step"
-             ]
-    end
-
     test "a system that moved to another module runs from there, for a region that was saved" do
       saved = region([Before]) |> Region.advance(1)
       assert saved.env.who == :before

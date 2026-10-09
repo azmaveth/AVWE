@@ -130,12 +130,12 @@ defmodule Avwe.RulesetTest do
              ]
     end
 
-    test "registering a plan lets a region run its systems by id" do
+    test "every system of the plan is known to the table" do
       {:ok, plan} = Ruleset.plan_for(nil)
-      :ok = Ruleset.register(plan)
 
       assert SystemTable.fetch("earthlike.heat/step") == {:ok, Avwe.Systems.Heat}
       assert SystemTable.missing(@legacy_order) == []
+      assert Enum.all?(plan.systems, &(SystemTable.fetch(&1.id) == {:ok, &1.module}))
     end
 
     test "leaves a rule out when it is not needed: a world with no smoke" do
@@ -151,6 +151,17 @@ defmodule Avwe.RulesetTest do
       assert plan.owners[{:component, :hearth}] == "earthlike.fire"
       assert plan.owners[:terrain] == "earthlike.valley"
       assert plan.providers[:air_temperature] == ["earthlike.weather"]
+    end
+  end
+
+  describe "registering a plan" do
+    test "lets a region run its systems by id, which the table did not know before" do
+      {:ok, plan} = Ruleset.plan([RA])
+
+      assert SystemTable.fetch("test.ruleset.a/step") == :error
+      :ok = Ruleset.register(plan)
+
+      assert SystemTable.fetch("test.ruleset.a/step") == {:ok, A1}
     end
   end
 

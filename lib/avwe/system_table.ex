@@ -6,7 +6,7 @@ defmodule Avwe.SystemTable do
   every snapshot see only the ids, so moving or renaming the module that
   implements a system breaks no saved world: the id stays and the table says
   which module it is now. A system names its id itself (`c:Avwe.System.system_id/0`,
-  `"earthlike.heat/step"`: its rule, a slash, its name); a module that does not
+  `"station.power/step"`: its rule, a slash, its name); a module that does not
   has the id `"module:" <> inspect(module)`, which is for tests and for
   systems made on the spot, and which a rename does change.
 
@@ -61,10 +61,23 @@ defmodule Avwe.SystemTable do
   end
 
   @doc """
+  Says that `module` runs the system `id` unless some module already does: what
+  is filled in for the ids nobody has said anything of leaves a move alone.
+  """
+  @spec put_new(id(), module()) :: :ok
+  def put_new(id, module) when is_binary(id) and is_atom(module) do
+    case lookup(id) do
+      :error -> put(id, module)
+      {:ok, _module} -> :ok
+    end
+  end
+
+  @doc """
   The module that runs the system `id`. An id the table has not been told of
   is looked for among the systems of the rules the packages ship
   (`Avwe.Ruleset.register_known/0`, which the application also does when it
-  starts), once, before it is said to be unknown.
+  starts), once, before it is said to be unknown; that only fills in ids the
+  table has nothing for, and leaves any it has as they are.
   """
   @spec fetch(id()) :: {:ok, module()} | :error
   def fetch(id) when is_binary(id) do
