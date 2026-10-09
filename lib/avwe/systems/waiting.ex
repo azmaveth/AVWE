@@ -8,6 +8,9 @@ defmodule Avwe.Systems.Waiting do
   alias Avwe.{Actions, Region, Tick}
 
   @impl Avwe.System
+  def system_id, do: "play.waiting/step"
+
+  @impl Avwe.System
   def run(region, tick) do
     now = Tick.end_time(tick)
 

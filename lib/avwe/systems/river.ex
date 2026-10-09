@@ -85,6 +85,9 @@ defmodule Avwe.Systems.River do
   def depth_m(reach_state, reach), do: reach_state.volume / (@width_m * reach.length_m)
 
   @impl Avwe.System
+  def system_id, do: "earthlike.river/step"
+
+  @impl Avwe.System
   def prepare(%Region{terrain: %Terrain{} = terrain} = region) do
     case Region.get(region, @river, :river) do
       nil -> region

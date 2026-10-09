@@ -40,6 +40,9 @@ defmodule Avwe.Systems.Weather do
   @type time :: Calendar.time()
 
   @impl Avwe.System
+  def system_id, do: "earthlike.weather/step"
+
+  @impl Avwe.System
   def prepare(region), do: put_air(region, region.time)
 
   @impl Avwe.System

@@ -50,6 +50,9 @@ defmodule Avwe.Systems.Autopilot do
   alias Avwe.{Actions, Autopilot, Calendar, Event, Intent, Region, Tick}
 
   @impl Avwe.System
+  def system_id, do: "play.autopilot/step"
+
+  @impl Avwe.System
   def prepare(region) do
     tod = Calendar.time_of_day(region.time)
     today = Integer.floor_div(region.time, Calendar.day())

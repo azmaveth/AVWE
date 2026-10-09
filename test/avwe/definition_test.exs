@@ -613,7 +613,7 @@ defmodule Avwe.DefinitionTest do
     test "is a region with the entities, the settings and the start the file gives" do
       region = tiny() |> decode!() |> Definition.region(id: {0, 0}, systems: [Avwe.Systems.Fire])
 
-      assert %Region{id: {0, 0}, seed: 7, dt: 60, systems: [Avwe.Systems.Fire]} = region
+      assert %Region{id: {0, 0}, seed: 7, dt: 60, systems: [{"earthlike.fire/step", []}]} = region
       assert region.time == Avwe.Calendar.at(1, day: 3, hour: 6)
 
       assert Region.get(region, "green", :position) == {10, 10}

@@ -27,9 +27,9 @@ defmodule Avwe.Store do
           and `:dt` from before the advance, the number of `:steps`, and the
           `:events` emitted.
       Version-1 records (intents inside the advance record) are rejected.
-    * `snap-<step>.bin` - `:erlang.term_to_binary` of `{:avwe_snapshot, 2,
+    * `snap-<step>.bin` - `:erlang.term_to_binary` of `{:avwe_snapshot, 3,
       %{region: region, definition: hash}}` for the region at `step`, with the
-      step zero-padded so names sort by step. The `2` is the snapshot version:
+      step zero-padded so names sort by step. The `3` is the snapshot version:
       a file with any other tag is refused with `{:unknown_snapshot, path,
       tag}`, so a region never resumes from a snapshot that a different build
       of the code wrote. `hash` is the hash of the world definition the region
@@ -91,13 +91,13 @@ defmodule Avwe.Store do
   read what a running region writes); each closes its own handle.
   """
 
-  alias Avwe.{Event, Intent, Region}
+  alias Avwe.{Event, Intent, Region, SystemTable}
 
   require Logger
 
   @version 2
   @snapshot_tag :avwe_snapshot
-  @snapshot_version 2
+  @snapshot_version 3
   @log_name "log"
   @snapshot_prefix "snap-"
   @snapshot_suffix ".bin"
@@ -127,6 +127,10 @@ defmodule Avwe.Store do
           | {:avwe, 2, {:advance, advance()}}
 
   # Opening and closing
+
+  @doc "The tag and version of the snapshots this build writes and reads."
+  @spec snapshot_tag() :: {atom(), pos_integer()}
+  def snapshot_tag, do: {@snapshot_tag, @snapshot_version}
 
   @doc "The folder name of a region's state under the store's dir."
   @spec region_dirname(term()) :: String.t()
@@ -418,7 +422,7 @@ defmodule Avwe.Store do
   end
 
   # A file that doesn't decode at all is corrupt. One that decodes but isn't
-  # `{:avwe_snapshot, 2, %{region: region, definition: hash}}` was written by
+  # `{:avwe_snapshot, 3, %{region: region, definition: hash}}` was written by
   # other code: an earlier or later version of this one, or the untagged
   # format from before the tag. The tag names which, so the error can say
   # what the file is.
@@ -486,12 +490,21 @@ defmodule Avwe.Store do
     do: store |> oldest_snapshot() |> then(&replay_from(store, &1)) |> without_definition()
 
   defp replay_from(store, {:ok, %Region{} = region, definition}) do
-    with {:ok, records} <- records_after(store, region.step),
+    with :ok <- known_systems(region),
+         {:ok, records} <- records_after(store, region.step),
          {:ok, rebuilt} <- replay_all(region, records),
          do: {:ok, rebuilt, definition}
   end
 
   defp replay_from(_store, other), do: other
+
+  # A snapshot lists its systems by id; replaying it needs a module for each.
+  defp known_systems(%Region{systems: systems}) do
+    case systems |> Enum.map(&elem(&1, 0)) |> SystemTable.missing() do
+      [] -> :ok
+      ids -> {:error, {:unknown_systems, ids}}
+    end
+  end
 
   defp replay_all(region, records) do
     Enum.reduce_while(records, {:ok, region}, fn record, {:ok, acc} ->

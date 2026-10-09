@@ -17,6 +17,9 @@ defmodule Avwe.Systems.Daylight do
   @daylight_s @sunset - @sunrise
 
   @impl Avwe.System
+  def system_id, do: "earthlike.daylight/step"
+
+  @impl Avwe.System
   def prepare(region) do
     Region.put_env(region, :light, region.time |> Calendar.time_of_day() |> light())
   end

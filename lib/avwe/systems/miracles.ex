@@ -18,6 +18,9 @@ defmodule Avwe.Systems.Miracles do
   alias Avwe.{Event, Region, Tick}
 
   @impl Avwe.System
+  def system_id, do: "sim.miracles/step"
+
+  @impl Avwe.System
   def prepare(region) do
     {region, _events} = apply_due(region, region.time)
     region

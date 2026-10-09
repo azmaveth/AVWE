@@ -199,6 +199,9 @@ defmodule Avwe.Systems.Heat do
   # Lifecycle
 
   @impl Avwe.System
+  def system_id, do: "earthlike.heat/step"
+
+  @impl Avwe.System
   def prepare(%Region{terrain: %Terrain{} = terrain} = region) do
     statics =
       region

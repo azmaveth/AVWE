@@ -26,10 +26,17 @@ defmodule Avwe.Region do
   depend on map iteration order.
   """
 
-  alias Avwe.{Actions, Event, Intent, Tick}
+  alias Avwe.{Actions, Event, Intent, SystemTable, Tick}
 
   @type entity_id :: String.t()
   @type component :: atom()
+
+  @typedoc """
+  A system the region runs: its stable id (`Avwe.System`) and its options.
+  `every: seconds` makes it run only in a step that reaches a multiple of that
+  many seconds.
+  """
+  @type system :: {SystemTable.id(), keyword()}
 
   @enforce_keys [:id, :seed]
   defstruct [
@@ -55,7 +62,7 @@ defmodule Avwe.Region do
           step: non_neg_integer(),
           time: Avwe.Calendar.time(),
           dt: pos_integer(),
-          systems: [module()],
+          systems: [system()],
           components: %{component() => %{entity_id() => term()}},
           fields: %{atom() => term()},
           env: %{atom() => term()},
@@ -71,6 +78,8 @@ defmodule Avwe.Region do
 
   Options: `:id` and `:seed` (required), `:time` (default 0), `:dt` (step length
   in world seconds, default 60) and `:systems` (run in order every step).
+  Systems are given as modules, as ids, or as `{module_or_id, options}`
+  (`systems/1`).
   """
   @spec new(keyword()) :: t()
   def new(opts) do
@@ -79,9 +88,37 @@ defmodule Avwe.Region do
       seed: Keyword.fetch!(opts, :seed),
       time: Keyword.get(opts, :time, 0),
       dt: Keyword.get(opts, :dt, 60),
-      systems: Keyword.get(opts, :systems, [])
+      systems: systems(Keyword.get(opts, :systems, []))
     }
   end
+
+  @doc """
+  The systems a region runs, as the region keeps them: `{id, options}`. A
+  module is registered under its id (`Avwe.SystemTable.register/1`); an id
+  must already be one some module runs, or this raises. What `new/1` and
+  `put_systems/2` do to what they are given, and what a list that is already
+  in this form comes through unchanged.
+  """
+  @spec systems([module() | String.t() | {module() | String.t(), keyword()}]) :: [system()]
+  def systems(given) when is_list(given), do: Enum.map(given, &system/1)
+
+  defp system({module_or_id, options}) when is_list(options),
+    do: {system_id(module_or_id), options}
+
+  defp system(module_or_id), do: {system_id(module_or_id), []}
+
+  defp system_id(module) when is_atom(module), do: SystemTable.register(module)
+
+  defp system_id(id) when is_binary(id) do
+    case SystemTable.fetch(id) do
+      {:ok, _module} -> id
+      :error -> raise ArgumentError, SystemTable.unknown(id)
+    end
+  end
+
+  @doc "Replaces the systems the region runs (`systems/1`)."
+  @spec put_systems(t(), [module() | String.t() | {module() | String.t(), keyword()}]) :: t()
+  def put_systems(%__MODULE__{} = region, given), do: %{region | systems: systems(given)}
 
   # Reducers
 
@@ -138,18 +175,27 @@ defmodule Avwe.Region do
   `c:Avwe.System.prepare/1`). Call once, after building the region and before
   the first step.
 
-  Pass `only: systems` to prepare just those (a region resumed from disk
-  prepares only the systems added since it was saved).
+  Pass `only: systems` (system ids, or entries as `systems/1` gives them) to
+  prepare just those (a region resumed from disk prepares only the systems
+  added since it was saved).
   """
   @spec prepare(t(), keyword()) :: t()
   def prepare(%__MODULE__{systems: systems} = region, opts \\ []) do
-    chosen = Keyword.get(opts, :only, systems)
+    chosen = opts |> Keyword.get(:only, systems) |> Enum.map(&entry_id/1)
 
-    Enum.reduce(Enum.filter(systems, &(&1 in chosen)), region, fn system, acc ->
-      Code.ensure_loaded!(system)
-      if function_exported?(system, :prepare, 1), do: system.prepare(acc), else: acc
-    end)
+    systems
+    |> Enum.map(&entry_id/1)
+    |> Enum.filter(&(&1 in chosen))
+    |> Enum.reduce(region, fn id, acc -> prepare_system(SystemTable.fetch!(id), acc) end)
   end
+
+  defp prepare_system(module, region) do
+    Code.ensure_loaded!(module)
+    if function_exported?(module, :prepare, 1), do: module.prepare(region), else: region
+  end
+
+  defp entry_id({id, _options}), do: id
+  defp entry_id(id), do: id
 
   @doc """
   Advances the region by `steps` steps.
@@ -198,10 +244,36 @@ defmodule Avwe.Region do
   end
 
   defp run_systems(region, tick) do
-    Enum.reduce(region.systems, region, fn system, acc ->
-      {acc, events} = system.run(acc, tick)
-      emit(acc, events, tick)
+    Enum.reduce(region.systems, region, fn {id, options}, acc ->
+      case due(options, tick) do
+        :skip ->
+          acc
+
+        system_tick ->
+          {acc, events} = SystemTable.fetch!(id).run(acc, system_tick)
+          emit(acc, events, tick)
+      end
     end)
+  end
+
+  # A system with a period runs in the step that reaches a multiple of it,
+  # whatever the step length (so the choice depends on time, never on counting
+  # steps, and many steps at once are the same as one by one). It is told the
+  # period it covers: a step as long as the period or longer is its own tick,
+  # a shorter one becomes the last `every` seconds up to the step's end.
+  defp due(options, tick) do
+    case Keyword.get(options, :every) do
+      nil ->
+        tick
+
+      every when tick.dt >= every ->
+        tick
+
+      every ->
+        if Tick.crossed?(tick, every),
+          do: %{tick | time: Tick.end_time(tick) - every, dt: every},
+          else: :skip
+    end
   end
 
   defp emit(region, events, tick) do

@@ -210,8 +210,17 @@ defmodule Avwe.RegionServer do
       {:error, {:unknown_snapshot, path, tag}} = error ->
         Logger.error(
           "Region #{inspect(region.id)}: no snapshot this build can read; #{path} is " <>
-            "tagged #{inspect(tag)} and this build reads {:avwe_snapshot, 2}. " <>
+            "tagged #{inspect(tag)} and this build reads #{inspect(Store.snapshot_tag())}. " <>
             "Delete the world folder #{store.dir} to start over."
+        )
+
+        error
+
+      {:error, {:unknown_systems, ids}} = error ->
+        Logger.error(
+          "Region #{inspect(region.id)}: the world was saved with systems this build does " <>
+            "not have: #{Enum.join(ids, ", ")}. Run a build that has them, or delete the " <>
+            "world folder #{store.dir} to start over."
         )
 
         error

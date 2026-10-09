@@ -15,6 +15,9 @@ defmodule Avwe.Systems.Discovery do
   @discover_cells 3
 
   @impl Avwe.System
+  def system_id, do: "play.discovery/step"
+
+  @impl Avwe.System
   def run(region, _tick) do
     places =
       for id <- Region.with_components(region, [:place, :position]),
