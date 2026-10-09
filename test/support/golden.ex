@@ -13,8 +13,10 @@ defmodule Avwe.Test.Golden do
   compared, so the record does not depend on the last bit of a C library's `exp`
   (macOS and Linux differ there: five decimals was too fine for the heat field's
   large values, and the states of a run on Linux did not match), and `systems`
-  is left out of the state, since later slices change how a region names its
-  systems. A digest says that something changed;
+  and `calendar` are left out of the state, since later slices change how a
+  region names its systems and E2 made the calendar a value of the region (the
+  Earth's, which is all the Ember Reach has). A digest says that something
+  changed;
   the full normalised streams, kept beside the digests, say what and where.
 
   Record with `MIX_ENV=test mix run -e 'Avwe.Test.Golden.record!()'`, and only
@@ -198,7 +200,13 @@ defmodule Avwe.Test.Golden do
   defp here?(view, body), do: view.components |> Map.get(:position, %{}) |> Map.has_key?(body)
 
   defp state(acc, step) do
-    digest = acc.region |> Map.put(:systems, []) |> Map.put(:outbox, []) |> digest()
+    digest =
+      acc.region
+      |> Map.put(:systems, [])
+      |> Map.put(:outbox, [])
+      |> Map.delete(:calendar)
+      |> digest()
+
     %{acc | states: [{step + 1, digest} | acc.states]}
   end
 

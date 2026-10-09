@@ -27,7 +27,7 @@ defmodule Avwe.Region do
   depend on map iteration order.
   """
 
-  alias Avwe.{Event, Input, Space, SystemTable, Tick}
+  alias Avwe.{Calendar, Event, Input, Space, SystemTable, Tick}
 
   @type entity_id :: String.t()
   @type component :: atom()
@@ -47,6 +47,7 @@ defmodule Avwe.Region do
     step: 0,
     time: 0,
     dt: 60,
+    calendar: %Avwe.Calendar{},
     systems: [],
     components: %{},
     fields: %{},
@@ -63,6 +64,7 @@ defmodule Avwe.Region do
           step: non_neg_integer(),
           time: Avwe.Calendar.time(),
           dt: pos_integer(),
+          calendar: Calendar.t(),
           systems: [system()],
           components: %{component() => %{entity_id() => term()}},
           fields: %{atom() => term()},
@@ -78,7 +80,8 @@ defmodule Avwe.Region do
   Creates an empty region.
 
   Options: `:id` and `:seed` (required), `:time` (default 0), `:dt` (step length
-  in world seconds, default 60) and `:systems` (run in order every step).
+  in world seconds, default 60), `:calendar` (default the Earth's,
+  `Avwe.Calendar.earth/0`) and `:systems` (run in order every step).
   Systems are given as modules, as ids, or as `{module_or_id, options}`
   (`systems/1`).
   """
@@ -89,6 +92,7 @@ defmodule Avwe.Region do
       seed: Keyword.fetch!(opts, :seed),
       time: Keyword.get(opts, :time, 0),
       dt: Keyword.get(opts, :dt, 60),
+      calendar: Keyword.get(opts, :calendar, Calendar.earth()),
       systems: systems(Keyword.get(opts, :systems, []))
     }
   end
@@ -224,7 +228,8 @@ defmodule Avwe.Region do
       time: region.time,
       dt: dt,
       seed: region.seed,
-      region: region.id
+      region: region.id,
+      calendar: region.calendar
     }
 
     stepped =
