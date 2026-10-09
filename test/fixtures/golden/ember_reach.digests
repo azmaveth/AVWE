@@ -1,0 +1,73 @@
+# Recorded by Avwe.Test.Golden.record!/0; see its moduledoc.
+%{
+  ember_813: %{
+    events: %{
+      count: 321,
+      digest: "92d25213ee00614ab579bfc12845ab3094bbecf1da78e3c979b940ab8e235dd3"
+    },
+    states: [
+      {360, "bd0401eda28fca58c09e1b67e51af1cc95cec2d1ee3be37247855aadb4b6411c"},
+      {720, "20cbc66deeb52ad752e470a221fde7a6077807a806671ccbb895935e1581a551"},
+      {1080, "b22ce35cd2a918732b02434d840fcad25c2d80f4bc0d284f8375f28ae347c4c7"},
+      {1440, "6ca43a3d1d250511eeeb7e71825540d0724e6a7894beca3dcc0f6aaf38a0ab57"},
+      {1800, "02c0f413ffc322f9b9fffbf3e288e910fc1712c48d7c12e5afe54a5cd5fb1ba9"},
+      {2160, "5c63350c8395d520bb7f1140001201ad54ff96c7b1fc3dd33b3ffb89c097cc78"},
+      {2520, "73a31a52fa8df621eb6db1f294bc577b62c792d69e433cae30e008d233fb26b5"},
+      {2880, "2b2cbddb15eae8c0b43f9d8d84886826b610ad4dbcdbcf1615cf7b58d6f6ab27"}
+    ],
+    steps: 2880,
+    percepts: %{
+      nil => %{
+        count: 33,
+        digest: "0879b36d9dd38fc3a78ebf5f80522e14ac5b88a233e55792ecdebce4d8ba6adb"
+      },
+      "guest-tomas-reed" => %{
+        count: 16,
+        digest: "85254720ba08708b201703915b58b40a90e8c8a7025e87f10bdd21307838ec07"
+      },
+      "mira-vale" => %{
+        count: 85,
+        digest: "5d445daa0dbcab19ffb5052e825051543c0d7f923a2f7e3f7594760dcddf87ed"
+      }
+    },
+    looks: %{
+      count: 48,
+      digest: "66171793464028e186d78a63c19f507bdc5e5df67a9ec49dc35d2fb0d290c61d"
+    }
+  },
+  ember_812: %{
+    events: %{
+      count: 374,
+      digest: "d7deda50b4902ab8c7fdb9a3ceccad6c24556db41568f8437d24bd30e0e5a421"
+    },
+    states: [
+      {360, "a85052dd144084eed348407bceec6977de34fb98efa45e78ef3741524c09e1f1"},
+      {720, "7fc659e10ce6588998c4ee3e1a7ad45f942ce7ddcec5883795821a5470279bd3"},
+      {1080, "532c5805e81bb7216e53adb867b6510fe1020e7421b54677713f9ae9a3214c20"},
+      {1440, "ee26c8d07d1cf20b42e411db92bbf7d8e6d3c19f33bc7382ceff4472dfa565c5"},
+      {1800, "f7c8ee2db2beb87f7ba4a019eae8d655f01eecc7df1b6b815d92152b56a5c07a"},
+      {2160, "0576c40fbd885435ebb6c9bba90ea7b72c8e3c2e0f15e03e588703d8d9c30f2c"},
+      {2520, "c439df92e5874b8f76b4671d8e41d3e3f5281ce459378a7c51d5d881e437ac8a"},
+      {2880, "77f57dc1aa95ca81a06488520ffa2f33972b6272a946b9e26ddbf59f61442078"},
+      {3240, "688b15eb1c3cb27a248bbb6554267b9d10eb7ca4280422c75944580b823d8477"},
+      {3600, "8ade5e00624eed330c672ce4d2518f3e3276dacb0fef0ccb70053269b7220c3b"},
+      {3960, "353ecb67dfdf9f816103060de3f2b005dd03564e5cbe3586967a0a5aa0fafd76"},
+      {4320, "282dfefd63496a8aa4345a9bb4ffdb2d471d153427afa6df321db7a13b47e144"}
+    ],
+    steps: 4320,
+    percepts: %{
+      nil => %{
+        count: 58,
+        digest: "6b6d0e2e580b881769c792dbab5708044723a8543e94628828c8bca2119083bd"
+      },
+      "mira-vale" => %{
+        count: 105,
+        digest: "aa24a5d6ebef3e6f05b03adfdf9b237206b44b595e235112417ccfde8bfacf98"
+      }
+    },
+    looks: %{
+      count: 48,
+      digest: "03fdf277087bf0b4ea0582013a177256ba1947d4403bfc968128174922c9f7b3"
+    }
+  }
+}
