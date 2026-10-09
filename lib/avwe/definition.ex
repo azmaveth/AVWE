@@ -216,8 +216,8 @@ defmodule Avwe.Definition do
 
   @doc """
   The world's starting region. Options: `:id` (the region's id, required) and
-  `:systems` (run in order every step; default none, since the systems are code
-  and not part of what a world is: `Avwe.start_world/2` gives its own).
+  `:systems` (run in order every step; default none: they are the code of the
+  world's rules, and `Avwe.start_world/2` gives those of its `ruleset`).
   """
   @spec region(t(), keyword()) :: Region.t()
   def region(%__MODULE__{} = definition, opts) do

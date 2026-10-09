@@ -752,6 +752,154 @@ diffs against the last accepted definition, species as a section, the log
 header the spec once planned (the snapshot does that work), and a definition
 for Lantern Hollow (the Quire path stays for the tests that use it).
 
+### E2 as built (in place; moving it to `avwe_sim` is E2b)
+
+E2 is built in this project first. The kernel stays in `lib/avwe/` until a test
+says it names nothing above itself (below), and moving its files to a project of
+their own is then a move and not a change. What is built:
+
+**System ids and periods** (`Avwe.System`, `Avwe.SystemTable`, `Avwe.Region`).
+A system module gives its id (`c:Avwe.System.system_id/0`, `"earthlike.heat/step"`:
+the rule, a slash, the name), a region keeps `{id, options}` for each system, and
+`state_hash/1` and every snapshot see only those. `SystemTable` (in
+`:persistent_term`: it is read for every system of every step) says which module
+runs an id. `Region.new/1` registers the modules it is given, `Ruleset.register/1`
+those of a plan, and the application registers every system of every rule the
+packages ship when it starts; the table also looks there itself, once, before it
+says an id is unknown, so a saved world resolves whatever it is started under.
+Two modules that declare one id are refused when the second is registered; a
+module that declares none is known as `"module:" <> inspect(module)`, which is
+for tests and which a rename changes. A resume that finds an id no rule declares
+is refused in plain words (`{:unknown_systems, ids}`), and a renamed module
+under an unchanged id resumes. A system listed with `every: seconds` runs in a
+step that reaches a multiple of that many seconds, decided by `Tick.crossed?/3`
+and so by time and not by counting steps (one advance of many steps and many
+advances of one are the same). A step shorter than the period hands it a tick for
+the whole period (`dt: every`, ending where the step does); a step as long as
+the period or longer hands it the step as it is.
+
+**Rules and the composition check** (`Avwe.Rule`, `Avwe.RulePackage`,
+`Avwe.Ruleset`). A rule module implements `Avwe.Rule`: `id/0` and `version/0`,
+and what it has of `owns`, `edits`, `provides`, `requires`, `uses`, `conflicts`,
+`runs_after`, `runs_before`, `systems` (`{name, module}` or `{name, module,
+options}`; the id is the rule's, a slash, the name) and `facets`. `Rule.manifest/1`
+reads a module into a map with the defaults filled in. `config :avwe,
+:rule_packages` lists the packages (`Avwe.Rules.PlayPackage`, `Avwe.Rules.Earthlike`),
+`:default_preset` the preset a definition without a `ruleset` runs (`"earthlike"`);
+`sim` (`Avwe.Rules.Sim`) is the kernel's own and always runs. `Ruleset.plan/2`
+refuses, all at once, sorted, in plain words: two rules owning one state key; a
+`requires` that no rule of the set provides, naming the rules that would
+("earthlike.river needs :air_temperature, which no rule in this ruleset provides
+(earthlike.weather does)"); rules that conflict; a rule listed twice; a system
+module whose own id is not the one its rule gives it; a `runs_after` or
+`runs_before` that is no rule, system or capability (a slip, which is not the same
+as a rule that was left out: that is not an error); and constraints that cannot all
+be met, naming the systems that wait for each other. What the constraints leave
+open is sorted by id, so a ruleset has one order whatever order its rules were
+written in. A rule's own systems run in the order it lists them; others say what
+they run after, by system id, rule id or capability.
+
+| Rule | Owns | Provides | Requires | Uses |
+|---|---|---|---|---|
+| `sim` | `place`, `miracle` (and edits any) | `scheduled_changes` | | |
+| `play` | `position`, `repr`, `body`, `control`, `action`, `knows`, `memory`, `notebook`, `item`, `carried_by`, `autopilot`, `routine`, `norms`, `guest` | `bodies`, `intents` | | `air_temperature`, `fire_sources`, `light`, `river_water` |
+| `earthlike.daylight` | env `light` | `light` | | |
+| `earthlike.weather` | env `air_c`, `sky_c`, `wind` | `air_temperature`, `sky_temperature`, `wind` | | |
+| `earthlike.valley` | the terrain | `terrain` | | |
+| `earthlike.river` | `river`, `spring` | `river_water` | `air_temperature` | `terrain` |
+| `earthlike.fire` | `hearth` | `fire_sources` | | |
+| `earthlike.heat` | field `heat` | `ground_heat` | `air_temperature`, `light`, `sky_temperature` | `fire_sources`, `river_water`, `terrain` |
+| `earthlike.smoke` | field `smoke`, `nose` | `smoke` | `fire_sources`, `wind` | |
+
+The capabilities state what the systems still call by module name (the six
+direct calls of section 0); the check refuses a ruleset that leaves one out, and
+E3 to E5 route the calls through them. `owns` is what a rule's *systems write*:
+`position` is `play`'s because movement writes it, and the places that carry one
+are put there when the world is built. The one rule that writes another's state
+on purpose is `sim`'s scheduled change, which says so with `edits: :any`. The
+check cannot see what a system writes, so a test does (`Avwe.RuleCase.survey/2`
+measures what each system changes in its place in the step, over a morning, a
+played session and the hour of a miracle, and requires it to be in `owns` or
+`edits`), and another that the Earth-like plan runs the engine's systems in the
+order the engine always ran them, with the golden journal for the rest.
+
+**The `ruleset` section of a definition** (`Avwe.Definition.Schema`, `Check`):
+`{"preset": "earthlike", "with": [...], "without": [...]}` or `{"rules": [...]}`,
+not both; with none the world runs the default preset. Reading checks it with
+the other references and gives every problem with the path `ruleset`, and a
+`rules` entry (the parameters of a rule) for a rule the world does not run is an
+error. `Avwe.start_world/2` plans the ruleset and gives `{:invalid_ruleset,
+problems}` for a bad one (`Definition.explain/1` writes the list); `:systems`,
+when given, replaces the plan, for the tests that run one system. The hash covers
+`ruleset`, so a saved world resumes under the rules it was saved with.
+`Avwe.default_systems/0` is the default ruleset's systems.
+
+**Inputs and hooks** (`Avwe.Input`, `Avwe.Hooks`). `Input` is a protocol on the
+input's struct (`handle/3`, `order_key/1`, `validate/2`, `derived?/1`, `seq/1`,
+`put_seq/2`; 4.4). `Region.submit/2` numbers an input and queues it, and a step
+applies the inbox sorted by `{order_key, seq}`; `RegionServer.submit/3` asks
+`validate/2` before it journals, so a refusal is never in the log; the journal
+and the snapshot hold inputs as opaque terms with the `seq` the region gave
+them, and a snapshot keeps those that are `derived?` (autopilot's). `Avwe.Intent`
+implements it: `Actions` handles it, its body orders it, `Guests` validates an
+arrival, and autopilot's are derived. A world is started with `:hooks` (default
+`Avwe.Hooks.Play` and `Avwe.Hooks.Settings`), and the server asks each for what
+it defines: `on_resume/2`, the inputs to accept and journal when a region has
+been started again (play's releases the bodies whose holder has no live lease in
+this world), and `on_reconfigure/3`, told when the saved region and the one given
+may differ (the settings of a world from Quire that are ignored). The fifth place
+4.4 counted, those warnings, did not go away with the definition's hash as 4.4
+expected: the Quire path stays for tests, so they are a hook. Sim runs a test
+input of its own (`Avwe.Test.Poke` with `PokeHooks`), so the hooks are tested
+without play.
+
+**`Region.near(region, location, radius_m, components \\ [])`** gives the ids of
+the entities within `radius_m` metres of a position that have a `position` and
+every one of `components`, sorted; who is near is the region's question, and
+Discovery, which scanned every place for its own cell radius, asks it (30 m, its
+three cells).
+
+**The calendar** (`Avwe.Calendar`) is a value, `%Calendar{hours_per_day,
+days_per_year, epoch}`, with the Earth's as `earth/0` and a form of each function
+that takes a calendar (`day/1`, `year/1`, `at/3`, `describe/2`, `time_of_day/2`,
+`format/2`); the forms that take none are the Earth's, so no call site moved. A
+region keeps one (`Region.new(calendar:)`) and hands it to its systems in the tick.
+The golden journal's state digests leave it out of the state, as they leave out
+the systems. A world definition has no `calendar` key yet, nor are there named
+moments or month and season names: the first world with another calendar (the
+station, E8) decides their shape.
+
+**The boundary** (`test/avwe/kernel_test.exs`, `Avwe.Test.Boundary`). The
+kernel's files (`region`, `tick`, `rng`, `event`, `system`, `system_table`,
+`calendar`, `space`, `store`, `region_server`, `world`, `clock`, `input`, `hooks`,
+`rule`, `rule_package`, `ruleset`, `rules/sim`, `systems/miracles`) refer to no
+module outside the kernel (read from each file's code with its aliases resolved,
+so a name in a type or a spec counts) and use no word for a body, a percept or an
+intent, nor for the Earth-like physics, in code or in documentation. Getting there
+made the region's terrain an opaque slot, the ruleset's packages and default
+preset configuration, `Region` stop calling `Actions`, and `Store` and
+`RegionServer` stop naming `Intent` and `Guests`. The test's list is what E2b
+moves.
+
+**Saving.** The snapshot is `{:avwe_snapshot, 3, ...}` (it was 2), whose region
+lists system ids; the journal's records keep their version, since an input was
+always an opaque term with its `seq` to the journal. As the spec said, a saved
+dev world from before E2 is refused in the usual words.
+
+**Differences from the plan above.** `Avwe.Rule` has no `parameters/0`, `seed/2`
+or `invariants/0` yet (the schema and `Worldgen` still know what the three
+Earth-like rules are told, and the conformance suite of section 6 is later), and
+nothing hands out `facets/0` (there is no layer to register for one until `play`
+is a project). The "names" check covers rules and system ids; verbs, behaviours
+and modalities are E3 and after. `Calendar` is a value and not a behaviour. The
+definition (`Definition`, its schema and its check, `Export`) stays in this
+project, since its schema names Earth-like things; it moves apart when the rules
+carry their own parameters (E7).
+
+**Not yet.** E2b: the `avwe_sim` project, which takes the kernel's files and
+tests (its registries `Avwe.Registry`, `Avwe.PubSub` and the world supervisor
+with them) while this project depends on it.
+
 ## 9. Tests
 
 CLAUDE.md applies: an end-to-end test through the real transport for every
@@ -888,10 +1036,15 @@ what make that a swap and not a rewrite.
 None outstanding; Hysun's answers and recommendations settled the earlier ones
 (decisions 5 to 12 and the accepted defaults). Left to the slices that need them:
 
-1. **The exact shapes of the hooks** (4.4) and of the facet registration (4.1).
-   E2 settles them with a test handler in sim and play's handler behind them.
-2. **What a capability call costs in the step.** E2 measures it against the
-   performance bound before E3 to E5 route the six direct calls through it.
+1. **The shape of the facet registration** (4.1). E2 settled the hooks (4.4,
+   "E2 as built"); nothing hands out `facets/0` until `play` is a project, so
+   its registration is settled with E3.
+2. **What a capability call costs in the step.** E2 has no capability calls to
+   measure, since the systems still call each other by name. What it did add to
+   the step, finding every system through the id table, costs nothing visible:
+   the Ember Reach's twelve systems take 2.1 ms a step against the 10 ms bound
+   (about 2 ms before). A capability call is measured against the bound when E3
+   to E5 route the six direct calls through them.
 3. **When the adapters become projects.** The same argument applies to MCP,
    telnet and the web page; ArborMCP's arrival is the natural moment for MCP.
 4. **When the `view` leaves play.** When a second family of projections exists.

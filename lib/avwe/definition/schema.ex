@@ -16,9 +16,9 @@ defmodule Avwe.Definition.Schema do
       preset when it is left out (`Avwe.Ruleset`)
     * `rules`: what each rule is told, by its id. `earthlike.valley` takes the
       terrain (a `river`, `rises` and `clay`), `earthlike.fire` the `hearths`
-      and `earthlike.weather` the `wind`. The ids are the rules' names in
-      `docs/engine-spec.md`; until the rules exist as modules (E2) a world
-      always runs the engine's own systems
+      and `earthlike.weather` the `wind`. The ids are those of the rules
+      (`Avwe.Rules.Earthlike`), and a rule that is told something must be one
+      the world runs (`ruleset`)
     * `entities`: the places and bodies, by id, with their components (`place`,
       `position`, `repr`, `article`, `body`, `knows`, `home`): what
       `Avwe.Quire.Seed` builds from a Quire world
