@@ -481,9 +481,11 @@ its own.
 
 ## 5. The world definition
 
-One JSON file per world, `worlds/<id>/definition.json`, beside the evidence
-that produced it (`provenance.json`) and the Quire snapshot it was compiled
-from (`docs/quire-spec.md`).
+One JSON file per world, `priv/worlds/<name>/definition.json` (E1 as built:
+`worlds/` is where a running world keeps its journal), beside the evidence that
+produced it (`provenance.json`) and the Quire snapshot it was compiled from
+(`docs/quire-spec.md`). The table is the plan; "E1 as built" in section 8 says
+where the first slice differs from it.
 
 | Section | Holds | Registered by |
 |---|---|---|
@@ -641,6 +643,114 @@ table that replaces the name exists.
 A saved dev world does not survive E1 (the snapshot gains the definition's
 hash) or E2 (it refers to modules by name). The snapshot refuses it with the
 usual message; nothing else is lost.
+
+### E1 as built
+
+**The golden journal** (`Avwe.Test.Golden`, `test/golden`, recorded files in
+`test/fixtures/golden`). Two runs of the Ember Reach, driven as controllers
+drive it: `:ember_813` (two world days: Mira lights the hearth, speaks, writes,
+walks the banks, follows the channel, says something at every volume, is let go
+of; a guest arrives) and `:ember_812` (nobody at the controls, from the
+afternoon before the source fails to three days after). For every step it keeps
+the events and the percepts a spectator, Mira and the guest are told; every
+180 steps each body's look; every 360 steps a digest of the whole state; as
+digests, and as the full normalised streams beside them, so a failure names the
+first difference. Floats are rounded to 6 significant digits (five decimals
+was too fine: macOS and Linux differ in the last bits of `exp`, and the heat
+field's large values showed it); `systems` is left out of the state, since E2
+changes how a region names them. It matches on macOS and Linux (arm64 and
+x86_64). It is re-recorded only by hand, on code whose behaviour is the one to
+keep (`MIX_ENV=test mix run -e 'Avwe.Test.Golden.record!()'`); a failure is
+read as a bug. Each scenario runs twice, from the region Quire and the
+settings build and from the definition.
+
+**The definition** (`Avwe.Definition`, with `Codec`, `Schema`, `Check`, `Json`
+and `Export` beside it, all pure; `Avwe.Definitions` reads the files). One file,
+`priv/worlds/<name>/definition.json`, schema version 1; the Ember Reach's is
+`priv/worlds/ember-reach/definition.json`. What differs from the table in
+section 5:
+
+- `rules` is keyed by the rule ids this spec names: `earthlike.valley` (the
+  terrain), `earthlike.fire` (the hearths) and `earthlike.weather` (the wind).
+  The rules do not exist as modules yet, so the keys are the names E2 will
+  give; there is no `ruleset` section, and a world still runs the engine's own
+  systems (`Avwe.start_world/2`'s `:systems`), since the systems are code.
+- Miracles are one section, `miracles`, with a `kind` (`event`, a change at a
+  time; `standing`, a hearth that burns without fuel), where this table says
+  `scheduled`. The standing miracle carries its own name and description: it
+  has no Quire to ask.
+- `entities` holds what `Quire.Seed` builds, flat: `id`, then `place`,
+  `position`, `repr`, `article`, `body`, `knows`, `home`. A body that is
+  nowhere simply has no `position`.
+- `guests` is `{"arrival": place, "max": n}`; `characters` is by body id, with
+  `norms`, `carries`, `routine`, `glyph` and `color`. `provenance.json` is not
+  built yet.
+
+**Reading is closed.** Every type in the schema is a description
+(`Avwe.Definition.Codec`) used to read and to write, so what is written can be
+read again. A string becomes an atom only by being one of the names the schema
+lists (the verbs a routine step may use, the norms, the item kinds, the
+components a miracle may change and what it may set on each, the directions);
+object keys are looked up among the keys listed; no atom is made from the
+file. Reading reports every problem with its path (`rules.earthlike.fire.
+hearths[0].fuel_kg: expected a number, 0 or more, got -1.0`), shapes first and,
+when they are right, references (`Avwe.Definition.Check`): an id belongs to one
+thing, a place has a position on the map, `home`, `knows`, the terrain, a
+hearth, a standing miracle and the guests' door name places, an event's target
+exists and has the component it changes, a character is a body and a routine
+step's target is something in the world. `Worldgen`'s own checks stay as a
+second line, with the same messages.
+
+**The hash** (`Avwe.Definition.hash/1`) is SHA-256 of the canonical form of the
+data (keys sorted, no spaces), not of the text: a file laid out differently,
+or with its keys in another order, is the same definition. It leaves out
+`guests`: who may arrive and where is how a world is run, as its clock is, and
+a saved world takes the guests it is started to take (`docs/m3-spec.md`), so
+raising the most a world takes does not strand it. `to_json/1` writes
+the readable form (`id` and `name` first, a short object on a line), and a test
+requires the checked-in files to be exactly what it writes.
+
+**Starting a world** (`Avwe.start_world/2`). `definition:` takes a name (read
+from `priv/worlds/<name>/`, or `config :avwe, :definitions_root`), a path to a
+`.json` file, or an `Avwe.Definition`. The definition is the whole of the
+world, so `:start`, `:seed`, `:terrain`, `:hearths`, `:miracles`, `:climate`,
+`:characters` and `:guests` are refused beside it
+(`{:settings_with_definition, keys}`); a different world is a different
+definition, and a test that wants one changes the struct. `quire:` and its
+settings stay for tests and for trying a Quire world; both together is
+`:definition_and_quire`, neither `:no_world_source`. The run path of the Ember
+Reach (`config :avwe, :worlds, ember_reach: [definition: "ember-reach"]`) no
+longer reads Quire.
+
+**Saving.** The snapshot is now `{:avwe_snapshot, 2, %{region: region,
+definition: hash}}` (`hash` is `nil` for a world started from Quire), written
+at step 0 and every snapshot after, so the first one is the header of the
+history that follows (no separate log header was needed). A saved world is
+resumed only under the definition it was saved under, however that file is laid
+out; under another, or under none, or the other way round, it refuses to start
+(`{:definition_changed, saved, given}`), says both hashes and where the world
+folder is, and writes nothing. The settings warnings of the Quire path are
+unchanged. `Avwe.worlds/0` reports each world's `definition` hash.
+
+**Making a definition.** `Avwe.Definition.Export` compiles one from a Quire
+world and a **recipe** (AVWE's own settings for the world: seed, start, terrain,
+hearths, miracles, climate, characters, guests), refusing a recipe that does
+not make a valid definition, with every problem. For the Ember Reach the
+recipe is `priv/worlds/ember-reach/source.exs`, and `mix avwe.definition.export
+ember-reach` writes `definition.json` from it and Quire's folder, reads it back,
+and stops unless it reads as what was made. A test makes the fixture's
+definition again and compares the text; another builds the Ember Reach both
+ways, from Quire and settings and from its definition, and requires the same
+`Region.state_hash/1`, at four times of day and with the settings changed the
+same way. The checked-in definition made from the real Quire is checked against
+the fixture's for everything the recipe says. Stage 1 of the Quire work
+(`docs/quire-spec.md`) replaces the exporter with a language model whose output
+the same loader reads.
+
+**Not in E1.** `ruleset` and rule composition (E2), `provenance.json` and
+diffs against the last accepted definition, species as a section, the log
+header the spec once planned (the snapshot does that work), and a definition
+for Lantern Hollow (the Quire path stays for the tests that use it).
 
 ## 9. Tests
 

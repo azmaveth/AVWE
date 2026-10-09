@@ -63,6 +63,20 @@ changing anything structural; it records the decisions and the reasons.
   `Region.state_hash/1`; anything that would make live and replay differ
   (reading map order, the wall clock, `:rand` without `Tick.rng`) is a bug.
   `test/e2e/persistence_test.exs` checks it.
+- **The golden journal says nothing changed.** `test/golden` replays two
+  recorded runs of the Ember Reach (events, percepts, looks and state digests,
+  from Quire and settings and from the definition) and requires the same. A
+  change that is meant to leave the world as it was must leave them as they
+  were; a failure is a change of behaviour to be understood, not a record to be
+  made again. Re-record only on purpose, with `MIX_ENV=test mix run -e
+  'Avwe.Test.Golden.record!()'`.
+- **A world definition is data, never code.** `Avwe.Definition` reads a file
+  into terms by the types of `Avwe.Definition.Schema` and nothing else: no atom
+  is made from a file, a verb, norm, component or direction the schema does not
+  list is refused, and every problem is reported with its path. Teaching it
+  something new is a change to the schema, with tests. A saved world is
+  resumed only under the definition (`Avwe.Definition.hash/1`) it was saved
+  under.
 
 ## Commands
 
@@ -77,6 +91,12 @@ npm test --prefix assets    # the page's drawing arithmetic, with Node's own run
                             # (CI runs it; nothing to install, Node 20 or later)
 mix assets.build            # the bundle again, after changing assets/ (the dev server
                             # rebuilds it by itself)
+mix avwe.definition.export ember-reach
+                            # makes priv/worlds/ember-reach/definition.json again, from
+                            # Quire (../quire/data/worlds, or AVWE_QUIRE_ROOT) and the
+                            # recipe beside it; the fixture's: `--quire
+                            # test/fixtures/quire/ember-reach --out
+                            # test/fixtures/worlds/ember-reach/definition.json`
 mix format
 mix lint                    # format check, unused deps, compile with warnings as
                             # errors, credo --strict: about a second warm
@@ -127,14 +147,20 @@ finding of that kind still fails:
 
 Tests use worlds in `test/fixtures/quire/`: a copy of the Ember Reach, and
 Lantern Hollow, a tiny world laid out to test hearing and sight ranges (fire
-and smoke tests add hearths and a wind to it through start options).
-`Avwe.Test.Fixtures.ember_reach_opts/1` starts the Ember Reach with its real
-settings (terrain, river, the 812 miracle) from the fixture copy, and
-`Avwe.Test.Ember.region/2` builds its region directly for unit tests.
-`mix run --no-halt` in dev runs the Ember Reach live (one world minute per
-second) with telnet on port 4040, MCP at `http://127.0.0.1:4041/mcp` and the web
-client at `http://127.0.0.1:4042` (after `mix setup`),
-reading Quire from `../quire/data/worlds` or `AVWE_QUIRE_ROOT`. `.mcp.json`
+and smoke tests add hearths and a wind to it through start options). A world
+is run from its definition (`Avwe.Definition`: `priv/worlds/<name>/definition.json`),
+made from a Quire folder and a recipe (`priv/worlds/ember-reach/source.exs`,
+AVWE's own settings for it) by `mix avwe.definition.export NAME`; the Quire
+path (`quire:` with settings) stays for tests like Lantern Hollow's.
+`Avwe.Test.Fixtures.ember_reach_opts/1` starts the Ember Reach from the fixture
+copy of Quire and the recipe, `ember_reach_definition/1` is its definition
+made from that copy (`test/fixtures/worlds/ember-reach/definition.json`, kept
+exactly as the exporter writes it by a test), and `Avwe.Test.Ember.region/2`
+and `region_from_definition/2` build its region both ways, which must be
+equal. `mix run --no-halt` in dev runs the Ember Reach live (one world minute
+per second) from `priv/worlds/ember-reach/definition.json`, with telnet on port
+4040, MCP at `http://127.0.0.1:4041/mcp` and the web client at
+`http://127.0.0.1:4042` (after `mix setup`); Quire is not read. `.mcp.json`
 points a Claude Code session in this folder at that server, and
 `scripts/mcp_call.py <tool> '<json>'` plays it by hand (stdlib Python; the
 session id is kept in `tmp/mcp_session`).

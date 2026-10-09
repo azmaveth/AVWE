@@ -82,7 +82,7 @@ when M0 starts.
 | Unobserved regions | Deferred. Every region ticks every tick for now | Premature at the scale of one valley. Section 6.8 records what keeps the option open |
 | Terrain storage | A small seeded description (the channel's line of cells plus rises and clay), with elevation and ground computed per cell on demand | Tiny, fast to generate, and deterministic. A stored, editable grid can come when terrain needs hand-editing |
 | River model | A chain of 100 m reaches from source to exit, each a linear reservoir updated with its exact solution | Stable at any step length, cheap, and it drains from upstream down, as canon needs |
-| When the source failed | 812 AR, day 200, 15:00 | Canon gives only the year. The day and hour are ours, in `config/config.exs` |
+| When the source failed | 812 AR, day 200, 15:00 | Canon gives only the year. The day and hour are ours, in the Ember Reach's definition (`priv/worlds/ember-reach/source.exs`) |
 | Weather | A fixed late-summer diurnal air curve (13 to 25 °C), a constant wind per region from config, no randomness | Enough for the Ember Reach's one season; seasons and changing weather come later, and nothing in the physics would change |
 | Heat storage | Energy per cell relative to 15 °C on a sparse active set (cells near the channel, the clay, and wherever a hearth stands), with per-cell exact exponential relaxation and no lateral conduction | Soil conducts about 0.2 m a day; what warms the banks is seepage from the river, modelled as a per-material coupling. No stencil means no step-size limit, and the budget is testable to 1e-8 MJ |
 | Smoke | Sparse puffs that drift with the wind and decay, not a grid | Cheap, bounded, exact in mass at any step length, and nobody sniffs a grid |
@@ -400,7 +400,9 @@ Built. All file I/O lives in `Avwe.Store`; the core stays pure.
   file, fsynced, then renamed) taken when an advance crosses a multiple of
   `snapshot_every` steps (default 1000), keeping the newest few plus step 0.
   Terrain is inside the snapshot, so once a world has run its terrain is
-  fixed.
+  fixed. Each also records the hash of the world definition the region was
+  built from (`Avwe.Definition.hash/1`; `nil` for a world made from Quire and
+  settings), so the step-0 snapshot is the header of the history after it.
 - **Replay** rebuilds a region from a snapshot and the records after it, and
   must reproduce `Region.state_hash/1` exactly; a replay from step 0 is the
   determinism test, run end-to-end. Replay checks the log's continuity and
@@ -409,8 +411,11 @@ Built. All file I/O lives in `Avwe.Store`; the core stays pure.
   wins over configuration (seed, time, terrain, components, fields) and
   configuration wins for code: the systems list comes from the current
   config, and a system added since the save is prepared for the saved time.
-  A log with no snapshot refuses to start rather than silently beginning
-  again over it.
+  A world started from a definition resumes only under the definition it was
+  saved under, and refuses to start under another, or under none; a world
+  started from Quire and settings ignores a setting that differs from the
+  saved world, with a warning. A log with no snapshot refuses to start rather
+  than silently beginning again over it.
 - **Durability:** a region crash loses nothing (the log process outlives it);
   a VM crash loses at most the log's write cache (2 s or 64 KB). The log is
   synced before a snapshot is renamed into place, so a snapshot on disk
@@ -503,7 +508,7 @@ Built as a first brain (`Avwe.Autopilot`, whose moduledoc is the reference;
 every body nobody holds, it picks the best of a few candidates and submits
 one intent:
 
-- **Routine entries** (0.6): the body's `routine`, from `config/config.exs`
+- **Routine entries** (0.6): the body's `routine`, from the world's definition
   under `characters:` (the shape a compiled Quire sidecar, section 10.3,
   would one day produce). An entry is a *plan*, a list of steps run in
   sequence (go to the bend, wait 40 minutes, come home). Entries are due
@@ -783,7 +788,11 @@ actions (spawn, edit, adjust the weather) are a separate capability.
 
 ### 10.1 Import
 
-AVWE reads `quire/data/worlds/<id>/` and never writes to canon files.
+AVWE reads `quire/data/worlds/<id>/` and never writes to canon files. Since
+E1 (`docs/engine-spec.md`) that reading is the exporter's (`mix
+avwe.definition.export`, `Avwe.Definition.Export`), which compiles a Quire
+folder and AVWE's own settings into a world definition; a running world is
+made from the definition and reads no Quire.
 
 | Quire | AVWE | Ember Reach examples |
 |---|---|---|
