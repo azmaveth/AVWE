@@ -14,7 +14,7 @@
    rules it runs) and the **data** that says how: its parameters, map,
    entities and characters. One file, the **world definition**, holds both.
    Quire is the source that an LLM compiles into the world definition
-   (`docs/quire-spec.md`, to come).
+   (`docs/quire-spec.md`).
 2. **The line for what an LLM may produce: data, and vetted rule code; never
    runtime code.** The LLM writes world definitions, which are validated,
    reviewed and hashed. A world that needs a mechanic no rule has gets it the
@@ -752,11 +752,11 @@ diffs against the last accepted definition, species as a section, the log
 header the spec once planned (the snapshot does that work), and a definition
 for Lantern Hollow (the Quire path stays for the tests that use it).
 
-### E2 as built (in place; moving it to `avwe_sim` is E2b)
+### E2a as built (the kernel in place)
 
-E2 is built in this project first. The kernel stays in `lib/avwe/` until a test
-says it names nothing above itself (below), and moving its files to a project of
-their own is then a move and not a change. What is built:
+E2 was built in this project first. The kernel stayed in `lib/avwe/` until a test
+said it names nothing above itself (below), and moving its files to a project of
+their own (E2b, next) was then a move and not a change. What was built:
 
 **System ids and periods** (`Avwe.System`, `Avwe.SystemTable`, `Avwe.Region`).
 A system module gives its id (`c:Avwe.System.system_id/0`, `"earthlike.heat/step"`:
@@ -921,7 +921,7 @@ so a name in a type or a spec counts) and use none of the words the test lists
 made the region's terrain an opaque slot, the ruleset's packages and default
 preset configuration, `Region` stop calling `Actions`, and `Store` and
 `RegionServer` stop naming `Intent` and `Guests`. The test's list is what E2b
-moves.
+moved.
 
 **Saving.** The snapshot is `{:avwe_snapshot, 3, ...}` (it was 2), whose region
 lists system ids; the journal's records keep their version, since an input was
@@ -942,9 +942,55 @@ definition (`Definition`, its schema and its check, `Export`) stays in this
 project, since its schema names Earth-like things; it moves apart when the rules
 carry their own parameters (E7).
 
-**Not yet.** E2b: the `avwe_sim` project, which takes the kernel's files and
-tests (its registries `Avwe.Registry`, `Avwe.PubSub` and the world supervisor
-with them) while this project depends on it.
+### E2b as built (the `avwe_sim` project)
+
+**The project.** `avwe_sim` is a Mix project and a git repository of its own
+(github.com/azmaveth/avwe_sim), cloned beside this one, with its own `mix.exs`,
+lockfile, configuration, tests and CI. Its OTP application is `:avwe_sim`; the
+modules keep the names they had (`Avwe.Region`, `Avwe.Store`, ...), so nothing
+that calls them changed. It holds the nineteen files the kernel test of E2a listed
+and an application, `Avwe.Sim.Application`, which starts the registries
+`Avwe.Registry` and `Avwe.PubSub` and the `Avwe.Worlds` supervisor and registers
+the systems of the rules the packages ship. It depends on nothing but Erlang/OTP
+and Elixir (StreamData, Credo, Dialyxir and Sobelow are for developing it), so the
+compiler holds it to naming nothing of ours, and its own test holds it to the words
+(`test/avwe/kernel_test.exs`). Its CI is ours without the web client: lint, test,
+Dialyzer, Sobelow, and the audit weekly.
+
+**How this project uses it.** By path: `{:avwe_sim, path: System.get_env("AVWE_SIM_PATH")
+|| "../avwe_sim"}`. A dependency is compiled for `:prod`, so none of the kernel's test
+support is in our builds; a worktree of this repository somewhere else sets the
+variable. The kernel reads its configuration from `config :avwe_sim` (the rule
+packages and the default preset, set in our `config/config.exs`), and our
+application no longer starts the registries. CI here checks the kernel out beside the
+code (`.github/actions/kernel`): the branch of the same name as the pull request's if
+the kernel's repository has one, otherwise master. So **a change that spans both
+projects is two pull requests, the kernel's first.**
+
+**What moved with it, and what did not.** The tests that need nothing of ours moved:
+the calendar, the space, the tick, the system ids and the inputs as they were; the
+region (a lamp where there was the Earth-like daylight), the id table (a package of
+rules made for the test), the ruleset (its generic checks, and what a definition may
+say of its rules, with a package of station rules), the store (31 tests, ported to
+test inputs and a small region), and the hooks and system ids of a saved world, now
+through a world the test starts (`Avwe.Test.Worlds`); new are a running world's
+(stepping, subscribers, a live clock, listing). They run in a third of a second.
+This project keeps what needs the Earth-like rules, the agent layer or a real world:
+the Earth-like ruleset (`test/avwe/earthlike_ruleset_test.exs`), the rules' own tests
+(including that every shipped system declares an id of its rule's), the store with
+real intents and the Ember Reach (`store_test.exs`), persistence, the end-to-end
+system ids through `start_world`, and the golden journal, which now runs against the
+dependency and is unchanged. Nothing was deleted without a test of the same thing in
+its new home.
+
+**What changed in the code that moved.** `Avwe.Input` has a fallback: a term that
+does not implement it is refused when it is submitted (`{:error, {:not_an_input,
+term}}`) where it used to crash the region's server, and Elixir 1.19 insists on an
+implementation before the kernel compiles alone. The ruleset reads `:avwe_sim`. The
+pointers in its documentation to this repository's documents say so. Nothing else.
+
+**Not yet.** The plan's `avwe_play` (E3 and after); the kernel's own words test only
+covers the words the E2a test listed.
 
 ## 9. Tests
 
@@ -1069,8 +1115,8 @@ what make that a swap and not a rewrite.
 - Units other than a 60-second minute and a 60-minute hour (decision 8).
 - The pipeline that has an LLM draft a rule and its tests; decision 2 says
   only that it goes through review.
-- The Quire compile and proposals (`docs/quire-spec.md`, next), and tiers of
-  non-player brains (a spec of their own).
+- The Quire compile and proposals are specified in `docs/quire-spec.md`, not
+  here; tiers of non-player brains are a spec of their own.
 - Needs, satisfiers and utility curves as data, and a data form for cultural
   norms, until a world asks for them.
 - Languages other than English.
@@ -1083,7 +1129,7 @@ None outstanding; Hysun's answers and recommendations settled the earlier ones
 (decisions 5 to 12 and the accepted defaults). Left to the slices that need them:
 
 1. **The shape of the facet registration** (4.1). E2 settled the hooks (4.4,
-   "E2 as built"); nothing hands out `facets/0` until `play` is a project, so
+   "E2a as built"); nothing hands out `facets/0` until `play` is a project, so
    its registration is settled with E3.
 2. **What a capability call costs in the step.** E2 has no capability calls to
    measure, since the systems still call each other by name. What it did add to

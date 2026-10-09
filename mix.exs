@@ -73,8 +73,16 @@ defmodule Avwe.MixProject do
     [ignore_advisories: ["EEF-CVE-2026-43966", "EEF-CVE-2026-43969"]]
   end
 
+  # The simulation kernel is a project of its own, beside this one: the directory in
+  # AVWE_SIM_PATH, or ../avwe_sim (a worktree of this repository somewhere else sets
+  # the variable; CI checks the repository out and sets it).
+  defp avwe_sim do
+    {:avwe_sim, path: System.get_env("AVWE_SIM_PATH") || "../avwe_sim"}
+  end
+
   defp deps do
     [
+      avwe_sim(),
       {:yaml_elixir, "~> 2.12"},
       {:arbor_mcp, "~> 2.0.0-rc.2"},
       {:phoenix, "~> 1.8"},

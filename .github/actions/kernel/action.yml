@@ -1,0 +1,35 @@
+name: Check out the simulation kernel
+description: >
+  AVWE depends on its simulation kernel (azmaveth/avwe_sim, a repository of its
+  own) by path. This checks it out into avwe_sim/ and sets AVWE_SIM_PATH to it:
+  the branch of the same name as the pull request's when there is one, so that a
+  change that spans both is tested together, otherwise master.
+
+runs:
+  using: composite
+  steps:
+    - name: Choose the kernel's branch
+      id: kernel
+      shell: bash
+      env:
+        HEAD_REF: ${{ github.head_ref }}
+        REF_NAME: ${{ github.ref_name }}
+      run: |
+        branch="${HEAD_REF:-$REF_NAME}"
+        if git ls-remote --exit-code --heads "https://github.com/azmaveth/avwe_sim.git" "refs/heads/$branch" > /dev/null 2>&1; then
+          echo "ref=$branch" >> "$GITHUB_OUTPUT"
+        else
+          echo "ref=master" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Check out the kernel
+      uses: actions/checkout@v7
+      with:
+        repository: azmaveth/avwe_sim
+        ref: ${{ steps.kernel.outputs.ref }}
+        path: avwe_sim
+        persist-credentials: false
+
+    - name: Point AVWE at it
+      shell: bash
+      run: echo "AVWE_SIM_PATH=$GITHUB_WORKSPACE/avwe_sim" >> "$GITHUB_ENV"

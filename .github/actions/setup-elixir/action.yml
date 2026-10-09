@@ -1,7 +1,8 @@
 name: Set up Elixir
 description: >
   The Erlang/OTP and Elixir pinned in .tool-versions (so CI and local work
-  match), and the project's dependencies, cached.
+  match), the simulation kernel checked out beside the code, and the project's
+  dependencies, cached.
 
 inputs:
   mix-env:
@@ -25,6 +26,9 @@ runs:
       with:
         version-file: .tool-versions
         version-type: strict
+
+    # The simulation kernel is a repository of its own that AVWE depends on by path.
+    - uses: ./.github/actions/kernel
 
     - name: Use MIX_ENV=${{ inputs.mix-env }}
       shell: bash
