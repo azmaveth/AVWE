@@ -7,9 +7,9 @@ import Config
 config :avwe, :worlds, ember_reach: [definition: "ember-reach"]
 
 # The rules a world can run (docs/engine-spec.md, 4): packages of them, and
-# the preset a definition that names no ruleset runs. `sim`, the kernel's own
-# rule, is always known and always runs.
-config :avwe,
+# the preset a definition that names no ruleset runs. They are the simulation
+# kernel's to read (avwe_sim); `sim`, its own rule, is always known and always runs.
+config :avwe_sim,
   rule_packages: [Avwe.Rules.PlayPackage, Avwe.Rules.Earthlike],
   default_preset: "earthlike"
 
