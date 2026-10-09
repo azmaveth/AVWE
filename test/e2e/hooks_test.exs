@@ -74,6 +74,29 @@ defmodule Avwe.E2E.HooksTest do
     assert submitted == [:y]
   end
 
+  test "a region refuses an input that a system made, which is never journaled", %{
+    tmp_dir: tmp_dir
+  } do
+    {:ok, _pid} = start(tmp_dir, [])
+
+    assert RegionServer.submit(@world, @region, Poke.new(:z, 3, derived: true)) ==
+             {:error, :derived_input}
+
+    Avwe.step(@world, 2)
+    assert env(:z) == nil
+    :ok = Avwe.stop_world(@world)
+
+    {:ok, store} = Store.open(store_dir(tmp_dir), @region)
+    {:ok, records} = Store.records(store)
+    :ok = Store.close(store)
+
+    assert for({:avwe, 2, {:submit, _step, _input}} <- records, do: :submitted) == []
+
+    # And the world comes back from what it kept.
+    assert {:ok, _pid} = start(tmp_dir, [])
+    assert {:ok, %{step: 2}} = Avwe.snapshot(@world)
+  end
+
   test "a region that is started again asks its hooks, and accepts and journals what they say",
        %{tmp_dir: tmp_dir} do
     {:ok, _pid} = start(tmp_dir, [PokeHooks])

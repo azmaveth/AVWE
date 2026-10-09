@@ -71,9 +71,10 @@ defmodule Avwe.RegionServer do
   end
 
   @doc """
-  Queues an input for the region's next step. The input is asked first whether
-  the region would take it (`Avwe.Input.validate/2`), and refused with the
-  reason before anything is journaled.
+  Queues an input for the region's next step. An input that a system made
+  (`Avwe.Input.derived?/1`) is refused with `{:error, :derived_input}`; the
+  others are asked whether the region would take them (`Avwe.Input.validate/2`)
+  and refused with the reason before anything is journaled.
   """
   @spec submit(term(), term(), Input.t()) :: :ok | {:error, :not_found | term()}
   def submit(world, region_id, input) do
@@ -153,8 +154,10 @@ defmodule Avwe.RegionServer do
 
   @impl GenServer
   def handle_call({:submit, input}, _from, state) do
-    case Input.validate(input, state.region) do
-      :ok -> {:reply, :ok, accept(state, input)}
+    with :ok <- not_derived(input),
+         :ok <- Input.validate(input, state.region) do
+      {:reply, :ok, accept(state, input)}
+    else
       {:error, _reason} = refused -> {:reply, refused, state}
     end
   end
@@ -299,6 +302,13 @@ defmodule Avwe.RegionServer do
 
   defp hooked?(hook, callback, arity),
     do: Code.ensure_loaded?(hook) and function_exported?(hook, callback, arity)
+
+  # An input a system made is derived state: regenerated on replay, never
+  # journaled (`Avwe.Input`). It is not something to send in, and one that was
+  # journaled would be numbered twice when the region is rebuilt.
+  defp not_derived(input) do
+    if Input.derived?(input), do: {:error, :derived_input}, else: :ok
+  end
 
   # Queues an input for the next step and journals it.
   defp accept(state, input) do
