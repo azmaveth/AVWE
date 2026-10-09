@@ -18,12 +18,15 @@ defmodule Avwe.Rules.Earthlike.Smoke do
   @impl Avwe.Rule
   def requires, do: [:fire_sources, :wind]
 
-  # After the bodies have decided (smoke is what they smell next), and before
-  # memory takes down what happened in the step, smoke's events included.
+  # After what it reads of this step, the smoke each hearth gave off
+  # (`last_step`) and the wind, and after the bodies have decided (smoke is what
+  # they smell next); before memory takes down what happened in the step,
+  # smoke's events included.
   @impl Avwe.Rule
   def systems do
     [
-      {"step", Avwe.Systems.Smoke, runs_after: ["play/autopilot"], runs_before: ["play/memory"]}
+      {"step", Avwe.Systems.Smoke,
+       runs_after: [:fire_sources, :wind, "play/autopilot"], runs_before: ["play/memory"]}
     ]
   end
 end

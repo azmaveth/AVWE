@@ -15,6 +15,7 @@ defmodule Avwe.Rules.Earthlike.Daylight do
   @impl Avwe.Rule
   def provides, do: [:light]
 
+  # Before the bodies act, who see the light of the step.
   @impl Avwe.Rule
-  def systems, do: [{"step", Avwe.Systems.Daylight}]
+  def systems, do: [{"step", Avwe.Systems.Daylight, runs_before: ["play/movement"]}]
 end

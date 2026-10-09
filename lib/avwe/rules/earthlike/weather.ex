@@ -18,8 +18,9 @@ defmodule Avwe.Rules.Earthlike.Weather do
   @impl Avwe.Rule
   def provides, do: [:air_temperature, :sky_temperature, :wind]
 
+  # After the scheduled changes of the step; before the bodies, who feel it.
   @impl Avwe.Rule
   def systems do
-    [{"step", Avwe.Systems.Weather, runs_after: ["sim/miracles"]}]
+    [{"step", Avwe.Systems.Weather, runs_after: ["sim/miracles"], runs_before: ["play/movement"]}]
   end
 end

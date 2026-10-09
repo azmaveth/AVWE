@@ -24,12 +24,15 @@ defmodule Avwe.Rules.Earthlike.Heat do
   @impl Avwe.Rule
   def uses, do: [:fire_sources, :river_water, :terrain]
 
-  # After the fire has burned, before the bodies move through the warmth.
+  # After what it reads of this step: the air and sky (`env`), each hearth's
+  # burn (`last_step`) and the river's reaches; before the bodies move through the
+  # warmth.
   @impl Avwe.Rule
   def systems do
     [
       {"step", Avwe.Systems.Heat,
-       runs_after: ["earthlike.fire/step"], runs_before: ["play/movement"]}
+       runs_after: [:air_temperature, :light, :fire_sources, :river_water],
+       runs_before: ["play/movement"]}
     ]
   end
 end

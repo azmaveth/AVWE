@@ -21,8 +21,13 @@ defmodule Avwe.Rules.Earthlike.River do
   @impl Avwe.Rule
   def uses, do: [:terrain]
 
+  # After the scheduled changes (a spring's flow is one) and the air the water
+  # gives its warmth to; before the bodies.
   @impl Avwe.Rule
   def systems do
-    [{"step", Avwe.Systems.River, runs_after: ["earthlike.weather/step"]}]
+    [
+      {"step", Avwe.Systems.River,
+       runs_after: ["sim/miracles", :air_temperature], runs_before: ["play/movement"]}
+    ]
   end
 end
