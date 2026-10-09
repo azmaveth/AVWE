@@ -846,9 +846,13 @@ a hearth's fuel; and the physics all run before the bodies move. A test runs eve
 set the check accepts, in the order the plan gives and in the old order of the
 systems that remain, over a morning with a lit hearth and the hour a source
 fails, and requires the same world where the orders differ
-(`test/avwe/rules_composition_test.exs`). The check cannot see a dependency the
-manifest leaves out, so a rule from outside the package is tested the same way by
-whoever writes it.
+(`test/avwe/rules_composition_test.exs`). Two more tests in the same file state the
+data flows once, as pairs that every accepted set must run in order, and ask that
+the order the rules declare (`Ruleset.declared_order/1`, before the ids fill what is
+open) puts one before the other for every capability that a rule requires or uses
+and another provides, so that a dependency left unordered is not saved by the
+alphabet. The check cannot see a dependency the manifest leaves out, so a rule
+from outside the package is tested the same way by whoever writes it.
 
 **The `ruleset` section of a definition** (`Avwe.Definition.Schema`, `Check`):
 `{"preset": "earthlike", "with": [...], "without": [...]}` or `{"rules": [...]}`,
