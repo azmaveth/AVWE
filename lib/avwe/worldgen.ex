@@ -68,6 +68,21 @@ defmodule Avwe.Worldgen do
   def region(quire_world, opts) do
     quire_world
     |> Quire.Seed.region(Keyword.take(opts, [:id, :seed, :time, :dt, :systems]) ++ [grid: @grid])
+    |> build(opts, quire_world)
+  end
+
+  @doc """
+  Adds the world's own settings (`:terrain`, `:hearths`, `:miracles`,
+  `:climate` and `:characters` of `opts`, as above) to a region that already
+  has its places and bodies, and prepares the systems. `region/2` is Quire's
+  places and bodies and then this; a world definition (`Avwe.Definition`)
+  carries the places and bodies itself, so it comes straight here, with no
+  Quire world: a standing miracle then takes its name and description from its
+  own settings.
+  """
+  @spec build(Region.t(), keyword(), Quire.World.t() | nil) :: Region.t()
+  def build(region, opts, quire_world \\ nil) do
+    region
     |> add_terrain(Keyword.get(opts, :terrain))
     |> add_hearths(Keyword.get(opts, :hearths) || [])
     |> add_miracles(Keyword.get(opts, :miracles) || [], quire_world)
@@ -399,9 +414,12 @@ defmodule Avwe.Worldgen do
         %{name: title, description: summary}
 
       nil ->
-        %{name: Keyword.get(miracle, :name, id), description: Keyword.get(miracle, :description)}
+        repr(nil, id, miracle)
     end
   end
+
+  defp repr(nil, id, miracle),
+    do: %{name: Keyword.get(miracle, :name, id), description: Keyword.get(miracle, :description)}
 
   defp position_of(region, place) do
     Region.get(region, place, :position) ||
